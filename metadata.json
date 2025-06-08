@@ -1,0 +1,5 @@
+
+{
+  "name": "AI YouTube to Shorts Segmenter",
+  "description": "An application that uses AI to automatically identify and conceptualize multiple short, engaging vertical (9:16) video clips from a given YouTube video URL. Actual video processing, cutting, and reformatting are simulated for demonstration purposes."
+}
