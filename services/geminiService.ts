@@ -18,25 +18,31 @@ const generatePrompt = (videoUrlHint?: string, transcript?: string): string => {
  }
 
  return `
-Anda adalah asisten AI yang sangat ahli dalam membagi video YouTube berdurasi panjang menjadi SEBANYAK MUNGKIN segmen/klip pendek yang benar-benar menarik, viral, lucu, dramatis, informatif, atau penuh emosi.
+Anda adalah asisten AI yang sangat ahli dalam membagi video YouTube berdurasi panjang menjadi segmen/klip pendek yang PALING MENARIK, VIRAL, atau PUNCAK EMOSI, dengan kualitas highlight terbaik.
 ${videoContext}
 ${transcriptContext}
 
 INSTRUKSI PENTING:
-- Bagi video menjadi highlight sebanyak mungkin, JANGAN batasi jumlah segmen!
-- Setiap segmen HARUS berdurasi antara 30 detik hingga 2 menit, dan boleh bervariasi sesuai intensitas momen.
-- Jika memungkinkan, bagi video menjadi minimal 8-15 segmen (atau lebih jika highlight memang banyak, terutama untuk video berdurasi 20 menit ke atas).
-- Jangan takut membagi momen yang cukup panjang menjadi beberapa highlight berbeda jika memang menarik.
-- Cari dan pilih SEMUA momen menarik, lucu, dramatis, informatif, puncak emosi, atau viral, bahkan jika jumlahnya lebih dari 10.
+- Bagi video menjadi SEBANYAK MUNGKIN segmen menarik, dengan durasi SETIAP SEGMEN antara 30 hingga 120 detik (2 menit).
+- Untuk video berdurasi lebih dari 10 menit, USAHAKAN membagi menjadi minimal 10 segmen.
+- Pilih dan bagi video menjadi highlight yang PALING MENARIK, dramatis, lucu, informatif, atau viral, utamakan momen yang benar-benar menonjol dan berpotensi viral.
+- BUAT variasi durasi segmen! Jangan semua segmen berdurasi 30 detik. Usahakan ada segmen berdurasi 60–120 detik jika memungkinkan.
+- Jika highlight cukup panjang, buat segmen lebih panjang (misal 90–120 detik), dan jika highlight pendek, boleh 30–45 detik.
+- Jangan buat segmen terlalu pendek (<30 detik) atau terlalu panjang (>120 detik).
+- Jika highlight panjang, bagi menjadi beberapa segmen yang tetap menarik dan tidak tumpang tindih berlebihan.
 - Hindari bagian intro, outro, atau bagian yang tidak penting.
-- Segmen boleh sedikit overlap jika memang momen menarik berdekatan.
+- Segmen boleh sedikit overlap jika memang momen menarik berdekatan, tapi jangan duplikat.
 - Gaya bahasa santai, tidak perlu emoji/hashtag/call-to-action.
-- Tidak perlu alasan khusus, cukup judul dan deskripsi saja.
-- Jika memungkinkan, sarankan framing video fokus ke wajah pembicara (auto reframe).
 - Output HARUS dalam bahasa Indonesia.
 - Judul dan deskripsi HARUS relevan dengan isi segmen pada transkrip.
-- Pastikan setiap segmen unik dan tidak tumpang tindih secara berlebihan.
-- Jika highlight tidak terlalu padat, tetap bagi video secara merata agar jumlah segmen cukup banyak.
+- Pastikan setiap segmen unik, tidak tumpang tindih berlebihan, dan benar-benar menarik.
+
+Contoh variasi durasi output:
+[
+  {"title": "Momen Lucu Banget", "description": "Bagian paling lucu dari video.", "startTimeString": "0m35s", "endTimeString": "1m10s"},
+  {"title": "Puncak Emosi", "description": "Bagian paling dramatis.", "startTimeString": "2m00s", "endTimeString": "3m55s"},
+  {"title": "Fakta Mengejutkan", "description": "Fakta menarik yang diungkap.", "startTimeString": "4m10s", "endTimeString": "5m30s"}
+]
 
 Untuk setiap segmen, berikan detail berikut (semua dalam bahasa Indonesia!):
 1. \`title\`: Judul singkat dan menarik (maksimal 10 kata, HARUS sesuai isi segmen pada transkrip).
@@ -56,7 +62,7 @@ Format output yang DIHARUSKAN:
   }
 ]
 
-Bagi video ini menjadi highlight sebanyak mungkin sesuai instruksi di atas.
+Bagi video ini menjadi highlight paling menarik dan konsisten sesuai instruksi di atas.
 `;
 };
 

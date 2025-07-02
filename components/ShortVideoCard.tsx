@@ -233,6 +233,7 @@ export const ShortVideoCard: React.FC<ShortVideoCardProps> = ({shortVideo, isAct
  const duration = shortVideo.endTimeSeconds - shortVideo.startTimeSeconds;
 
  useEffect(() => {
+  // Only fetch transcript for YouTube videos
   setTranscript('');
   setTranscriptLoading(true);
   fetchTranscript(shortVideo.youtubeVideoId, shortVideo.startTimeSeconds, shortVideo.endTimeSeconds)
@@ -243,6 +244,7 @@ export const ShortVideoCard: React.FC<ShortVideoCardProps> = ({shortVideo, isAct
  return (
   <div className="bg-gray-800 shadow-xl rounded-lg overflow-hidden flex flex-col transition-all duration-300 hover:shadow-purple-500/30 hover:ring-2 hover:ring-purple-500">
    <div className="yt-embed-container group">
+    {/* Always show YouTube embed/thumbnail */}
     {!showPlayer ? (
      <>
       <img

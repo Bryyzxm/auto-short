@@ -5,11 +5,12 @@ interface YouTubeInputFormProps {
  onSubmit: (url: string, aspectRatio: string) => void;
  isLoading: boolean;
  disabled?: boolean;
+ aspectRatio: string;
+ setAspectRatio: (v: string) => void;
 }
 
-export const YouTubeInputForm: React.FC<YouTubeInputFormProps> = ({onSubmit, isLoading, disabled}) => {
+export const YouTubeInputForm: React.FC<YouTubeInputFormProps> = ({onSubmit, isLoading, disabled, aspectRatio, setAspectRatio}) => {
  const [url, setUrl] = useState<string>('');
- const [aspectRatio, setAspectRatio] = useState<string>('9:16');
  const [inputError, setInputError] = useState<string | null>(null);
 
  const handleSubmit = (e: React.FormEvent) => {
@@ -31,6 +32,7 @@ export const YouTubeInputForm: React.FC<YouTubeInputFormProps> = ({onSubmit, isL
    onSubmit={handleSubmit}
    className="space-y-6"
   >
+   {/* Input URL YouTube */}
    <div>
     <label
      htmlFor="youtubeUrl"

@@ -6,17 +6,18 @@ import {v4 as uuidv4} from 'uuid';
 import path from 'path';
 import fs from 'fs';
 import fetch from 'node-fetch';
+import {execSync} from 'child_process';
+import {fileURLToPath} from 'url';
+
+// Polyfill __dirname for ES module
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 5001;
-const OUTPUT_DIR = path.join(process.cwd(), 'outputs');
 
 app.use(cors());
 app.use(express.json());
-
-if (!fs.existsSync(OUTPUT_DIR)) {
- fs.mkdirSync(OUTPUT_DIR);
-}
 
 // Endpoint: POST /api/shorts
 // Body: { youtubeUrl, start, end }
@@ -26,33 +27,36 @@ app.post('/api/shorts', async (req, res) => {
   return res.status(400).json({error: 'youtubeUrl, start, end (in seconds) required'});
  }
  const id = uuidv4();
- const tempFile = path.join(OUTPUT_DIR, `${id}.mp4`);
+ const tempFile = path.join(process.cwd(), `${id}.mp4`);
 
- // Compose yt-dlp command
+ // Logging waktu
+ console.log(`[${id}] Mulai proses download dan cut segmen: ${youtubeUrl} (${start}s - ${end}s, rasio: ${aspectRatio})`);
+ console.time(`[${id}] yt-dlp download`);
+
+ // Compose yt-dlp command (download full video)
  const ytDlpArgs = ['-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4', '-o', tempFile, youtubeUrl];
 
  execFile('yt-dlp', ytDlpArgs, (err) => {
+  console.timeEnd(`[${id}] yt-dlp download`);
   if (err) {
    return res.status(500).json({error: 'yt-dlp failed', details: err.message});
   }
   // After download, cut segment
-  const cutFile = path.join(OUTPUT_DIR, `${id}-short.mp4`);
-  // ffmpeg: crop to 9:16, cut segment
+  const cutFile = path.join(process.cwd(), `${id}-short.mp4`);
   let ffmpegArgs;
   if (aspectRatio === 'original') {
-   // Hanya cut, tidak crop
-   ffmpegArgs = ['-y', '-i', tempFile, '-ss', String(start), '-to', String(end), '-c:v', 'libx264', '-c:a', 'aac', '-preset', 'fast', cutFile];
+   ffmpegArgs = ['-y', '-ss', String(start), '-to', String(end), '-i', tempFile, '-c', 'copy', cutFile];
   } else {
-   // Default: crop ke 9:16
-   ffmpegArgs = ['-y', '-i', tempFile, '-ss', String(start), '-to', String(end), '-vf', 'crop=in_h*9/16:in_h', '-c:v', 'libx264', '-c:a', 'aac', '-preset', 'fast', cutFile];
+   ffmpegArgs = ['-y', '-ss', String(start), '-to', String(end), '-i', tempFile, '-vf', 'crop=in_h*9/16:in_h', '-c:v', 'libx264', '-c:a', 'aac', '-preset', 'fast', cutFile];
   }
+  console.time(`[${id}] ffmpeg cut`);
   execFile('ffmpeg', ffmpegArgs, (err2) => {
-   // Clean up tempFile
+   console.timeEnd(`[${id}] ffmpeg cut`);
    fs.unlink(tempFile, () => {});
    if (err2) {
     return res.status(500).json({error: 'ffmpeg failed', details: err2.message});
    }
-   // Respond with download link
+   console.log(`[${id}] Selesai proses. Download: /outputs/${path.basename(cutFile)}`);
    res.json({downloadUrl: `/outputs/${path.basename(cutFile)}`});
   });
  });
@@ -80,21 +84,21 @@ app.get('/api/yt-transcript', async (req, res) => {
  const {videoId, lang} = req.query;
  if (!videoId) return res.status(400).json({error: 'videoId required'});
  const id = uuidv4();
- const outputVtt = path.join(OUTPUT_DIR, `${id}.vtt`);
+ // const outputVtt = path.join(OUTPUT_DIR, `${id}.vtt`); // unused variable removed
  // yt-dlp --write-auto-subs --sub-lang=id,en --skip-download -o <output> <url>
  const ytUrl = `https://www.youtube.com/watch?v=${videoId}`;
  const subLang = lang ? String(lang) : 'id,en';
- const ytDlpArgs = ['--write-auto-subs', '--sub-lang', subLang, '--skip-download', '-o', path.join(OUTPUT_DIR, `${id}`), ytUrl];
+ const ytDlpArgs = ['--write-auto-subs', '--sub-lang', subLang, '--skip-download', '-o', path.join(process.cwd(), `${id}`), ytUrl];
  execFile('yt-dlp', ytDlpArgs, async (err) => {
   if (err) {
    return res.status(500).json({error: 'yt-dlp subtitle fetch failed', details: err.message});
   }
   // Cari file .id.vtt (Indonesia) lebih dulu, jika tidak ada baru cari .en.vtt
   let vttFile = null;
-  const files = fs.readdirSync(OUTPUT_DIR);
+  const files = fs.readdirSync(process.cwd());
   for (const file of files) {
    if (file.startsWith(id) && file.endsWith('.id.vtt')) {
-    vttFile = path.join(OUTPUT_DIR, file);
+    vttFile = path.join(process.cwd(), file);
     break;
    }
   }
@@ -102,7 +106,7 @@ app.get('/api/yt-transcript', async (req, res) => {
   if (!vttFile) {
    for (const file of files) {
     if (file.startsWith(id) && file.endsWith('.en.vtt')) {
-     vttFile = path.join(OUTPUT_DIR, file);
+     vttFile = path.join(process.cwd(), file);
      break;
     }
    }
@@ -145,9 +149,6 @@ app.get('/api/yt-transcript', async (req, res) => {
   }
  });
 });
-
-// Serve outputs statically
-app.use('/outputs', express.static(OUTPUT_DIR));
 
 app.listen(PORT, () => {
  console.log(`Backend server running on http://localhost:${PORT}`);
