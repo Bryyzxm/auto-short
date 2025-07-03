@@ -49,33 +49,28 @@ const App: React.FC = () => {
  // Utility: Clean transcript from duplicate lines/phrases (global, not just consecutive)
  function cleanTranscript(text: string): string {
   if (!text) return '';
-  // Split berdasarkan kalimat (setelah titik, tanda seru, atau tanya)
-  const lines = text.split(/(?<=[.!?])\s+/);
-  const seen = new Set<string>();
+  // Split ke kata
+  const words = text.split(/\s+/);
+  const ngramSet = new Set<string>();
   const cleaned: string[] = [];
-  for (let line of lines) {
-   let norm = line.trim().toLowerCase().replace(/\s+/g, ' ');
-   // Hilangkan karakter non-alfabet dan angka agar normalisasi lebih kuat
-   norm = norm.replace(/[^a-z0-9\u00C0-\u024F\u1E00-\u1EFF ]/gi, '');
-   // Abaikan frasa sangat pendek (<10 karakter) dari deduplikasi global
-   if (norm.length < 10) {
-    cleaned.push(line.trim());
+  let i = 0;
+  while (i < words.length) {
+   // Ambil n-gram 6 kata (bisa diubah sesuai kebutuhan)
+   const n = 6;
+   const ngram = words
+    .slice(i, i + n)
+    .join(' ')
+    .toLowerCase();
+   if (ngramSet.has(ngram)) {
+    // Jika sudah pernah muncul, skip n kata ke depan
+    i += n;
     continue;
    }
-   if (norm && !seen.has(norm)) {
-    cleaned.push(line.trim());
-    seen.add(norm);
-   }
+   ngramSet.add(ngram);
+   cleaned.push(words[i]);
+   i++;
   }
-  // Hapus duplikasi antar kalimat yang mirip (fuzzy, >80% sama)
-  type CleanedLine = string;
-  const final: CleanedLine[] = [];
-  for (const cur of cleaned.map((x) => x.toLowerCase())) {
-   if (final.every((prev) => similarity(prev, cur) < 0.8)) {
-    final.push(cur);
-   }
-  }
-  return final.join(' ');
+  return cleaned.join(' ');
  }
 
  // Fuzzy similarity sederhana (Jaccard)
