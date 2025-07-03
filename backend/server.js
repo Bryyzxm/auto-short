@@ -16,8 +16,16 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 5001;
 
-app.use(cors());
+app.use(cors({origin: '*', methods: ['GET', 'POST', 'OPTIONS'], allowedHeaders: ['Content-Type', 'Authorization']}));
 app.use(express.json());
+
+// Fallback: tambahkan header CORS manual untuk semua response
+app.use((req, res, next) => {
+ res.header('Access-Control-Allow-Origin', '*');
+ res.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+ res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+ next();
+});
 
 // Fungsi untuk menghapus duplikasi frasa antar segmen subtitle
 function cleanSegments(segments) {
