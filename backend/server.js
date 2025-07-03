@@ -19,6 +19,20 @@ const PORT = process.env.PORT || 5001;
 app.use(cors());
 app.use(express.json());
 
+// Fungsi untuk menghapus duplikasi frasa antar segmen subtitle
+function cleanSegments(segments) {
+ const seen = new Set();
+ return segments.filter((seg) => {
+  const norm = seg.text
+   .toLowerCase()
+   .replace(/[^a-z0-9 ]/gi, '')
+   .replace(/\s+/g, ' ');
+  if (seen.has(norm)) return false;
+  seen.add(norm);
+  return true;
+ });
+}
+
 // Endpoint: POST /api/shorts
 // Body: { youtubeUrl, start, end }
 app.post('/api/shorts', async (req, res) => {
@@ -143,7 +157,7 @@ app.get('/api/yt-transcript', async (req, res) => {
      });
     }
    }
-   res.json({segments});
+   res.json({segments: cleanSegments(segments)});
   } catch (e) {
    return res.status(500).json({error: 'Failed to parse VTT', details: e.message});
   }

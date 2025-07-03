@@ -6,7 +6,7 @@ import {formatTime} from '../utils/timeUtils';
 // Helper: fetch transcript for a segment
 async function fetchTranscript(videoId: string, start: number, end: number): Promise<string> {
  // Fetch transcript via backend yt-dlp proxy
- const url = `http://localhost:5001/api/yt-transcript?videoId=${videoId}`;
+ const url = `https://auto-short-production.up.railway.app/api/yt-transcript?videoId=${videoId}`;
  try {
   const res = await fetch(url);
   if (!res.ok) {

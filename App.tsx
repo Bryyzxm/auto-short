@@ -82,7 +82,7 @@ const App: React.FC = () => {
  }
 
  const fetchFullTranscript = async (videoId: string): Promise<string> => {
-  const url = `http://localhost:5001/api/yt-transcript?videoId=${videoId}`;
+  const url = `https://auto-short-production.up.railway.app/api/yt-transcript?videoId=${videoId}`;
   try {
    const res = await fetch(url);
    if (!res.ok) return '';
@@ -97,7 +97,7 @@ const App: React.FC = () => {
 
  // Ambil seluruh segmen subtitle lengkap (dengan timestamp)
  const fetchSubtitleSegments = async (videoId: string): Promise<Array<{start: string; end: string; text: string}>> => {
-  const url = `http://localhost:5001/api/yt-transcript?videoId=${videoId}`;
+  const url = `https://auto-short-production.up.railway.app/api/yt-transcript?videoId=${videoId}`;
   try {
    const res = await fetch(url);
    if (!res.ok) return [];
@@ -189,7 +189,7 @@ const App: React.FC = () => {
    let videoDuration = 0;
    // Fallback: fetch durasi video via backend (bukan YouTube langsung)
    try {
-    const metaRes = await fetch(`https://YOUR_BACKEND_URL/api/video-meta?videoId=${videoId}`);
+    const metaRes = await fetch(`https://auto-short-production.up.railway.app/api/video-meta?videoId=${videoId}`);
     if (metaRes.ok) {
      const data = await metaRes.json();
      if (data.duration && !isNaN(data.duration)) {
