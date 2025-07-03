@@ -1,12 +1,11 @@
 // Simple Express backend for YouTube video download & segment cut
 import express from 'express';
 import cors from 'cors';
+import fs from 'fs';
 import {execFile} from 'child_process';
 import {v4 as uuidv4} from 'uuid';
 import path from 'path';
-import fs from 'fs';
 import fetch from 'node-fetch';
-import {execSync} from 'child_process';
 import {fileURLToPath} from 'url';
 
 // Polyfill __dirname for ES module
@@ -113,7 +112,7 @@ app.get('/api/yt-transcript', async (req, res) => {
  try {
   await new Promise((resolve, reject) => {
    execFile('yt-dlp', ytDlpArgs, (err) => {
-    if (err) reject(err);
+    if (err) reject(new Error('yt-dlp execution failed'));
     else resolve();
    });
   });
@@ -137,7 +136,7 @@ app.get('/api/yt-transcript', async (req, res) => {
   if (!vttFile) {
    throw new Error('Subtitle file not found (no .vtt generated for id or en)');
   }
-  // Baca dan parse VTT
+  // Baca and parse VTT
   let vttContent = fs.readFileSync(vttFile, 'utf-8');
   fs.unlinkSync(vttFile);
   vttContent = vttContent
