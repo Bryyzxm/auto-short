@@ -226,6 +226,22 @@ app.get('/api/video-meta', async (req, res) => {
  }
 });
 
+// Handler 404 (Not Found) - harus di bawah semua route
+app.use((req, res, next) => {
+ res.setHeader('Access-Control-Allow-Origin', '*');
+ res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+ res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+ res.status(404).json({error: 'Not found'});
+});
+
+// Handler error global - harus di bawah semua route dan handler 404
+app.use((err, req, res, next) => {
+ res.setHeader('Access-Control-Allow-Origin', '*');
+ res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+ res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+ res.status(err.status || 500).json({error: err.message || 'Internal Server Error'});
+});
+
 app.listen(PORT, () => {
  console.log(`Backend server running on http://localhost:${PORT}`);
 });
