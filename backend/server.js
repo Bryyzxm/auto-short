@@ -150,6 +150,37 @@ app.get('/api/yt-transcript', async (req, res) => {
  });
 });
 
+// Endpoint baru: Mendapatkan durasi video dari file .vtt
+app.get('/api/video-meta', async (req, res) => {
+ const id = req.query.videoId;
+ if (!id) return res.status(400).json({error: 'videoId is required'});
+ // Cari file .id.vtt atau .en.vtt
+ let vttFile = null;
+ const files = fs.readdirSync(process.cwd());
+ for (const file of files) {
+  if (file.startsWith(id) && (file.endsWith('.id.vtt') || file.endsWith('.en.vtt'))) {
+   vttFile = path.join(process.cwd(), file);
+   break;
+  }
+ }
+ if (!vttFile) {
+  return res.status(404).json({error: 'Subtitle file not found for this videoId'});
+ }
+ try {
+  const vttContent = fs.readFileSync(vttFile, 'utf-8');
+  // Cari timestamp terakhir di file VTT
+  const matches = [...vttContent.matchAll(/([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}) --> ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3})/g)];
+  if (matches.length === 0) return res.status(400).json({error: 'No segments found in VTT'});
+  const last = matches[matches.length - 1][2]; // ambil end time segmen terakhir
+  // Konversi ke detik
+  const [h, m, s] = last.split(':');
+  const duration = Math.round(parseInt(h) * 3600 + parseInt(m) * 60 + parseFloat(s));
+  res.json({duration});
+ } catch (e) {
+  res.status(500).json({error: 'Failed to read VTT', details: e.message});
+ }
+});
+
 app.listen(PORT, () => {
  console.log(`Backend server running on http://localhost:${PORT}`);
 });

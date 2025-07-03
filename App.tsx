@@ -187,17 +187,13 @@ const App: React.FC = () => {
    } catch {}
 
    let videoDuration = 0;
-   // Fallback: fetch durasi video via YouTube Data API (tanpa API key, gunakan yt-dlp atau oEmbed, fallback ke 10 menit)
+   // Fallback: fetch durasi video via backend (bukan YouTube langsung)
    try {
-    // Coba fetch dari backend (gunakan yt-dlp jika ada endpoint, atau oEmbed jika tidak)
-    const metaRes = await fetch(`https://www.youtube.com/get_video_info?video_id=${videoId}`);
+    const metaRes = await fetch(`https://YOUR_BACKEND_URL/api/video-meta?videoId=${videoId}`);
     if (metaRes.ok) {
-     const text = await metaRes.text();
-     const params = new URLSearchParams(text);
-     const playerResponse = params.get('player_response');
-     if (playerResponse) {
-      const json = JSON.parse(playerResponse);
-      videoDuration = parseInt(json.videoDetails?.lengthSeconds || '0', 10);
+     const data = await metaRes.json();
+     if (data.duration && !isNaN(data.duration)) {
+      videoDuration = data.duration;
      }
     }
    } catch {}
