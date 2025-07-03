@@ -103,6 +103,7 @@ app.get('/api/transcript', async (req, res) => {
 
 // Endpoint: GET /api/yt-transcript?videoId=...
 app.get('/api/yt-transcript', async (req, res) => {
+ res.setHeader('Access-Control-Allow-Origin', '*');
  const {videoId, lang} = req.query;
  if (!videoId) return res.status(400).json({error: 'videoId required'});
  const id = uuidv4();
@@ -168,10 +169,12 @@ app.get('/api/yt-transcript', async (req, res) => {
    const apiUrl = `https://yt.lemnoslife.com/noKey/transcript?videoId=${videoId}`;
    const apiRes = await fetch(apiUrl);
    if (!apiRes.ok) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
     return res.status(apiRes.status).json({error: 'Failed to fetch transcript from LemnosLife', status: apiRes.status});
    }
    const data = await apiRes.json();
    if (!data || !data.transcript || !Array.isArray(data.transcript)) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
     return res.status(404).json({error: 'No transcript found from LemnosLife'});
    }
    // LemnosLife format: {transcript: [{text, offset, duration}]}
@@ -183,6 +186,7 @@ app.get('/api/yt-transcript', async (req, res) => {
    res.json({segments: cleanSegments(segments)});
   } catch (fallbackErr) {
    console.error('Fallback LemnosLife transcript fetch failed:', fallbackErr);
+   res.setHeader('Access-Control-Allow-Origin', '*');
    return res.status(500).json({error: 'Failed to fetch transcript from both yt-dlp and LemnosLife', details: fallbackErr.message});
   }
  }
@@ -190,6 +194,7 @@ app.get('/api/yt-transcript', async (req, res) => {
 
 // Endpoint baru: Mendapatkan durasi video dari file .vtt
 app.get('/api/video-meta', async (req, res) => {
+ res.setHeader('Access-Control-Allow-Origin', '*');
  const id = req.query.videoId;
  if (!id) return res.status(400).json({error: 'videoId is required'});
  // Cari file .id.vtt atau .en.vtt
@@ -202,6 +207,7 @@ app.get('/api/video-meta', async (req, res) => {
   }
  }
  if (!vttFile) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
   return res.status(404).json({error: 'Subtitle file not found for this videoId'});
  }
  try {
@@ -215,6 +221,7 @@ app.get('/api/video-meta', async (req, res) => {
   const duration = Math.round(parseInt(h) * 3600 + parseInt(m) * 60 + parseFloat(s));
   res.json({duration});
  } catch (e) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
   res.status(500).json({error: 'Failed to read VTT', details: e.message});
  }
 });
