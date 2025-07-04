@@ -1,0 +1,22 @@
+# Gunakan image Node.js resmi
+FROM node:18
+
+# Install ffmpeg dan yt-dlp
+RUN apt-get update && \
+    apt-get install -y ffmpeg && \
+    pip install yt-dlp
+
+# Set workdir
+WORKDIR /app
+
+# Copy package.json dan package-lock.json
+COPY package*.json ./
+
+# Install dependencies
+RUN npm install
+
+# Copy semua file backend ke container
+COPY . .
+
+# Jalankan server
+CMD ["node", "server.js"]
