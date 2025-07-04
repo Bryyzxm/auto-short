@@ -73,14 +73,6 @@ const App: React.FC = () => {
   return cleaned.join(' ');
  }
 
- // Fuzzy similarity sederhana (Jaccard)
- function similarity(a: string, b: string): number {
-  const setA = new Set(a.split(' '));
-  const setB = new Set(b.split(' '));
-  const intersection = new Set([...setA].filter((x) => setB.has(x)));
-  return intersection.size / Math.max(setA.size, setB.size);
- }
-
  const fetchFullTranscript = async (videoId: string): Promise<string> => {
   const url = `https://auto-short-production.up.railway.app/api/yt-transcript?videoId=${videoId}`;
   try {
@@ -111,6 +103,7 @@ const App: React.FC = () => {
 
  // Fungsi pencocokan subtitle yang memperluas rentang agar durasi wajar dan relevan dengan deskripsi
  function findBestSubtitleRange(subtitles: Array<{start: string; end: string; text: string}>, description: string, minDurationSec = 30, maxDurationSec = 120) {
+  // Temukan subtitle yang paling relevan
   let bestIdx = 0;
   let bestScore = 0;
   const desc = description.toLowerCase();
@@ -123,31 +116,23 @@ const App: React.FC = () => {
     bestIdx = i;
    }
   }
-  // Perluas rentang ke depan & belakang hingga durasi min tercapai dan kata kunci tercakup
-  let startIdx = bestIdx,
-   endIdx = bestIdx;
-  let coveredWords = new Set(subtitles[bestIdx].text.toLowerCase().split(' '));
+  // Helper untuk konversi waktu
   const toSeconds = (vtt: string) => {
    const [h, m, s] = vtt.split(':');
    return parseInt(h) * 3600 + parseInt(m) * 60 + parseFloat(s.replace(',', '.'));
   };
+  // Perluas rentang ke depan & belakang hingga durasi min tercapai
+  let startIdx = bestIdx;
+  let endIdx = bestIdx;
   let duration = toSeconds(subtitles[endIdx].end) - toSeconds(subtitles[startIdx].start);
   // Perluas ke depan
   while (duration < minDurationSec && endIdx < subtitles.length - 1 && endIdx - startIdx < 20) {
    endIdx++;
-   subtitles[endIdx].text
-    .toLowerCase()
-    .split(' ')
-    .forEach((w) => coveredWords.add(w));
    duration = toSeconds(subtitles[endIdx].end) - toSeconds(subtitles[startIdx].start);
   }
   // Perluas ke belakang
   while (duration < minDurationSec && startIdx > 0 && endIdx - startIdx < 20) {
    startIdx--;
-   subtitles[startIdx].text
-    .toLowerCase()
-    .split(' ')
-    .forEach((w) => coveredWords.add(w));
    duration = toSeconds(subtitles[endIdx].end) - toSeconds(subtitles[startIdx].start);
   }
   // Jika terlalu panjang, potong ke maxDurationSec
@@ -186,130 +171,31 @@ const App: React.FC = () => {
     transcript = await fetchFullTranscript(videoId);
    } catch {}
 
-   let videoDuration = 0;
-   // Fallback: fetch durasi video via backend (bukan YouTube langsung)
-   try {
-    const metaRes = await fetch(`https://auto-short-production.up.railway.app/api/video-meta?videoId=${videoId}`);
-    if (metaRes.ok) {
-     const data = await metaRes.json();
-     if (data.duration && !isNaN(data.duration)) {
-      videoDuration = data.duration;
-     }
-    }
-   } catch {}
-   if (!videoDuration || isNaN(videoDuration) || videoDuration < 30) {
-    // fallback ke 10 menit
-    videoDuration = 600;
-   }
+   let videoDuration = await getVideoDuration(videoId);
 
    try {
     const ideas = await generateShortsIdeas(url, transcript); // Kirim transcript ke Gemini
     let subtitleSegments = await fetchSubtitleSegments(videoId);
-    // Fallback: jika subtitleSegments kosong, buat dummy segmentasi manual berdasarkan durasi video
-    if (!subtitleSegments || subtitleSegments.length === 0) {
-     const fallbackSegments = [];
-     const segLength = videoDuration > 600 ? 90 : 60; // 90 detik default untuk video panjang
-     for (let start = 0; start < videoDuration; start += segLength) {
-      const end = Math.min(start + segLength, videoDuration);
-      const toVtt = (sec: number) => {
-       const h = Math.floor(sec / 3600)
-        .toString()
-        .padStart(2, '0');
-       const m = Math.floor((sec % 3600) / 60)
-        .toString()
-        .padStart(2, '0');
-       const s = (sec % 60).toFixed(3).padStart(6, '0');
-       return `${h}:${m}:${s}`;
-      };
-      fallbackSegments.push({start: toVtt(start), end: toVtt(end), text: ''});
-     }
-     subtitleSegments = fallbackSegments;
-    }
-    // Fallback: jika hasil AI terlalu sedikit, generate segmen otomatis
-    let shortsWithVideoId: ShortVideo[] = ideas.map((idea) => {
-     let startTimeSeconds = 0;
-     let endTimeSeconds = 0;
-     if (subtitleSegments.length > 0) {
-      let bestRange = findBestSubtitleRange(subtitleSegments, idea.description);
-      const toSeconds = (vtt: string) => {
-       const [h, m, s] = vtt.split(':');
-       return parseInt(h) * 3600 + parseInt(m) * 60 + parseFloat(s.replace(',', '.'));
-      };
-      let duration = toSeconds(bestRange.end) - toSeconds(bestRange.start);
-      let endIdx = subtitleSegments.findIndex((s) => s.start === bestRange.start);
-      let lastIdx = subtitleSegments.findIndex((s) => s.end === bestRange.end);
-      const targetDuration = Math.max(30, Math.min(idea.endTimeSeconds - idea.startTimeSeconds, 120));
-      while (duration < targetDuration && lastIdx < subtitleSegments.length - 1) {
-       lastIdx++;
-       bestRange.end = subtitleSegments[lastIdx].end;
-       duration = toSeconds(bestRange.end) - toSeconds(bestRange.start);
-      }
-      while (duration > targetDuration && lastIdx > endIdx) {
-       lastIdx--;
-       bestRange.end = subtitleSegments[lastIdx].end;
-       duration = toSeconds(bestRange.end) - toSeconds(bestRange.start);
-      }
-      startTimeSeconds = toSeconds(bestRange.start);
-      endTimeSeconds = toSeconds(bestRange.end);
-     } else {
-      startTimeSeconds = idea.startTimeSeconds ?? 0;
-      endTimeSeconds = idea.endTimeSeconds ?? 120;
-      if (endTimeSeconds - startTimeSeconds < 30) endTimeSeconds = startTimeSeconds + 120;
-     }
-     return {
-      ...idea,
-      youtubeVideoId: videoId,
-      thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
-      startTimeSeconds,
-      endTimeSeconds,
-     };
-    });
-    // Jika hasil AI terlalu sedikit untuk video panjang, fallback ke segmentasi otomatis minimal 10 segmen
-    if (shortsWithVideoId.length < 10 && videoDuration > 600) {
-     const fallbackShorts: ShortVideo[] = [];
-     const segLength = Math.max(30, Math.floor(videoDuration / 10));
-     let idx = 0;
-     for (let start = 0; start < videoDuration; start += segLength) {
-      const end = Math.min(start + segLength, videoDuration);
-      fallbackShorts.push({
-       id: `fallback-${idx}`,
-       title: `Segmen ${idx + 1}`,
-       description: `Highlight otomatis dari detik ${start} hingga ${end}.`,
-       startTimeSeconds: start,
-       endTimeSeconds: end,
-       youtubeVideoId: videoId,
-       thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
-      });
-      idx++;
-     }
-     setGeneratedShorts(fallbackShorts);
+    subtitleSegments = ensureSubtitleSegments(subtitleSegments, videoDuration);
+    // Patch: tambahkan youtubeVideoId dan thumbnailUrl jika belum ada
+    const ideasWithMeta = ideas.map((idea, idx) => ({
+     ...idea,
+     youtubeVideoId: videoId,
+     thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
+     id: idea.id || `short-${Date.now()}-${idx}`,
+    }));
+    const shortsWithVideoId = buildShortsWithVideoId(ideasWithMeta, subtitleSegments, videoId);
+    if (shouldFallbackToAutoSegments(shortsWithVideoId, videoDuration)) {
+     setGeneratedShorts(generateAutoSegments(videoDuration, videoId));
      setError('AI hanya menghasilkan sedikit segmen. Ditambahkan segmentasi otomatis agar total minimal 10 segmen.');
      return;
     }
-    // Jika hasil AI kosong, baru fallback ke segmentasi otomatis
     if (!shortsWithVideoId || shortsWithVideoId.length === 0) {
-     const fallbackShorts: ShortVideo[] = [];
-     const segLength = videoDuration > 600 ? 90 : 60;
-     let idx = 0;
-     for (let start = 0; start < videoDuration; start += segLength) {
-      const end = Math.min(start + segLength, videoDuration);
-      fallbackShorts.push({
-       id: `fallback-${idx}`,
-       title: `Segmen ${idx + 1}`,
-       description: `Highlight otomatis dari detik ${start} hingga ${end}.`,
-       startTimeSeconds: start,
-       endTimeSeconds: end,
-       youtubeVideoId: videoId,
-       thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
-      });
-      idx++;
-     }
-     setGeneratedShorts(fallbackShorts);
+     setGeneratedShorts(generateAutoSegments(videoDuration, videoId));
      setError('AI tidak menghasilkan segmen. Ditampilkan segmentasi otomatis.');
      return;
     }
     setGeneratedShorts(shortsWithVideoId);
-    // Tampilkan warning jika segmen terlalu sedikit (tapi tidak fallback)
     if (shortsWithVideoId.length < Math.floor(videoDuration / 180)) {
      setError('Segmen yang dihasilkan sangat sedikit untuk durasi video ini. Coba ulangi proses, gunakan video lain, atau pastikan video memiliki transkrip yang jelas.');
     }
@@ -322,6 +208,112 @@ const App: React.FC = () => {
   },
   [apiKeyError]
  );
+
+ function ensureSubtitleSegments(subtitleSegments: Array<{start: string; end: string; text: string}>, videoDuration: number) {
+  if (!subtitleSegments || subtitleSegments.length === 0) {
+   const fallbackSegments = [];
+   const segLength = videoDuration > 600 ? 90 : 60;
+   for (let start = 0; start < videoDuration; start += segLength) {
+    const end = Math.min(start + segLength, videoDuration);
+    fallbackSegments.push({start: toVtt(start), end: toVtt(end), text: ''});
+   }
+   return fallbackSegments;
+  }
+  return subtitleSegments;
+ }
+
+ function buildShortsWithVideoId(ideas: ShortVideo[], subtitleSegments: Array<{start: string; end: string; text: string}>, videoId: string): ShortVideo[] {
+  return ideas.map((idea) => {
+   let startTimeSeconds = 0;
+   let endTimeSeconds = 0;
+   if (subtitleSegments.length > 0) {
+    let bestRange = findBestSubtitleRange(subtitleSegments, idea.description);
+    const toSeconds = (vtt: string) => {
+     const [h, m, s] = vtt.split(':');
+     return parseInt(h) * 3600 + parseInt(m) * 60 + parseFloat(s.replace(',', '.'));
+    };
+    let duration = toSeconds(bestRange.end) - toSeconds(bestRange.start);
+    let endIdx = subtitleSegments.findIndex((s) => s.start === bestRange.start);
+    let lastIdx = subtitleSegments.findIndex((s) => s.end === bestRange.end);
+    const targetDuration = Math.max(30, Math.min(idea.endTimeSeconds - idea.startTimeSeconds, 120));
+    while (duration < targetDuration && lastIdx < subtitleSegments.length - 1) {
+     lastIdx++;
+     bestRange.end = subtitleSegments[lastIdx].end;
+     duration = toSeconds(bestRange.end) - toSeconds(bestRange.start);
+    }
+    while (duration > targetDuration && lastIdx > endIdx) {
+     lastIdx--;
+     bestRange.end = subtitleSegments[lastIdx].end;
+     duration = toSeconds(bestRange.end) - toSeconds(bestRange.start);
+    }
+    startTimeSeconds = toSeconds(bestRange.start);
+    endTimeSeconds = toSeconds(bestRange.end);
+   } else {
+    startTimeSeconds = idea.startTimeSeconds ?? 0;
+    endTimeSeconds = idea.endTimeSeconds ?? 120;
+    if (endTimeSeconds - startTimeSeconds < 30) endTimeSeconds = startTimeSeconds + 120;
+   }
+   return {
+    ...idea,
+    youtubeVideoId: videoId,
+    thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
+    startTimeSeconds,
+    endTimeSeconds,
+   };
+  });
+ }
+
+ function shouldFallbackToAutoSegments(shortsWithVideoId: ShortVideo[], videoDuration: number) {
+  return shortsWithVideoId.length < 10 && videoDuration > 600;
+ }
+
+ function generateAutoSegments(videoDuration: number, videoId: string): ShortVideo[] {
+  const fallbackShorts: ShortVideo[] = [];
+  const segLength = Math.max(30, Math.floor(videoDuration / 10));
+  let idx = 0;
+  for (let start = 0; start < videoDuration; start += segLength) {
+   const end = Math.min(start + segLength, videoDuration);
+   fallbackShorts.push({
+    id: `fallback-${idx}`,
+    title: `Segmen ${idx + 1}`,
+    description: `Highlight otomatis dari detik ${start} hingga ${end}.`,
+    startTimeSeconds: start,
+    endTimeSeconds: end,
+    youtubeVideoId: videoId,
+    thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
+   });
+   idx++;
+  }
+  return fallbackShorts;
+ }
+
+ async function getVideoDuration(videoId: string): Promise<number> {
+  let videoDuration = 0;
+  try {
+   const metaRes = await fetch(`https://auto-short-production.up.railway.app/api/video-meta?videoId=${videoId}`);
+   if (metaRes.ok) {
+    const data = await metaRes.json();
+    if (data.duration && !isNaN(data.duration)) {
+     videoDuration = data.duration;
+    }
+   }
+  } catch {}
+  if (!videoDuration || isNaN(videoDuration) || videoDuration < 30) {
+   videoDuration = 600;
+  }
+  return videoDuration;
+ }
+
+ function toVtt(sec: number) {
+  const h = Math.floor(sec / 3600)
+   .toString()
+   .padStart(2, '0');
+  const m = Math.floor((sec % 3600) / 60)
+   .toString()
+   .padStart(2, '0');
+  const s = (sec % 60).toFixed(3).padStart(6, '0');
+  return `${h}:${m}:${s}`;
+ }
 
  return (
   <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-blue-900 text-gray-100 flex flex-col items-center p-4 sm:p-8 selection:bg-purple-500 selection:text-white">
