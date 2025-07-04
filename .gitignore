@@ -23,8 +23,8 @@ dist-ssr
 *.sln
 *.sw?
 ffmpeg-7.1.1-full_build/
-backend/outputs/
-backend/*.vtt
+api/outputs/
+api/*.vtt
 
 # Ignore BFG Repo-Cleaner jar file
 bfg*.jar
