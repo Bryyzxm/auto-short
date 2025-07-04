@@ -117,19 +117,31 @@ app.get('/api/yt-transcript', async (req, res) => {
  const ytUrl = `https://www.youtube.com/watch?v=${videoId}`;
  const subLang = lang ? String(lang) : 'id,en';
  const ytDlpArgs = ['--write-auto-subs', '--sub-lang', subLang, '--skip-download', '-o', path.join(process.cwd(), `${id}`), ytUrl];
- try {
-  await new Promise((resolve, reject) => {
-   execFile('yt-dlp', ytDlpArgs, (err) => {
-    if (err) reject(new Error(err.message));
-    else resolve();
-   });
-  });
+ execFile('yt-dlp', ytDlpArgs, async (err) => {
+  if (err) {
+   return res.status(500).json({error: 'yt-dlp subtitle fetch failed', details: err.message});
+  }
+  // Cari file .id.vtt (Indonesia) lebih dulu, jika tidak ada baru cari .en.vtt
   let vttFile = null;
   const files = fs.readdirSync(process.cwd());
-  vttFile = findVttFile(files, id, 'id') || findVttFile(files, id, 'en');
-  if (!vttFile) {
-   throw new Error('Subtitle file not found (no .vtt generated for id or en)');
+  for (const file of files) {
+   if (file.startsWith(id) && file.endsWith('.id.vtt')) {
+    vttFile = path.join(process.cwd(), file);
+    break;
+   }
   }
+  if (!vttFile) {
+   for (const file of files) {
+    if (file.startsWith(id) && file.endsWith('.en.vtt')) {
+     vttFile = path.join(process.cwd(), file);
+     break;
+    }
+   }
+  }
+  if (!vttFile) {
+   return res.status(404).json({error: 'Subtitle file not found (no .vtt generated for id or en)'});
+  }
+  // Baca dan parse VTT
   let vttContent = fs.readFileSync(vttFile, 'utf-8');
   fs.unlinkSync(vttFile);
   vttContent = vttContent
@@ -141,7 +153,7 @@ app.get('/api/yt-transcript', async (req, res) => {
    .replace(/NOTE[^\n]*\n/g, '')
    .replace(/\n{2,}/g, '\n');
   const segments = [];
-  const regex = /(\d{2}:\d{2}:\d{2}\.\d{3}) --> (\d{2}:\d{2}:\d{2}\.\d{3})\s+([\s\S]*?)(?=\n\d|$)/g;
+  const regex = /([0-9:.]+) --> ([0-9:.]+)\s+([\s\S]*?)(?=\n\d|$)/g;
   let match;
   while ((match = regex.exec(vttContent)) !== null) {
    const cleanText = match[3].replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
@@ -153,34 +165,8 @@ app.get('/api/yt-transcript', async (req, res) => {
     });
    }
   }
-  res.json({segments: cleanSegments(segments)});
- } catch (e) {
-  console.error('yt-dlp transcript fetch failed:', e);
-  // Fallback: coba fetch dari LemnosLife API
-  try {
-   const apiUrl = `https://yt.lemnoslife.com/noKey/transcript?videoId=${videoId}`;
-   const apiRes = await fetch(apiUrl);
-   if (!apiRes.ok) {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    return res.status(apiRes.status).json({error: 'Failed to fetch transcript from LemnosLife', status: apiRes.status});
-   }
-   const data = await apiRes.json();
-   if (!data?.transcript || !Array.isArray(data.transcript)) {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    return res.status(404).json({error: 'No transcript found from LemnosLife'});
-   }
-   const segments = data.transcript.map((seg) => ({
-    start: seg.offset,
-    end: seg.offset + seg.duration,
-    text: seg.text,
-   }));
-   res.json({segments: cleanSegments(segments)});
-  } catch (fallbackErr) {
-   console.error('Fallback LemnosLife transcript fetch failed:', fallbackErr);
-   res.setHeader('Access-Control-Allow-Origin', '*');
-   return res.status(500).json({error: 'Failed to fetch transcript from both yt-dlp and LemnosLife', details: fallbackErr.message});
-  }
- }
+  res.json({segments});
+ });
 });
 
 // Endpoint baru: Mendapatkan durasi video dari file .vtt
