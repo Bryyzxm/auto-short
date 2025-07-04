@@ -1,0 +1,8 @@
+# Konfigurasi untuk Railway's Nixpacks builder
+[phases.setup]
+# Memberitahu Railway untuk menginstal Python 3
+nixPkgs = ["pkgs.python3"]
+
+[start]
+# Menjalankan aplikasi dari subdirektori /api
+cmd = "npm start --prefix api"
