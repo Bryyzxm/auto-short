@@ -1,10 +1,10 @@
 // Simple Express backend for YouTube video download & segment cut
 import express from 'express';
 import cors from 'cors';
-import fs from 'fs';
 import {execFile} from 'child_process';
 import {v4 as uuidv4} from 'uuid';
 import path from 'path';
+import fs from 'fs';
 import fetch from 'node-fetch';
 import {fileURLToPath} from 'url';
 
@@ -41,7 +41,6 @@ function cleanSegments(segments) {
 }
 
 // Endpoint: POST /api/shorts
-// Body: { youtubeUrl, start, end }
 app.post('/api/shorts', async (req, res) => {
  const {youtubeUrl, start, end, aspectRatio} = req.body;
  if (!youtubeUrl || typeof start !== 'number' || typeof end !== 'number') {
@@ -100,6 +99,15 @@ app.get('/api/transcript', async (req, res) => {
  }
 });
 
+function findVttFile(files, id, lang) {
+ for (const file of files) {
+  if (file.startsWith(id) && file.endsWith(`.${lang}.vtt`)) {
+   return path.join(process.cwd(), file);
+  }
+ }
+ return null;
+}
+
 // Endpoint: GET /api/yt-transcript?videoId=...
 app.get('/api/yt-transcript', async (req, res) => {
  res.setHeader('Access-Control-Allow-Origin', '*');
@@ -112,31 +120,16 @@ app.get('/api/yt-transcript', async (req, res) => {
  try {
   await new Promise((resolve, reject) => {
    execFile('yt-dlp', ytDlpArgs, (err) => {
-    if (err) reject(new Error('yt-dlp execution failed'));
+    if (err) reject(new Error(err.message));
     else resolve();
    });
   });
-  // Cari file .id.vtt (Indonesia) lebih dulu, jika tidak ada baru cari .en.vtt
   let vttFile = null;
   const files = fs.readdirSync(process.cwd());
-  for (const file of files) {
-   if (file.startsWith(id) && file.endsWith('.id.vtt')) {
-    vttFile = path.join(process.cwd(), file);
-    break;
-   }
-  }
-  if (!vttFile) {
-   for (const file of files) {
-    if (file.startsWith(id) && file.endsWith('.en.vtt')) {
-     vttFile = path.join(process.cwd(), file);
-     break;
-    }
-   }
-  }
+  vttFile = findVttFile(files, id, 'id') || findVttFile(files, id, 'en');
   if (!vttFile) {
    throw new Error('Subtitle file not found (no .vtt generated for id or en)');
   }
-  // Baca and parse VTT
   let vttContent = fs.readFileSync(vttFile, 'utf-8');
   fs.unlinkSync(vttFile);
   vttContent = vttContent
@@ -148,7 +141,7 @@ app.get('/api/yt-transcript', async (req, res) => {
    .replace(/NOTE[^\n]*\n/g, '')
    .replace(/\n{2,}/g, '\n');
   const segments = [];
-  const regex = /([0-9:.]+) --> ([0-9:.]+)\s+([\s\S]*?)(?=\n\d|$)/g;
+  const regex = /(\d{2}:\d{2}:\d{2}\.\d{3}) --> (\d{2}:\d{2}:\d{2}\.\d{3})\s+([\s\S]*?)(?=\n\d|$)/g;
   let match;
   while ((match = regex.exec(vttContent)) !== null) {
    const cleanText = match[3].replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
@@ -172,11 +165,10 @@ app.get('/api/yt-transcript', async (req, res) => {
     return res.status(apiRes.status).json({error: 'Failed to fetch transcript from LemnosLife', status: apiRes.status});
    }
    const data = await apiRes.json();
-   if (!data || !data.transcript || !Array.isArray(data.transcript)) {
+   if (!data?.transcript || !Array.isArray(data.transcript)) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     return res.status(404).json({error: 'No transcript found from LemnosLife'});
    }
-   // LemnosLife format: {transcript: [{text, offset, duration}]}
    const segments = data.transcript.map((seg) => ({
     start: seg.offset,
     end: seg.offset + seg.duration,
@@ -212,7 +204,7 @@ app.get('/api/video-meta', async (req, res) => {
  try {
   const vttContent = fs.readFileSync(vttFile, 'utf-8');
   // Cari timestamp terakhir di file VTT
-  const matches = [...vttContent.matchAll(/([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}) --> ([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3})/g)];
+  const matches = [...vttContent.matchAll(/(\d{2}:\d{2}:\d{2}\.\d{3}) --> (\d{2}:\d{2}:\d{2}\.\d{3})/g)];
   if (matches.length === 0) return res.status(400).json({error: 'No segments found in VTT'});
   const last = matches[matches.length - 1][2]; // ambil end time segmen terakhir
   // Konversi ke detik

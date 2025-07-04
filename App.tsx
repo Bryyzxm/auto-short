@@ -73,6 +73,14 @@ const App: React.FC = () => {
   return cleaned.join(' ');
  }
 
+ // Fuzzy similarity sederhana (Jaccard)
+ function similarity(a: string, b: string): number {
+  const setA = new Set(a.split(' '));
+  const setB = new Set(b.split(' '));
+  const intersection = new Set([...setA].filter((x) => setB.has(x)));
+  return intersection.size / Math.max(setA.size, setB.size);
+ }
+
  const fetchFullTranscript = async (videoId: string): Promise<string> => {
   const url = `https://auto-short-production.up.railway.app/api/yt-transcript?videoId=${videoId}`;
   try {
