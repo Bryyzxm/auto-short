@@ -8,6 +8,7 @@
     "dev": "nodemon server.js"
   },
   "dependencies": {
+    "ai-youtube-to-shorts-segmenter": "file:..",
     "cors": "^2.8.5",
     "express": "^4.18.2",
     "node-fetch": "^3.3.2",
