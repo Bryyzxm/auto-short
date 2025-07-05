@@ -1,8 +1,28 @@
 # Konfigurasi untuk Railway's Nixpacks builder
+# Solusi Definitif: Menyediakan SEMUA dependensi sistem (Python & FFMPEG).
+
+# 1. Atur PATH untuk SEMUA fase agar 'python' bisa ditemukan.
+[variables]
+PATH = "/app/bin:$PATH"
+
 [phases.setup]
-# Memberitahu Railway untuk menginstal Python 3
-nixPkgs = ["pkgs.python3"]
+# 2. Instal SEMUA paket yang dibutuhkan: python, ffmpeg, dan 'which' (untuk debugging).
+# Ini berdasarkan dokumentasi di README.md yang menyebutkan kebutuhan ffmpeg.
+nixPkgs = ["pkgs.python3", "pkgs.ffmpeg", "pkgs.which"]
+# 3. Buat symlink 'python' ke 'python3' agar dapat ditemukan oleh skrip instalasi.
+cmds = [
+    "mkdir -p /app/bin",
+    "ln -s $(which python3) /app/bin/python"
+]
+
+[phases.install]
+# 4. Jalankan 'npm install' HANYA di direktori 'api'.
+cmds = ["npm install --prefix api"]
+
+[phases.build]
+# 5. Kosongkan fase build untuk MENCEGAH Railway menjalankan build default yang salah.
+cmds = []
 
 [start]
-# Menjalankan aplikasi dari subdirektori /api
+# 6. Jalankan aplikasi. PATH sudah diatur secara global.
 cmd = "npm start --prefix api"
