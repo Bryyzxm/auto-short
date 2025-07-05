@@ -3,7 +3,7 @@
 
 # 1. Atur PATH untuk SEMUA fase agar 'python' bisa ditemukan.
 [variables]
-PATH = "/app/bin:$PATH"
+PATH = "${pkgs.ffmpeg}/bin:/app/bin:$PATH"
 
 [phases.setup]
 # 2. Instal SEMUA paket yang dibutuhkan: python, ffmpeg, dan 'which' (untuk debugging).
