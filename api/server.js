@@ -170,12 +170,15 @@ app.get("/api/yt-transcript", async (req, res) => {
   const subLang = lang ? String(lang) : "id,en";
 
   try {
-    await ytdlp(ytUrl, {
-      writeAutoSubs: true,
-      subLang: subLang,
-      skipDownload: true,
-      o: path.join(process.cwd(), `${id}`),
-    });
+    await runYtDlp([
+      ytUrl,
+      "--write-auto-subs",
+      "--sub-lang",
+      subLang,
+      "--skip-download",
+      "-o",
+      path.join(process.cwd(), `${id}`),
+    ]);
 
     // Cari file .id.vtt (Indonesia) lebih dulu, jika tidak ada baru cari .en.vtt
     let vttFile = null;
