@@ -1,172 +1,62 @@
-import {GoogleGenAI, GenerateContentResponse} from '@google/genai';
-import type {GeminiShortSegmentSuggestion, ShortVideo} from '../types';
-import {parseTimeStringToSeconds} from '../utils/timeUtils';
+import type { ShortVideo } from '../types';
+import { parseTimeStringToSeconds } from '../utils/timeUtils';
 
-const API_KEY = process.env.API_KEY;
-
-if (!API_KEY) {
- console.error('Gemini API Key is not configured. Please set the API_KEY environment variable.');
-}
-const ai = API_KEY ? new GoogleGenAI({apiKey: API_KEY}) : null;
-
-const generatePrompt = (videoUrlHint?: string, transcript?: string): string => {
- const videoContext = videoUrlHint ? `Video ini berasal dari URL berikut (gunakan untuk konteks topik secara umum jika memungkinkan): ${videoUrlHint}` : 'Video ini bertopik umum yang populer seperti vlog, tutorial, atau ulasan produk.';
-
- let transcriptContext = '';
- if (transcript && transcript.length > 100) {
-  transcriptContext = `\n\nBerikut adalah transkrip otomatis video (gunakan untuk memahami isi dan membagi segmen):\n\"\"\"${transcript.slice(0, 12000)}${transcript.length > 12000 ? '... (transkrip dipotong)' : ''}\"\"\"\n`;
- }
-
- return `
-Anda adalah asisten AI yang sangat ahli dalam membagi video YouTube berdurasi panjang menjadi segmen/klip pendek yang PALING MENARIK, VIRAL, atau PUNCAK EMOSI, dengan kualitas highlight terbaik.
-${videoContext}
-${transcriptContext}
-
-INSTRUKSI PENTING:
-- Bagi video menjadi SEBANYAK MUNGKIN segmen menarik, dengan durasi SETIAP SEGMEN antara 30 hingga 120 detik (2 menit).
-- Untuk video berdurasi lebih dari 10 menit, USAHAKAN membagi menjadi minimal 10 segmen.
-- Pilih dan bagi video menjadi highlight yang PALING MENARIK, dramatis, lucu, informatif, atau viral, utamakan momen yang benar-benar menonjol dan berpotensi viral.
-- BUAT variasi durasi segmen! Jangan semua segmen berdurasi 30 detik. Usahakan ada segmen berdurasi 60–120 detik jika memungkinkan.
-- Jika highlight cukup panjang, buat segmen lebih panjang (misal 90–120 detik), dan jika highlight pendek, boleh 30–45 detik.
-- Jangan buat segmen terlalu pendek (<30 detik) atau terlalu panjang (>120 detik).
-- Jika highlight panjang, bagi menjadi beberapa segmen yang tetap menarik dan tidak tumpang tindih berlebihan.
-- Hindari bagian intro, outro, atau bagian yang tidak penting.
-- Segmen boleh sedikit overlap jika memang momen menarik berdekatan, tapi jangan duplikat.
-- Gaya bahasa santai, tidak perlu emoji/hashtag/call-to-action.
-- Output HARUS dalam bahasa Indonesia.
-- Judul dan deskripsi HARUS relevan dengan isi segmen pada transkrip.
-- Pastikan setiap segmen unik, tidak tumpang tindih berlebihan, dan benar-benar menarik.
-
-Contoh variasi durasi output:
-[
-  {"title": "Momen Lucu Banget", "description": "Bagian paling lucu dari video.", "startTimeString": "0m35s", "endTimeString": "1m10s"},
-  {"title": "Puncak Emosi", "description": "Bagian paling dramatis.", "startTimeString": "2m00s", "endTimeString": "3m55s"},
-  {"title": "Fakta Mengejutkan", "description": "Fakta menarik yang diungkap.", "startTimeString": "4m10s", "endTimeString": "5m30s"}
-]
-
-Untuk setiap segmen, berikan detail berikut (semua dalam bahasa Indonesia!):
-1. \`title\`: Judul singkat dan menarik (maksimal 10 kata, HARUS sesuai isi segmen pada transkrip).
-2. \`description\`: Deskripsi singkat (1-2 kalimat) yang menjelaskan mengapa segmen ini menarik.
-3. \`startTimeString\`: Waktu mulai segmen (misal: "0m35s", "1m20s", "12s").
-4. \`endTimeString\`: Waktu selesai segmen (misal: "1m5s", "2m45s", "1m30s").
-
-Kembalikan HASIL AKHIR HANYA berupa array JSON valid, TANPA penjelasan, catatan, atau teks lain di luar array JSON.
-
-Format output yang DIHARUSKAN:
-[
-  {
-    "title": "string",
-    "description": "string",
-    "startTimeString": "string",
-    "endTimeString": "string"
-  }
-]
-
-Bagi video ini menjadi highlight paling menarik dan konsisten sesuai instruksi di atas.
-`;
-};
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001';
 
 export const generateShortsIdeas = async (videoUrl: string, transcript?: string): Promise<Omit<ShortVideo, 'youtubeVideoId' | 'thumbnailUrl'>[]> => {
- if (!ai) {
-  throw new Error('Gemini API client is not initialized. API_KEY might be missing.');
- }
- const prompt = generatePrompt(videoUrl, transcript);
-
- try {
-  const response: GenerateContentResponse = await ai.models.generateContent({
-   model: 'gemini-2.5-flash-preview-04-17',
-   contents: prompt,
-   config: {
-    responseMimeType: 'application/json',
-    temperature: 0.75,
-    topP: 0.95,
-    topK: 40,
-   },
+  const response = await fetch(`${API_URL}/api/generate-segments`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ videoUrl, transcript }),
   });
 
-  // Tambahan: filter baris non-JSON sebelum parsing
-  let rawText = (response.text || '').trim();
-  // Hapus baris yang jelas bukan bagian JSON (misal: satu kata tanpa tanda kutip)
-  rawText = rawText
-   .split('\n')
-   .filter((line) => {
-    const trimmed = line.trim();
-    return trimmed.startsWith('{') || trimmed.startsWith('[') || trimmed.startsWith(']') || trimmed.startsWith('"') || trimmed.startsWith('}') || trimmed.includes(':');
-   })
-   .join('\n');
-
-  // Extract only the first valid JSON array substring
-  const firstBracket = rawText.indexOf('[');
-  const lastBracket = rawText.indexOf(']');
-  let jsonStrToParse = rawText;
-  if (firstBracket !== -1 && lastBracket > firstBracket) {
-   jsonStrToParse = rawText.substring(firstBracket, lastBracket + 1);
-  } else {
-   throw new Error('Tidak ditemukan array JSON di respons AI. Cek output Gemini.');
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ error: 'Failed to get a valid error response from the server.' }));
+    throw new Error(errorData.error || `Failed to get suggestions from AI: ${response.statusText}`);
   }
 
-  let suggestions: GeminiShortSegmentSuggestion[];
-  try {
-   suggestions = JSON.parse(jsonStrToParse);
-  } catch (parseError) {
-   console.error('Failed to parse JSON response from Gemini. Original full text:', response.text, 'Attempted to parse this substring:', jsonStrToParse, 'Parse error:', parseError);
-   throw new Error('AI response was not valid JSON. The content might be incomplete or malformed. Please check the console for more details on the problematic response.');
-  }
+  const suggestions = await response.json();
 
   if (!Array.isArray(suggestions)) {
-   console.error('Gemini response, after parsing, is not an array:', suggestions);
-   throw new Error('AI response was not in the expected format (array of suggestions).');
+    console.error('API response, after parsing, is not an array:', suggestions);
+    throw new Error('API response was not in the expected format (array of suggestions).');
   }
 
   return suggestions
-   .map((suggestion, index) => {
-    const startTimeSeconds = parseTimeStringToSeconds(suggestion.startTimeString);
-    let endTimeSeconds = parseTimeStringToSeconds(suggestion.endTimeString);
+    .map((suggestion, index) => {
+      const startTimeSeconds = parseTimeStringToSeconds(suggestion.startTimeString);
+      let endTimeSeconds = parseTimeStringToSeconds(suggestion.endTimeString);
 
-    if (isNaN(startTimeSeconds) || isNaN(endTimeSeconds)) {
-     console.warn(`Segment "${suggestion.title || 'Untitled'}" (index ${index}) has invalid NaN timestamps (start: ${suggestion.startTimeString}, end: ${suggestion.endTimeString}). Skipping this segment.`);
-     return null;
-    }
+      if (isNaN(startTimeSeconds) || isNaN(endTimeSeconds)) {
+        console.warn(`Segment "${suggestion.title || 'Untitled'}" (index ${index}) has invalid NaN timestamps (start: ${suggestion.startTimeString}, end: ${suggestion.endTimeString}). Skipping this segment.`);
+        return null;
+      }
 
-    if (endTimeSeconds <= startTimeSeconds) {
-     console.warn(`Segment "${suggestion.title || 'Untitled'}" (index ${index}) has endTime <= startTime (start: ${startTimeSeconds}s, end: ${endTimeSeconds}s). Adjusting endTime to startTime + 15s.`);
-     endTimeSeconds = startTimeSeconds + 15;
-    }
+      if (endTimeSeconds <= startTimeSeconds) {
+        console.warn(`Segment "${suggestion.title || 'Untitled'}" (index ${index}) has endTime <= startTime (start: ${startTimeSeconds}s, end: ${endTimeSeconds}s). Adjusting endTime to startTime + 15s.`);
+        endTimeSeconds = startTimeSeconds + 15;
+      }
 
-    if (endTimeSeconds - startTimeSeconds > 120) {
-     console.warn(`Segment "${suggestion.title || 'Untitled'}" (index ${index}) exceeds 120s duration (is ${endTimeSeconds - startTimeSeconds}s). Truncating to 120s.`);
-     endTimeSeconds = startTimeSeconds + 120;
-    }
+      if (endTimeSeconds - startTimeSeconds > 120) {
+        console.warn(`Segment "${suggestion.title || 'Untitled'}" (index ${index}) exceeds 120s duration (is ${endTimeSeconds - startTimeSeconds}s). Truncating to 120s.`);
+        endTimeSeconds = startTimeSeconds + 120;
+      }
 
-    if (endTimeSeconds - startTimeSeconds < 1) {
-     console.warn(`Segment "${suggestion.title || 'Untitled'}" (index ${index}) has duration < 1s. Adjusting endTime to startTime + 1s.`);
-     endTimeSeconds = startTimeSeconds + 1;
-    }
+      if (endTimeSeconds - startTimeSeconds < 1) {
+        console.warn(`Segment "${suggestion.title || 'Untitled'}" (index ${index}) has duration < 1s. Adjusting endTime to startTime + 1s.`);
+        endTimeSeconds = startTimeSeconds + 1;
+      }
 
-    return {
-     id: `short-${Date.now()}-${index}`,
-     title: suggestion.title || 'Untitled Segment',
-     description: suggestion.description || 'No description provided.',
-     startTimeSeconds,
-     endTimeSeconds,
-     reasonForVertical: suggestion.reasonForVertical || 'No specific reason for vertical suitability provided.',
-    };
-   })
-   .filter((s) => s !== null) as Omit<ShortVideo, 'youtubeVideoId' | 'thumbnailUrl'>[];
- } catch (error: any) {
-  console.error('Error calling Gemini API or processing response:', error);
-  if (error.message) {
-   if (error.message.toLowerCase().includes('api key not valid')) {
-    throw new Error("Invalid Gemini API Key. Please check your configuration and ensure it's correctly set.");
-   }
-   if (error.message.toLowerCase().includes('quota')) {
-    throw new Error('API quota exceeded. Please check your Gemini API usage and limits.');
-   }
-   // Re-throw specific parsing errors with more context if they weren't caught above
-   if (error.message.includes('AI response was not valid JSON')) {
-    throw error;
-   }
-  }
-  throw new Error(`Failed to get suggestions from AI: ${error.message || 'Unknown error occurred'}`);
- }
+      return {
+        id: `short-${Date.now()}-${index}`,
+        title: suggestion.title || 'Untitled Segment',
+        description: suggestion.description || 'No description provided.',
+        startTimeSeconds,
+        endTimeSeconds,
+        reasonForVertical: suggestion.reasonForVertical || 'No specific reason for vertical suitability provided.',
+      };
+    })
+    .filter((s) => s !== null) as Omit<ShortVideo, 'youtubeVideoId' | 'thumbnailUrl'>[];
 };

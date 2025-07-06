@@ -28,6 +28,125 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 5001;
 
+import { GoogleGenAI } from "@google/genai";
+
+const API_KEY = process.env.GEMINI_API_KEY;
+
+if (!API_KEY) {
+  console.error('Gemini API Key is not configured. Please set the GEMINI_API_KEY environment variable.');
+}
+const ai = API_KEY ? new GoogleGenAI(API_KEY) : null;
+
+const generatePrompt = (videoUrlHint, transcript) => {
+  const videoContext = videoUrlHint ? `Video ini berasal dari URL berikut (gunakan untuk konteks topik secara umum jika memungkinkan): ${videoUrlHint}` : 'Video ini bertopik umum yang populer seperti vlog, tutorial, atau ulasan produk.';
+
+  let transcriptContext = '';
+  if (transcript && transcript.length > 100) {
+    transcriptContext = `\n\nBerikut adalah transkrip otomatis video (gunakan untuk memahami isi dan membagi segmen):\n\"\"\"${transcript.slice(0, 12000)}${transcript.length > 12000 ? '... (transkrip dipotong)' : ''}\"\"\"\n`;
+  }
+
+  return `
+Anda adalah asisten AI yang sangat ahli dalam membagi video YouTube berdurasi panjang menjadi segmen/klip pendek yang PALING MENARIK, VIRAL, atau PUNCAK EMOSI, dengan kualitas highlight terbaik.
+${videoContext}
+${transcriptContext}
+
+INSTRUKSI PENTING:
+- Bagi video menjadi SEBANYAK MUNGKIN segmen menarik, dengan durasi SETIAP SEGMEN antara 30 hingga 120 detik (2 menit).
+- Untuk video berdurasi lebih dari 10 menit, USAHAKAN membagi menjadi minimal 10 segmen.
+- Pilih dan bagi video menjadi highlight yang PALING MENARIK, dramatis, lucu, informatif, atau viral, utamakan momen yang benar-benar menonjol dan berpotensi viral.
+- BUAT variasi durasi segmen! Jangan semua segmen berdurasi 30 detik. Usahakan ada segmen berdurasi 60–120 detik jika memungkinkan.
+- Jika highlight cukup panjang, buat segmen lebih panjang (misal 90–120 detik), dan jika highlight pendek, boleh 30–45 detik.
+- Jangan buat segmen terlalu pendek (<30 detik) atau terlalu panjang (>120 detik).
+- Jika highlight panjang, bagi menjadi beberapa segmen yang tetap menarik dan tidak tumpang tindih berlebihan.
+- Hindari bagian intro, outro, atau bagian yang tidak penting.
+- Segmen boleh sedikit overlap jika memang momen menarik berdekatan, tapi jangan duplikat.
+- Gaya bahasa santai, tidak perlu emoji/hashtag/call-to-action.
+- Output HARUS dalam bahasa Indonesia.
+- Judul dan deskripsi HARUS relevan dengan isi segmen pada transkrip.
+- Pastikan setiap segmen unik, tidak tumpang tindih berlebihan, dan benar-benar menarik.
+
+Contoh variasi durasi output:
+[
+  {"title": "Momen Lucu Banget", "description": "Bagian paling lucu dari video.", "startTimeString": "0m35s", "endTimeString": "1m10s"},
+  {"title": "Puncak Emosi", "description": "Bagian paling dramatis.", "startTimeString": "2m00s", "endTimeString": "3m55s"},
+  {"title": "Fakta Mengejutkan", "description": "Fakta menarik yang diungkap.", "startTimeString": "4m10s", "endTimeString": "5m30s"}
+]
+
+Untuk setiap segmen, berikan detail berikut (semua dalam bahasa Indonesia!):
+1. `title`: Judul singkat dan menarik (maksimal 10 kata, HARUS sesuai isi segmen pada transkrip).
+2. `description`: Deskripsi singkat (1-2 kalimat) yang menjelaskan mengapa segmen ini menarik.
+3. `startTimeString`: Waktu mulai segmen (misal: "0m35s", "1m20s", "12s").
+4. `endTimeString`: Waktu selesai segmen (misal: "1m5s", "2m45s", "1m30s").
+
+Kembalikan HASIL AKHIR HANYA berupa array JSON valid, TANPA penjelasan, catatan, atau teks lain di luar array JSON.
+
+Format output yang DIHARUSKAN:
+[
+  {
+    "title": "string",
+    "description": "string",
+    "startTimeString": "string",
+    "endTimeString": "string"
+  }
+]
+
+Bagi video ini menjadi highlight paling menarik dan konsisten sesuai instruksi di atas.
+`;
+};
+
+app.post('/api/generate-segments', async (req, res) => {
+  if (!ai) {
+    return res.status(500).json({ error: 'Gemini API client is not initialized. API_KEY might be missing.' });
+  }
+
+  const { videoUrl, transcript } = req.body;
+  const prompt = generatePrompt(videoUrl, transcript);
+
+  try {
+    const genAI = new GoogleGenAI(API_KEY);
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-preview-0514"});
+
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const text = response.text();
+
+    // Extract only the first valid JSON array substring
+    const firstBracket = text.indexOf('[');
+    const lastBracket = text.lastIndexOf(']');
+    let jsonStrToParse = text;
+    if (firstBracket !== -1 && lastBracket > firstBracket) {
+      jsonStrToParse = text.substring(firstBracket, lastBracket + 1);
+    } else {
+      throw new Error('Tidak ditemukan array JSON di respons AI. Cek output Gemini.');
+    }
+
+    let suggestions;
+    try {
+      suggestions = JSON.parse(jsonStrToParse);
+    } catch (parseError) {
+      console.error('Failed to parse JSON response from Gemini. Original full text:', text, 'Attempted to parse this substring:', jsonStrToParse, 'Parse error:', parseError);
+      throw new Error('AI response was not valid JSON. The content might be incomplete or malformed. Please check the console for more details on the problematic response.');
+    }
+
+    res.json(suggestions);
+  } catch (error) {
+    console.error('Error calling Gemini API or processing response:', error);
+    if (error.message) {
+      if (error.message.toLowerCase().includes('api key not valid')) {
+        return res.status(401).json({ error: "Invalid Gemini API Key. Please check your configuration and ensure it's correctly set." });
+      }
+      if (error.message.toLowerCase().includes('quota')) {
+        return res.status(429).json({ error: 'API quota exceeded. Please check your Gemini API usage and limits.' });
+      }
+      // Re-throw specific parsing errors with more context if they weren't caught above
+      if (error.message.includes('AI response was not valid JSON')) {
+        return res.status(500).json({ error: error.message });
+      }
+    }
+    res.status(500).json({ error: `Failed to get suggestions from AI: ${error.message || 'Unknown error occurred'}` });
+  }
+});
+
 app.use(
   cors({
     origin: "*",

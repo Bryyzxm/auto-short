@@ -28,8 +28,13 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Clean build directory
+        run: rm -rf dist
+
       - name: Build project
         run: npm run build
+        env:
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
