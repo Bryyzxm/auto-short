@@ -17,7 +17,12 @@ cmds = [
 
 [phases.install]
 # 4. Jalankan 'npm install' HANYA di direktori 'api'.
-cmds = ["npm install --prefix api"]
+cmds = [
+    "echo 'Checking Python availability before npm install...'",
+    "which python || echo 'Python not found in PATH!'",
+    "python --version || echo 'Python version check failed!'",
+    "npm install --prefix api"
+]
 
 [phases.build]
 # 5. Kosongkan fase build untuk MENCEGAH Railway menjalankan build default yang salah.
