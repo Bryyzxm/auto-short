@@ -65,7 +65,16 @@ app.post("/api/shorts", async (req, res) => {
   console.time(`[${id}] yt-dlp download`);
 
   try {
-    await ytdlp(youtubeUrl, {
+    try {
+    await runYtDlp([
+      ytUrl,
+      "--write-auto-subs",
+      "--sub-lang",
+      subLang,
+      "--skip-download",
+      "-o",
+      path.join(process.cwd(), `${id}`),
+    ]);
       f: "bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4",
       o: tempFile,
     });
