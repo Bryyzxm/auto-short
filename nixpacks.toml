@@ -40,4 +40,4 @@ cmds = []
 # Perintah Start: Jalankan aplikasi backend
 [start]
 # Jalankan server.js di direktori 'api'
-cmd = "npm start --prefix api"
+cmd = "echo 'Start: Current PATH: $PATH' && which ffmpeg || echo 'Start: ffmpeg not found!' && ffmpeg -version || echo 'Start: ffmpeg version check failed!' && which yt-dlp || echo 'Start: yt-dlp not found!' && yt-dlp --version || echo 'Start: yt-dlp version check failed!' && npm start --prefix api"
