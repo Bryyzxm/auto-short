@@ -3,7 +3,8 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches:
-      - main # Ganti dengan branch utama Anda jika berbeda (misal: master)
+      - main
+  workflow_dispatch: # Menambahkan pemicu manual di sini # Ganti dengan branch utama Anda jika berbeda (misal: master)
 
 permissions:
   contents: write
