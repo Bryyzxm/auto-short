@@ -1,42 +1,43 @@
 # Konfigurasi untuk Railway's Nixpacks builder
-# Solusi Definitif: Menyediakan SEMUA dependensi sistem (Python & FFMPEG).
 
-# 1. Atur PATH untuk SEMUA fase agar 'python' bisa ditemukan.
+# Variabel lingkungan global
 [variables]
-PATH = "${pkgs.ffmpeg}/bin:/app/bin:$PATH"
+# Nonaktifkan perintah instalasi default Nixpacks (npm ci) karena kita akan menanganinya secara manual
+NIXPACKS_INSTALL_CMD = "true"
+# Pastikan biner kustom (/app/bin) ada di PATH. Nixpacks akan menambahkan biner dari nixPkgs secara otomatis.
+PATH = "/app/bin:$PATH"
 
+# Fase Setup: Instal dependensi sistem dan jalankan npm install
 [phases.setup]
-# 2. Instal SEMUA paket yang dibutuhkan: python, ffmpeg, dan 'which' (untuk debugging).
-# Ini berdasarkan dokumentasi di README.md yang menyebutkan kebutuhan ffmpeg.
-nixPkgs = ["pkgs.python3", "pkgs.ffmpeg", "pkgs.which"]
-# 3. Buat symlink 'python' ke 'python3' agar dapat ditemukan oleh skrip instalasi.
+# Instal Python 3, FFmpeg, yt-dlp, dan 'which' (untuk debugging)
+nixPkgs = ["pkgs.python3", "pkgs.ffmpeg", "pkgs.which", "pkgs.yt-dlp"]
+# Perintah yang dijalankan setelah nixPkgs diinstal
 cmds = [
+    # Buat direktori untuk symlink kustom
     "mkdir -p /app/bin",
-    "ln -s $(which python3) /app/bin/python"
-]
-
-[phases.setup]
-# 2. Instal SEMUA paket yang dibutuhkan: python, ffmpeg, dan 'which' (untuk debugging).
-# Ini berdasarkan dokumentasi di README.md yang menyebutkan kebutuhan ffmpeg.
-nixPkgs = ["pkgs.python3", "pkgs.ffmpeg", "pkgs.which"]
-# 3. Buat symlink 'python' ke 'python3' agar dapat ditemukan oleh skrip instalasi.
-cmds = [
-    "mkdir -p /app/bin",
+    # Buat symlink 'python' ke 'python3' agar dapat ditemukan oleh skrip
     "ln -s $(which python3) /app/bin/python",
-    "echo 'Checking Python availability before npm install...'",
-    "which python || echo 'Python not found in PATH!'",
+    # Debugging: Verifikasi Python
+    "echo 'Checking Python availability...'",
+    "which python || echo 'Python binary not found!'",
     "python --version || echo 'Python version check failed!'",
+    # Debugging: Verifikasi yt-dlp
+    "echo 'Checking yt-dlp availability...'",
+    "which yt-dlp || echo 'yt-dlp binary not found!'",
+    "yt-dlp --version || echo 'yt-dlp version check failed!'",
+    # Jalankan npm install HANYA di direktori 'api' setelah semua dependensi sistem tersedia
     "npm install --prefix api"
 ]
 
+# Fase Install: Dikosongkan karena npm install sudah dilakukan di fase setup
 [phases.install]
-# 4. Kosongkan fase install karena npm install sudah dilakukan di setup.
 cmds = []
 
+# Fase Build: Dikosongkan karena tidak ada langkah build terpisah untuk backend Node.js ini
 [phases.build]
-# 5. Kosongkan fase build untuk MENCEGAH Railway menjalankan build default yang salah.
 cmds = []
 
+# Perintah Start: Jalankan aplikasi backend
 [start]
-# 6. Jalankan aplikasi. PATH sudah diatur secara global.
+# Jalankan server.js di direktori 'api'
 cmd = "npm start --prefix api"
