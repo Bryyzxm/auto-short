@@ -38,6 +38,12 @@ app.use(
 );
 app.use(express.json());
 
+// Serve static files from the 'outputs' directory with CORS headers
+app.use('/outputs', cors(), express.static(path.join(process.cwd(), 'outputs')));
+
+// Serve static files from the 'outputs' directory with CORS headers
+app.use('/outputs', cors(), express.static(path.join(process.cwd(), 'outputs')));
+
 // Fallback: tambahkan header CORS manual untuk semua response
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
