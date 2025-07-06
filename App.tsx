@@ -89,7 +89,7 @@ const App: React.FC = () => {
 
  // Ambil seluruh segmen subtitle lengkap (dengan timestamp)
  const fetchSubtitleSegments = async (videoId: string): Promise<Array<{start: string; end: string; text: string}>> => {
-  const url = `https://auto-short-production.up.railway.app/api/yt-transcript?videoId=${videoId}`;
+  const url = `https://auto-short-backend-production.up.railway.app/api/yt-transcript?videoId=${videoId}`;
   try {
    const res = await fetch(url);
    if (!res.ok) return [];
@@ -290,7 +290,7 @@ const App: React.FC = () => {
  async function getVideoDuration(videoId: string): Promise<number> {
   let videoDuration = 0;
   try {
-   const metaRes = await fetch(`https://auto-short-production.up.railway.app/api/video-meta?videoId=${videoId}`);
+   const metaRes = await fetch(`https://auto-short-backend-production.up.railway.app/api/video-meta?videoId=${videoId}`);
    if (metaRes.ok) {
     const data = await metaRes.json();
     if (data.duration && !isNaN(data.duration)) {
