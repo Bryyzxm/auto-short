@@ -15,14 +15,23 @@ cmds = [
     "ln -s $(which python3) /app/bin/python"
 ]
 
-[phases.install]
-# 4. Jalankan 'npm install' HANYA di direktori 'api'.
+[phases.setup]
+# 2. Instal SEMUA paket yang dibutuhkan: python, ffmpeg, dan 'which' (untuk debugging).
+# Ini berdasarkan dokumentasi di README.md yang menyebutkan kebutuhan ffmpeg.
+nixPkgs = ["pkgs.python3", "pkgs.ffmpeg", "pkgs.which"]
+# 3. Buat symlink 'python' ke 'python3' agar dapat ditemukan oleh skrip instalasi.
 cmds = [
+    "mkdir -p /app/bin",
+    "ln -s $(which python3) /app/bin/python",
     "echo 'Checking Python availability before npm install...'",
     "which python || echo 'Python not found in PATH!'",
     "python --version || echo 'Python version check failed!'",
     "npm install --prefix api"
 ]
+
+[phases.install]
+# 4. Kosongkan fase install karena npm install sudah dilakukan di setup.
+cmds = []
 
 [phases.build]
 # 5. Kosongkan fase build untuk MENCEGAH Railway menjalankan build default yang salah.
