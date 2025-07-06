@@ -42,7 +42,7 @@ const generatePrompt = (videoUrlHint, transcript) => {
 
   let transcriptContext = '';
   if (transcript && transcript.length > 100) {
-    transcriptContext = `\n\nBerikut adalah transkrip otomatis video (gunakan untuk memahami isi dan membagi segmen):\n\"\"\"${transcript.slice(0, 12000)}${transcript.length > 12000 ? '... (transkrip dipotong)' : ''}\"\"\"\n`;
+    transcriptContext = `\n\nBerikut adalah transkrip otomatis video (gunakan untuk memahami isi dan membagi segmen):\n"""${transcript.slice(0, 12000)}${transcript.length > 12000 ? '... (transkrip dipotong)' : ''}"""\n`;
   }
 
   return `
