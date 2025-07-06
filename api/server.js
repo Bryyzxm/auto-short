@@ -2,8 +2,20 @@
 import express from "express";
 import cors from "cors";
 import { execFile } from "child_process";
-import ytdlp from "yt-dlp-exec";
 import { v4 as uuidv4 } from "uuid";
+
+// Helper function to run yt-dlp and return a Promise
+function runYtDlp(args) {
+  return new Promise((resolve, reject) => {
+    execFile('yt-dlp', args, (error, stdout, stderr) => {
+      if (error) {
+        console.error(`yt-dlp stderr: ${stderr}`);
+        return reject(error);
+      }
+      resolve(stdout);
+    });
+  });
+}
 import path from "path";
 import fs from "fs";
 import fetch from "node-fetch";
@@ -65,19 +77,13 @@ app.post("/api/shorts", async (req, res) => {
   console.time(`[${id}] yt-dlp download`);
 
   try {
-    try {
     await runYtDlp([
-      ytUrl,
-      "--write-auto-subs",
-      "--sub-lang",
-      subLang,
-      "--skip-download",
+      youtubeUrl,
+      "-f",
+      "bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4",
       "-o",
-      path.join(process.cwd(), `${id}`),
+      tempFile,
     ]);
-      f: "bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4",
-      o: tempFile,
-    });
     console.timeEnd(`[${id}] yt-dlp download`);
 
     // After download, cut segment
