@@ -74,7 +74,7 @@ const App: React.FC = () => {
  }
 
  const fetchFullTranscript = async (videoId: string): Promise<string> => {
-  const url = `https://auto-short-production.up.railway.app/api/yt-transcript?videoId=${videoId}`;
+  const url = `https://auto-short-backend-production.up.railway.app/api/yt-transcript?videoId=${videoId}`;
   try {
    const res = await fetch(url);
    if (!res.ok) return '';

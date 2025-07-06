@@ -25,6 +25,7 @@ dist-ssr
 ffmpeg-7.1.1-full_build/
 api/outputs/
 api/*.vtt
+console-export-*.txt
 
 # Ignore BFG Repo-Cleaner jar file
 bfg*.jar
