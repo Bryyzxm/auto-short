@@ -28,6 +28,22 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 5001;
 
+// Middleware is configured FIRST to apply to all subsequent routes.
+app.use(
+  cors({
+    origin: "*",
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true,
+  })
+);
+app.use(express.json());
+
+// Health check endpoint for deployment platforms like Railway.
+app.get("/", (req, res) => {
+  res.status(200).json({ status: "ok", message: "Backend is healthy and running." });
+});
+
 import {GoogleGenerativeAI} from '@google/generative-ai';
 
 const API_KEY = process.env.GEMINI_API_KEY;
