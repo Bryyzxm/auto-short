@@ -28,14 +28,14 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 5001;
 
-import {GoogleGenAI} from '@google/genai';
+import {GoogleGenerativeAI} from '@google/generative-ai';
 
 const API_KEY = process.env.GEMINI_API_KEY;
 
 if (!API_KEY) {
  console.error('Gemini API Key is not configured. Please set the GEMINI_API_KEY environment variable.');
 }
-const ai = API_KEY ? new GoogleGenAI(API_KEY) : null;
+const ai = API_KEY ? new GoogleGenerativeAI(API_KEY) : null;
 
 const generatePrompt = (videoUrlHint, transcript) => {
  const videoContext = videoUrlHint ? `Video ini berasal dari URL berikut (gunakan untuk konteks topik secara umum jika memungkinkan): ${videoUrlHint}` : 'Video ini bertopik umum yang populer seperti vlog, tutorial, atau ulasan produk.';
@@ -99,7 +99,7 @@ app.post('/api/generate-segments', async (req, res) => {
  const prompt = generatePrompt(videoUrl, transcript);
 
  try {
-  const genAI = new GoogleGenAI(API_KEY);
+  const genAI = new GoogleGenerativeAI(API_KEY);
   const model = genAI.getGenerativeModel({model: 'gemini-1.5-flash-preview-0514'});
 
   const result = await model.generateContent(prompt);
