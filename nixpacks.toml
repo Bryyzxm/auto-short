@@ -26,7 +26,8 @@ cmds = [
     "which yt-dlp || echo 'yt-dlp binary not found!'",
     "yt-dlp --version || echo 'yt-dlp version check failed!'",
     # Jalankan npm install HANYA di direktori 'api' setelah semua dependensi sistem tersedia
-    "npm install --prefix api"
+    "npm install --prefix api",
+    "ln -s $(which yt-dlp) /app/bin/yt-dlp" # Tambahkan ini untuk membuat symlink yt-dlp
 ]
 
 # Fase Install: Dikosongkan karena npm install sudah dilakukan di fase setup
