@@ -6,6 +6,8 @@ import {generateShortsIdeas} from './services/geminiService';
 import type {ShortVideo} from './types';
 import {InfoIcon} from './components/icons';
 
+const BASE_API_URL = 'https://auto-short-backend-production.up.railway.app';
+
 // Helper: ekstrak videoId dari berbagai format URL YouTube (termasuk live/replay)
 function extractYouTubeVideoId(url: string): string | null {
  // Lebih sederhana dan aman
@@ -74,7 +76,7 @@ const App: React.FC = () => {
  }
 
  const fetchFullTranscript = async (videoId: string): Promise<string> => {
-  const url = `https://auto-short-backend-production.up.railway.app/api/yt-transcript?videoId=${videoId}`;
+  const url = `${BASE_API_URL}/api/yt-transcript?videoId=${videoId}`;
   try {
    const res = await fetch(url);
    if (!res.ok) return '';
@@ -89,7 +91,7 @@ const App: React.FC = () => {
 
  // Ambil seluruh segmen subtitle lengkap (dengan timestamp)
  const fetchSubtitleSegments = async (videoId: string): Promise<Array<{start: string; end: string; text: string}>> => {
-  const url = `https://auto-short-backend-production.up.railway.app/api/yt-transcript?videoId=${videoId}`;
+  const url = `${BASE_API_URL}/api/yt-transcript?videoId=${videoId}`;
   try {
    const res = await fetch(url);
    if (!res.ok) return [];
@@ -290,7 +292,7 @@ const App: React.FC = () => {
  async function getVideoDuration(videoId: string): Promise<number> {
   let videoDuration = 0;
   try {
-   const metaRes = await fetch(`https://auto-short-backend-production.up.railway.app/api/video-meta?videoId=${videoId}`);
+   const metaRes = await fetch(`${BASE_API_URL}/api/video-meta?videoId=${videoId}`);
    if (metaRes.ok) {
     const data = await metaRes.json();
     if (data.duration && !isNaN(data.duration)) {

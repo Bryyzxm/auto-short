@@ -1,7 +1,7 @@
 import type { ShortVideo } from '../types';
 import { parseTimeStringToSeconds } from '../utils/timeUtils';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001';
+const API_URL = 'https://auto-short-backend-production.up.railway.app';
 
 export const generateShortsIdeas = async (videoUrl: string, transcript?: string): Promise<Omit<ShortVideo, 'youtubeVideoId' | 'thumbnailUrl'>[]> => {
   const response = await fetch(`${API_URL}/api/generate-segments`, {

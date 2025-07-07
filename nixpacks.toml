@@ -1,44 +1,4 @@
-# Konfigurasi untuk Railway's Nixpacks builder
+packages = ["ffmpeg", "yt-dlp"]
 
-# Variabel lingkungan global
-[variables]
-# Nonaktifkan perintah instalasi default Nixpacks (npm ci) karena kita akan menanganinya secara manual
-NIXPACKS_INSTALL_CMD = "true"
-# Pastikan biner kustom (/app/bin) ada di PATH. Nixpacks akan menambahkan biner dari nixPkgs secara otomatis.
-PATH = "/app/bin:$PATH"
-
-# Fase Setup: Instal dependensi sistem dan jalankan npm install
-[phases.setup]
-# Instal Python 3, FFmpeg, yt-dlp, dan 'which' (untuk debugging)
-nixPkgs = ["pkgs.python3", "pkgs.ffmpeg", "pkgs.which", "pkgs.yt-dlp"]
-# Perintah yang dijalankan setelah nixPkgs diinstal
-cmds = [
-    # Buat direktori untuk symlink kustom
-    "mkdir -p /app/bin",
-    # Buat symlink 'python' ke 'python3' agar dapat ditemukan oleh skrip
-    "ln -s $(which python3) /app/bin/python",
-    # Debugging: Verifikasi Python
-    "echo 'Checking Python availability...'",
-    "which python || echo 'Python binary not found!'",
-    "python --version || echo 'Python version check failed!'",
-    # Debugging: Verifikasi yt-dlp
-    "echo 'Checking yt-dlp availability...'",
-    "which yt-dlp || echo 'yt-dlp binary not found!'",
-    "yt-dlp --version || echo 'yt-dlp version check failed!'",
-    # Jalankan npm install HANYA di direktori 'api' setelah semua dependensi sistem tersedia
-    "npm install --prefix api",
-    "ln -s $(which yt-dlp) /app/bin/yt-dlp" # Tambahkan ini untuk membuat symlink yt-dlp
-]
-
-# Fase Install: Dikosongkan karena npm install sudah dilakukan di fase setup
-[phases.install]
-cmds = []
-
-# Fase Build: Dikosongkan karena tidak ada langkah build terpisah untuk backend Node.js ini
-[phases.build]
-cmds = []
-
-# Perintah Start: Jalankan aplikasi backend
 [start]
-# Jalankan server.js di direktori 'api'
-cmd = "echo 'Start: Current PATH: $PATH' && which ffmpeg || echo 'Start: ffmpeg not found!' && ffmpeg -version || echo 'Start: ffmpeg version check failed!' && which yt-dlp || echo 'Start: yt-dlp not found!' && yt-dlp --version || echo 'Start: yt-dlp version check failed!' && npm start --prefix api"
+cmd = "npm start"
