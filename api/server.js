@@ -29,14 +29,13 @@ const app = express();
 const PORT = process.env.PORT || 5001;
 
 // Middleware is configured FIRST to apply to all subsequent routes.
-app.use(
-  cors({
-    origin: "*",
-    methods: ["GET", "POST", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-    credentials: true,
-  })
-);
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  next();
+});
+app.use(cors());
 app.use(express.json());
 
 // Health check endpoint for deployment platforms like Railway.
@@ -382,4 +381,12 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, () => {
  console.log(`Backend server running on http://localhost:${PORT}`);
+  // Diagnostic: Check if yt-dlp is in PATH
+  execFile('which', ['yt-dlp'], (error, stdout, stderr) => {
+    if (error) {
+      console.error(`which yt-dlp error: ${stderr}`);
+    } else {
+      console.log(`yt-dlp found at: ${stdout.trim()}`);
+    }
+  });
 });
