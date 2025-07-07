@@ -356,7 +356,7 @@ const App: React.FC = () => {
      </div>
     )}
 
-    {!isLoading && !error && generatedShorts.length === 0 && youtubeUrl && !apiKeyError && (
+    {!isLoading && !error && generatedShorts.length === 0 && youtubeUrl && (
      <div className="mt-6 p-4 bg-gray-700 bg-opacity-50 text-gray-300 border border-gray-600 rounded-lg text-center">
       <p>Tidak ada hasil untuk ditampilkan. Masukkan URL YouTube dan klik "Generate Clip Segments" untuk melihat saran bertenaga AI.</p>
      </div>
