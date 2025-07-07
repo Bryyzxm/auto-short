@@ -1,5 +1,4 @@
-
-[phases.build]
+[phases.setup]
 commands = [
   "apt-get update && apt-get install -y ffmpeg",
   "curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/bin/yt-dlp",
