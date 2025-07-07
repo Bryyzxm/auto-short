@@ -1,4 +1,6 @@
-packages = ["ffmpeg", "yt-dlp"]
+
+[phases.build]
+commands = ["apt-get update && apt-get install -y ffmpeg python3-pip && pip install yt-dlp"]
 
 [start]
 cmd = "npm start"

@@ -116,7 +116,7 @@ app.post('/api/generate-segments', async (req, res) => {
 
  try {
   const genAI = new GoogleGenerativeAI(API_KEY);
-  const model = genAI.getGenerativeModel({model: 'gemini-1.5-flash-preview-0514'});
+  const model = genAI.getGenerativeModel({model: 'gemini-1.5-flash'});
 
   const result = await model.generateContent(prompt);
   const response = await result.response;
