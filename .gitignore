@@ -27,6 +27,7 @@ api/outputs/
 api/*.vtt
 console-export-*.txt
 logs*
+.env
 
 # Ignore BFG Repo-Cleaner jar file
 bfg*.jar
