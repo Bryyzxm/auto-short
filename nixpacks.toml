@@ -1,4 +1,0 @@
-packages = ["ffmpeg", "yt-dlp"]
-
-[start]
-cmd = "npm start"
