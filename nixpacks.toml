@@ -3,10 +3,13 @@ aptPkgs = ["python3", "python3-pip", "ffmpeg", "curl", "yt-dlp"]
 
 [phases.install]
 cmds = [
-    "cd api && npm ci --only=production"
+    "unset NODE_ENV && npm ci", # install all deps incl dev (vite)
+    "npm run build",           # generate dist
+    "cd api && npm ci --only=production" # backend minimal deps
 ]
 
 [start]
+# Start only backend on runtime; front-end is already static in /dist. Serve via Caddy.
 cmd = "cd api && npm start"
 
 [variables]
