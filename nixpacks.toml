@@ -1,11 +1,20 @@
 [phases.setup]
-aptPkgs = ["python3", "python3-pip", "ffmpeg", "curl", "yt-dlp"]
+aptPkgs = ["python3", "python3-pip", "ffmpeg", "curl", "yt-dlp", "git", "build-essential", "cmake"]
 
 [phases.install]
 cmds = [
     "unset NODE_ENV && npm ci", # install all deps incl dev (vite)
     "npm run build",           # generate dist
     "cd api && npm ci --only=production" # backend minimal deps
+]
+
+# build whisper.cpp & download model
+[phases.build]
+cmds = [
+  "git clone --depth 1 https://github.com/ggerganov/whisper.cpp",
+  "cd whisper.cpp && make -j$(nproc)",
+  "mkdir -p /app/models",
+  "curl -L -o /app/models/ggml-tiny.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin"
 ]
 
 [start]

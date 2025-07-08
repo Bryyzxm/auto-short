@@ -26,6 +26,46 @@ import fs from "fs";
 import fetch from "node-fetch";
 import { fileURLToPath } from "url";
 
+// Helper: run whisper.cpp on an audio file and return segments [{start,end,text}]
+function runWhisperCpp(audioPath) {
+  return new Promise((resolve, reject) => {
+    const jsonOut = `${audioPath}.json`;
+    execFile(
+      "/app/whisper.cpp/main",
+      [
+        "-m",
+        "/app/models/ggml-tiny.bin",
+        "-f",
+        audioPath,
+        "-of",
+        jsonOut,
+        "-oj",
+      ],
+      { timeout: 300000 },
+      (err, stdout, stderr) => {
+        if (err) {
+          console.error("whisper.cpp error", err.message);
+          return reject(err);
+        }
+        try {
+          const raw = fs.readFileSync(jsonOut, "utf-8");
+          fs.unlinkSync(jsonOut);
+          const obj = JSON.parse(raw);
+          if (!obj.segments || !Array.isArray(obj.segments)) return resolve([]);
+          const segments = obj.segments.map((s) => ({
+            start: secondsToHMS(s.start),
+            end: secondsToHMS(s.end),
+            text: s.text.trim(),
+          }));
+          resolve(segments);
+        } catch (e) {
+          reject(e);
+        }
+      }
+    );
+  });
+}
+
 // Helper: convert seconds(float) to HH:MM:SS.mmm string
 function secondsToHMS(sec) {
   const h = Math.floor(sec / 3600)
@@ -621,6 +661,34 @@ app.get("/api/yt-transcript", async (req, res) => {
       }
     }
     if (!vttFile) {
+      console.warn("No VTT found – attempting local Whisper fallback...");
+
+      try {
+        const audioPath = path.join(process.cwd(), `${id}.m4a`);
+        await runYtDlp([
+          ytUrl,
+          "-f",
+          "bestaudio[ext=m4a]/bestaudio",
+          "--max-filesize",
+          "20M",
+          "-o",
+          audioPath,
+        ]);
+
+        const whisperSegs = await runWhisperCpp(audioPath);
+        try {
+          fs.unlinkSync(audioPath);
+        } catch {}
+
+        if (whisperSegs.length) {
+          const payload = { segments: whisperSegs };
+          transcriptCache.set(videoId, payload);
+          return res.json(payload);
+        }
+      } catch (e) {
+        console.error("Whisper fallback failed", e.message);
+      }
+
       const emptyPayload = { segments: [] };
       transcriptCache.set(videoId, emptyPayload);
       return res.status(200).json(emptyPayload);
