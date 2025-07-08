@@ -7,7 +7,7 @@ import {v4 as uuidv4} from 'uuid';
 // Helper function to run yt-dlp and return a Promise
 function runYtDlp(args) {
  return new Promise((resolve, reject) => {
-  execFile('yt-dlp', args, (error, stdout, stderr) => {
+  execFile('/usr/local/bin/yt-dlp', args, (error, stdout, stderr) => {
    if (error) {
     console.error(`yt-dlp stderr: ${stderr}`);
     return reject(error);
@@ -222,7 +222,7 @@ app.post('/api/shorts', async (req, res) => {
    ffmpegArgs = ['-y', '-ss', String(start), '-to', String(end), '-i', tempFile, '-vf', 'crop=in_h*9/16:in_h', '-c:v', 'libx264', '-c:a', 'aac', '-preset', 'fast', cutFile];
   }
   console.time(`[${id}] ffmpeg cut`);
-  execFile('ffmpeg', ffmpegArgs, (err2) => {
+  execFile('/usr/local/bin/ffmpeg', ffmpegArgs, (err2) => {
    console.timeEnd(`[${id}] ffmpeg cut`);
    fs.unlink(tempFile, () => {});
    if (err2) {
@@ -381,5 +381,4 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, () => {
  console.log(`Backend server running on http://localhost:${PORT}`);
-  console.log(`Server PATH: ${process.env.PATH}`);
 });

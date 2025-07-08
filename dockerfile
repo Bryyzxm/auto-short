@@ -14,18 +14,13 @@ RUN npm ci
 # apt-get update untuk memperbarui daftar paket
 # apt-get install -y ffmpeg python3-pip untuk menginstal ffmpeg dan pip
 # pip install yt-dlp untuk menginstal yt-dlp
-RUN apt-get update && apt-get install -y ffmpeg python3-pip && pip install yt-dlp \
-    && ln -s $(which yt-dlp) /usr/local/bin/yt-dlp \
-    && ln -s $(which ffmpeg) /usr/local/bin/ffmpeg
+RUN apt-get update && apt-get install -y ffmpeg python3-pip && pip install yt-dlp
 
 # Copy the rest of the application code
 COPY . .
 
 # Expose the port the app runs on (sesuaikan dengan PORT di server.js, yaitu 8080)
 EXPOSE 8080
-
-# Set PATH for runtime
-ENV PATH="/usr/local/bin:$PATH"
 
 # Command to run the application
 CMD ["npm", "start"]
