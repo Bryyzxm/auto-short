@@ -24,5 +24,8 @@ COPY . .
 # Expose the port the app runs on (sesuaikan dengan PORT di server.js, yaitu 8080)
 EXPOSE 8080
 
+# Set PATH for runtime
+ENV PATH="/usr/local/bin:$PATH"
+
 # Command to run the application
-CMD ["bash", "-c", "export PATH=$PATH:/usr/local/bin && npm start"]
+CMD ["npm", "start"]
