@@ -3,10 +3,13 @@ import type {ShortVideo} from '../types';
 import {PlayIcon, DownloadIcon, InfoIcon, StopIcon} from './icons';
 import {formatTime} from '../utils/timeUtils';
 
+const API_BASE_URL = 'https://auto-short-backend-production.up.railway.app';
+
+
 // Helper: fetch transcript for a segment
 async function fetchTranscript(videoId: string, start: number, end: number): Promise<string> {
  // Fetch transcript via backend yt-dlp proxy
- const url = `https://auto-short-production.up.railway.app/api/yt-transcript?videoId=${videoId}`;
+ const url = `${API_BASE_URL}/api/yt-transcript?videoId=${videoId}`;
  try {
   const res = await fetch(url);
   if (!res.ok) {
@@ -203,23 +206,23 @@ export const ShortVideoCard: React.FC<ShortVideoCardProps> = ({shortVideo, isAct
   setIsDownloading(true);
   setDownloadError(null);
   try {
-   const response = await fetch('http://localhost:5001/api/shorts', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({
-     youtubeUrl: getYoutubeUrl(shortVideo.youtubeVideoId),
-     start: shortVideo.startTimeSeconds,
-     end: shortVideo.endTimeSeconds,
-     aspectRatio: aspectRatio,
-    }),
-   });
+    const response = await fetch(`${API_BASE_URL}/api/shorts`, {
+     method: 'POST',
+     headers: {'Content-Type': 'application/json'},
+     body: JSON.stringify({
+      youtubeUrl: getYoutubeUrl(shortVideo.youtubeVideoId),
+      start: shortVideo.startTimeSeconds,
+      end: shortVideo.endTimeSeconds,
+      aspectRatio: aspectRatio,
+     }),
+    });
    if (!response.ok) {
     const err = await response.json().catch(() => ({}));
     throw new Error(err.error || 'Gagal memproses video.');
    }
    const data = await response.json();
    if (data.downloadUrl) {
-    window.open(`http://localhost:5001${data.downloadUrl}`, '_blank');
+    window.open(`${API_BASE_URL}${data.downloadUrl}`, '_blank');
    } else {
     throw new Error('Link unduhan tidak ditemukan.');
    }
