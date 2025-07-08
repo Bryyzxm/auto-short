@@ -26,6 +26,44 @@ import fs from "fs";
 import fetch from "node-fetch";
 import { fileURLToPath } from "url";
 
+// Fetch subtitles via official TimedText API (does not trigger CAPTCHA)
+async function fetchTimedTextSegments(videoId, langOrder = ["id", "en"]) {
+  for (const lang of langOrder) {
+    const url = `https://video.google.com/timedtext?lang=${lang}&v=${videoId}&kind=asr&fmt=vtt`;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const vtt = await res.text();
+      if (!vtt || vtt.trim().length === 0 || !vtt.includes("-->")) continue;
+
+      // Parse VTT into segments
+      const cleaned = vtt
+        .replace(/WEBVTT[^\n]*\n/gi, "")
+        .replace(/NOTE[^\n]*\n/gi, "")
+        .replace(/<\d{2}:\d{2}:\d{2}\.\d{3}>/g, "")
+        .replace(/<c>|<\/c>/g, "")
+        .replace(/align:[^\n]+/g, "")
+        .replace(/position:[^\n]+/g, "")
+        .replace(/\n{2,}/g, "\n");
+
+      const regex =
+        /(\d{2}:\d{2}:\d{2}\.\d{3}) --> (\d{2}:\d{2}:\d{2}\.\d{3})\s+([\s\S]*?)(?=\n\d|$)/g;
+      const segments = [];
+      let match;
+      while ((match = regex.exec(cleaned)) !== null) {
+        const text = match[3].replace(/\n/g, " ").replace(/\s+/g, " ").trim();
+        if (text) {
+          segments.push({ start: match[1], end: match[2], text });
+        }
+      }
+      if (segments.length) return segments;
+    } catch (e) {
+      /* ignore and try next language */
+    }
+  }
+  return [];
+}
+
 console.log("🚀 Starting server initialization...");
 console.log("📁 Current working directory:", process.cwd());
 console.log("🌍 Environment variables:");
@@ -418,6 +456,14 @@ app.get("/api/yt-transcript", async (req, res) => {
   const id = uuidv4();
   const ytUrl = `https://www.youtube.com/watch?v=${videoId}`;
   const subLang = lang ? String(lang) : "id,en";
+
+  // 0️⃣ Try official TimedText API first
+  const timedSegs = await fetchTimedTextSegments(videoId, subLang.split(","));
+  if (timedSegs.length) {
+    const payload = { segments: timedSegs };
+    transcriptCache.set(videoId, payload);
+    return res.json(payload);
+  }
 
   try {
     // 1️⃣ Try LemnosLife API first (no quota, usually works)
