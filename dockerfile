@@ -14,7 +14,7 @@ RUN npm ci
 # apt-get update untuk memperbarui daftar paket
 # apt-get install -y ffmpeg python3-pip untuk menginstal ffmpeg dan pip
 # pip install yt-dlp untuk menginstal yt-dlp
-RUN apt-get update && apt-get install -y ffmpeg python3-pip && pip install yt-dlp
+RUN apt-get update && apt-get install -y ffmpeg python3-pip     && pip install yt-dlp     && which ffmpeg     && which yt-dlp     && ffmpeg -version     && yt-dlp --version
 
 # Copy the rest of the application code
 COPY . .
