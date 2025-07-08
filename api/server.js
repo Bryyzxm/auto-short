@@ -161,12 +161,9 @@ const generatePrompt = (videoUrlHint, transcript) => {
 
 app.post("/api/generate-segments", async (req, res) => {
   if (!ai) {
-    return res
-      .status(500)
-      .json({
-        error:
-          "Gemini API client is not initialized. API_KEY might be missing.",
-      });
+    return res.status(500).json({
+      error: "Gemini API client is not initialized. API_KEY might be missing.",
+    });
   }
 
   const { videoUrl, transcript } = req.body;
@@ -214,20 +211,16 @@ app.post("/api/generate-segments", async (req, res) => {
     console.error("Error calling Gemini API or processing response:", error);
     if (error.message) {
       if (error.message.toLowerCase().includes("api key not valid")) {
-        return res
-          .status(401)
-          .json({
-            error:
-              "Invalid Gemini API Key. Please check your configuration and ensure it's correctly set.",
-          });
+        return res.status(401).json({
+          error:
+            "Invalid Gemini API Key. Please check your configuration and ensure it's correctly set.",
+        });
       }
       if (error.message.toLowerCase().includes("quota")) {
-        return res
-          .status(429)
-          .json({
-            error:
-              "API quota exceeded. Please check your Gemini API usage and limits.",
-          });
+        return res.status(429).json({
+          error:
+            "API quota exceeded. Please check your Gemini API usage and limits.",
+        });
       }
       // Forward Gemini 503 / model overloaded to client so front-end can show proper message
       if (
@@ -246,13 +239,11 @@ app.post("/api/generate-segments", async (req, res) => {
         return res.status(500).json({ error: error.message });
       }
     }
-    res
-      .status(500)
-      .json({
-        error: `Failed to get suggestions from AI: ${
-          error.message || "Unknown error occurred"
-        }`,
-      });
+    res.status(500).json({
+      error: `Failed to get suggestions from AI: ${
+        error.message || "Unknown error occurred"
+      }`,
+    });
   }
 });
 
@@ -490,10 +481,42 @@ app.get("/api/yt-transcript", async (req, res) => {
     }
     res.json({ segments });
   } catch (err) {
-    console.error("yt-dlp subtitle fetch failed", err);
-    return res
-      .status(500)
-      .json({ error: "yt-dlp subtitle fetch failed", details: err.message });
+    console.warn(
+      "yt-dlp subtitle fetch failed, falling back to Lemnoslife API",
+      err.message
+    );
+    try {
+      const apiUrl = `https://yt.lemnoslife.com/noKey/transcript?videoId=${videoId}`;
+      const apiRes = await fetch(apiUrl);
+      if (!apiRes.ok) {
+        return res.status(apiRes.status).json({
+          error: "Failed to fetch transcript from fallback API",
+          status: apiRes.status,
+        });
+      }
+      const data = await apiRes.json();
+      if (!data?.transcript?.segments) {
+        return res.status(404).json({ error: "No transcript segments found" });
+      }
+      const segments = data.transcript.segments.map((seg) => ({
+        start: new Date(seg.startMs)
+          .toISOString()
+          .substr(11, 12)
+          .replace("Z", ""),
+        end: new Date(seg.startMs + seg.durationMs)
+          .toISOString()
+          .substr(11, 12)
+          .replace("Z", ""),
+        text: seg.text,
+      }));
+      return res.json({ segments });
+    } catch (fallbackErr) {
+      console.error("Fallback transcript fetch failed", fallbackErr);
+      return res.status(500).json({
+        error: "Both yt-dlp and fallback transcript fetch failed",
+        details: fallbackErr.message,
+      });
+    }
   }
 });
 
