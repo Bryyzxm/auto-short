@@ -25,4 +25,4 @@ COPY . .
 EXPOSE 8080
 
 # Command to run the application
-CMD ["npm", "start"]
+CMD ["bash", "-c", "export PATH=$PATH:/usr/local/bin && npm start"]
