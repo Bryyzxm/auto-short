@@ -448,9 +448,7 @@ app.get("/api/yt-transcript", async (req, res) => {
       }
     }
     if (!vttFile) {
-      return res.status(404).json({
-        error: "Subtitle file not found (no .vtt generated for id or en)",
-      });
+      return res.status(200).json({ segments: [] });
     }
     // Baca dan parse VTT
     let vttContent = fs.readFileSync(vttFile, "utf-8");
@@ -489,14 +487,11 @@ app.get("/api/yt-transcript", async (req, res) => {
       const apiUrl = `https://yt.lemnoslife.com/noKey/transcript?videoId=${videoId}`;
       const apiRes = await fetch(apiUrl);
       if (!apiRes.ok) {
-        return res.status(apiRes.status).json({
-          error: "Failed to fetch transcript from fallback API",
-          status: apiRes.status,
-        });
+        return res.status(200).json({ segments: [] });
       }
       const data = await apiRes.json();
       if (!data?.transcript?.segments) {
-        return res.status(404).json({ error: "No transcript segments found" });
+        return res.status(200).json({ segments: [] });
       }
       const segments = data.transcript.segments.map((seg) => ({
         start: new Date(seg.startMs)
@@ -512,10 +507,7 @@ app.get("/api/yt-transcript", async (req, res) => {
       return res.json({ segments });
     } catch (fallbackErr) {
       console.error("Fallback transcript fetch failed", fallbackErr);
-      return res.status(500).json({
-        error: "Both yt-dlp and fallback transcript fetch failed",
-        details: fallbackErr.message,
-      });
+      return res.status(200).json({ segments: [] });
     }
   }
 });
