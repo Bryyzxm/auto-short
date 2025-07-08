@@ -401,25 +401,53 @@ app.get("/api/transcript", async (req, res) => {
   }
 });
 
-function findVttFile(files, id, lang) {
-  for (const file of files) {
-    if (file.startsWith(id) && file.endsWith(`.${lang}.vtt`)) {
-      return path.join(process.cwd(), file);
-    }
-  }
-  return null;
-}
+// Simple in-memory cache to avoid repeated fetches during container lifetime
+const transcriptCache = new Map();
 
 // Endpoint: GET /api/yt-transcript?videoId=...
 app.get("/api/yt-transcript", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   const { videoId, lang } = req.query;
   if (!videoId) return res.status(400).json({ error: "videoId required" });
+
+  // Serve from cache if available
+  if (transcriptCache.has(videoId)) {
+    return res.json(transcriptCache.get(videoId));
+  }
+
   const id = uuidv4();
   const ytUrl = `https://www.youtube.com/watch?v=${videoId}`;
   const subLang = lang ? String(lang) : "id,en";
 
   try {
+    // 1️⃣ Try LemnosLife API first (no quota, usually works)
+    try {
+      const apiUrl = `https://yt.lemnoslife.com/noKey/transcript?videoId=${videoId}`;
+      const apiRes = await fetch(apiUrl);
+      if (apiRes.ok) {
+        const data = await apiRes.json();
+        if (data?.transcript?.segments?.length) {
+          const segments = data.transcript.segments.map((seg) => ({
+            start: new Date(seg.startMs)
+              .toISOString()
+              .substr(11, 12)
+              .replace("Z", ""),
+            end: new Date(seg.startMs + seg.durationMs)
+              .toISOString()
+              .substr(11, 12)
+              .replace("Z", ""),
+            text: seg.text,
+          }));
+          const payload = { segments };
+          transcriptCache.set(videoId, payload);
+          return res.json(payload);
+        }
+      }
+    } catch (lemErr) {
+      console.warn("LemnosLife transcript fetch failed", lemErr.message);
+    }
+
+    // 2️⃣ Fallback to yt-dlp if LemnosLife didn't return segments
     await runYtDlp([
       ytUrl,
       "--write-auto-subs",
@@ -448,7 +476,9 @@ app.get("/api/yt-transcript", async (req, res) => {
       }
     }
     if (!vttFile) {
-      return res.status(200).json({ segments: [] });
+      const emptyPayload = { segments: [] };
+      transcriptCache.set(videoId, emptyPayload);
+      return res.status(200).json(emptyPayload);
     }
     // Baca dan parse VTT
     let vttContent = fs.readFileSync(vttFile, "utf-8");
@@ -477,38 +507,17 @@ app.get("/api/yt-transcript", async (req, res) => {
         });
       }
     }
-    res.json({ segments });
+    const payload = { segments };
+    transcriptCache.set(videoId, payload);
+    return res.json(payload);
   } catch (err) {
     console.warn(
       "yt-dlp subtitle fetch failed, falling back to Lemnoslife API",
       err.message
     );
-    try {
-      const apiUrl = `https://yt.lemnoslife.com/noKey/transcript?videoId=${videoId}`;
-      const apiRes = await fetch(apiUrl);
-      if (!apiRes.ok) {
-        return res.status(200).json({ segments: [] });
-      }
-      const data = await apiRes.json();
-      if (!data?.transcript?.segments) {
-        return res.status(200).json({ segments: [] });
-      }
-      const segments = data.transcript.segments.map((seg) => ({
-        start: new Date(seg.startMs)
-          .toISOString()
-          .substr(11, 12)
-          .replace("Z", ""),
-        end: new Date(seg.startMs + seg.durationMs)
-          .toISOString()
-          .substr(11, 12)
-          .replace("Z", ""),
-        text: seg.text,
-      }));
-      return res.json({ segments });
-    } catch (fallbackErr) {
-      console.error("Fallback transcript fetch failed", fallbackErr);
-      return res.status(200).json({ segments: [] });
-    }
+    const emptyPayload = { segments: [] };
+    transcriptCache.set(videoId, emptyPayload);
+    return res.status(200).json(emptyPayload);
   }
 });
 
