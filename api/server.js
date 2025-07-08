@@ -21,6 +21,21 @@ import fs from 'fs';
 import fetch from 'node-fetch';
 import {fileURLToPath} from 'url';
 
+console.log('🚀 Starting server initialization...');
+console.log('📁 Current working directory:', process.cwd());
+console.log('🌍 Environment variables:');
+console.log('  - NODE_ENV:', process.env.NODE_ENV);
+console.log('  - PORT:', process.env.PORT);
+console.log('  - GEMINI_API_KEY:', process.env.GEMINI_API_KEY ? '✅ Set' : '❌ Missing');
+
+try {
+ console.log('📦 Loading dependencies...');
+ console.log('✅ All dependencies loaded successfully');
+} catch (error) {
+ console.error('❌ Failed to load dependencies:', error);
+ process.exit(1);
+}
+
 // Deteksi path binary berdasarkan environment
 const isProduction = process.env.NODE_ENV === 'production';
 const YT_DLP_PATH = isProduction ? 'yt-dlp' : '/usr/local/bin/yt-dlp';
@@ -32,6 +47,23 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 5001;
+
+console.log('🔧 Setting up Express app...');
+console.log('📂 Checking file structure...');
+try {
+ console.log('  - Files in current directory:', fs.readdirSync('.'));
+ if (fs.existsSync('./api')) {
+  console.log('  - Files in api directory:', fs.readdirSync('./api'));
+ }
+ if (fs.existsSync('./outputs')) {
+  console.log('  - Outputs directory exists: ✅');
+ } else {
+  console.log('  - Creating outputs directory...');
+  fs.mkdirSync('./outputs', {recursive: true});
+ }
+} catch (err) {
+ console.error('❌ File system check failed:', err);
+}
 
 // Middleware is configured FIRST to apply to all subsequent routes.
 app.use((req, res, next) => {
@@ -395,13 +427,24 @@ process.on('SIGTERM', () => {
 });
 
 process.on('uncaughtException', (err) => {
-  console.error('Uncaught Exception:', err);
+ console.error('💥 Uncaught Exception:', err);
+ console.error('Stack trace:', err.stack);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+ console.error('💥 Unhandled Rejection at:', promise);
+ console.error('Reason:', reason);
 });
 
 const server = app.listen(PORT, '0.0.0.0', () => {
- console.log(`Backend server running on http://0.0.0.0:${PORT}`);
+ console.log('🎉 Server successfully started!');
+ console.log(`🌐 Backend server running on http://0.0.0.0:${PORT}`);
+ console.log('🔗 Health check: http://0.0.0.0:' + PORT + '/');
 });
+
+server.on('error', (error) => {
+ console.error('❌ Server failed to start:', error);
+ process.exit(1);
+});
+
+console.log('✅ Server.js loaded completely');
