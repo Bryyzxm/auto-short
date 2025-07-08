@@ -1,2 +1,2 @@
 [phases.setup]
-aptPkgs = ["ffmpeg", "yt-dlp"]
+pkgs = ["ffmpeg", "yt-dlp"]
