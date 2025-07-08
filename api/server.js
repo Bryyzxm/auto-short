@@ -3,23 +3,28 @@ import express from 'express';
 import cors from 'cors';
 import {execFile} from 'child_process';
 import {v4 as uuidv4} from 'uuid';
-
 // Helper function to run yt-dlp and return a Promise
 function runYtDlp(args) {
- return new Promise((resolve, reject) => {
-  execFile('/usr/local/bin/yt-dlp', args, (error, stdout, stderr) => {
-   if (error) {
-    console.error(`yt-dlp stderr: ${stderr}`);
-    return reject(error);
-   }
-   resolve(stdout);
+  return new Promise((resolve, reject) => {
+   execFile(YT_DLP_PATH, args, { timeout: 300000 }, (error, stdout, stderr) => {
+    if (error) {
+     console.error(`yt-dlp error: ${error.message}`);
+     console.error(`yt-dlp stderr: ${stderr}`);
+     return reject(error);
+    }
+    resolve(stdout);
+   });
   });
- });
-}
+ }
 import path from 'path';
 import fs from 'fs';
 import fetch from 'node-fetch';
 import {fileURLToPath} from 'url';
+
+// Deteksi path binary berdasarkan environment
+const isProduction = process.env.NODE_ENV === 'production';
+const YT_DLP_PATH = isProduction ? 'yt-dlp' : '/usr/local/bin/yt-dlp';
+const FFMPEG_PATH = isProduction ? 'ffmpeg' : '/usr/local/bin/ffmpeg';
 
 // Polyfill __dirname for ES module
 const __filename = fileURLToPath(import.meta.url);
@@ -222,10 +227,11 @@ app.post('/api/shorts', async (req, res) => {
    ffmpegArgs = ['-y', '-ss', String(start), '-to', String(end), '-i', tempFile, '-vf', 'crop=in_h*9/16:in_h', '-c:v', 'libx264', '-c:a', 'aac', '-preset', 'fast', cutFile];
   }
   console.time(`[${id}] ffmpeg cut`);
-  execFile('/usr/local/bin/ffmpeg', ffmpegArgs, (err2) => {
+  execFile(FFMPEG_PATH, ffmpegArgs, {timeout: 180000}, (err2) => {
    console.timeEnd(`[${id}] ffmpeg cut`);
    fs.unlink(tempFile, () => {});
    if (err2) {
+    console.error('FFmpeg error:', err2.message);
     return res.status(500).json({error: 'ffmpeg failed', details: err2.message});
    }
    console.log(`[${id}] Selesai proses. Download: /outputs/${path.basename(cutFile)}`);
@@ -379,6 +385,23 @@ app.use((err, req, res, next) => {
  res.status(err.status || 500).json({error: err.message || 'Internal Server Error'});
 });
 
-app.listen(PORT, () => {
- console.log(`Backend server running on http://localhost:${PORT}`);
+// Error handling untuk process
+process.on('SIGTERM', () => {
+  console.log('Received SIGTERM, shutting down gracefully');
+  server.close(() => {
+    console.log('Process terminated');
+    process.exit(0);
+  });
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+const server = app.listen(PORT, '0.0.0.0', () => {
+ console.log(`Backend server running on http://0.0.0.0:${PORT}`);
 });
