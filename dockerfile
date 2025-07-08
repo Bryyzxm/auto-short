@@ -15,14 +15,14 @@ RUN pip3 install yt-dlp
 # Create app directory
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
+# Copy package files from api directory
+COPY api/package*.json ./
 
 # Install dependencies
 RUN npm ci --only=production
 
-# Copy app source
-COPY . .
+# Copy app source from api directory
+COPY api/ .
 
 # Create outputs directory
 RUN mkdir -p outputs
