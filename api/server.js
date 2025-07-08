@@ -41,85 +41,121 @@ function secondsToHMS(sec) {
 // Fetch subtitles via official TimedText API (XML or VTT). Returns [] if none.
 async function fetchTimedTextSegments(videoId, langOrder = ["id", "en"]) {
   try {
-    const listRes = await fetch(
-      `https://video.google.com/timedtext?type=list&v=${videoId}`
-    );
-    if (!listRes.ok) throw new Error("list fetch failed");
-    const listXml = await listRes.text();
-    const trackRegex = /<track\s+([^>]+)\/>/g;
-    const tracks = [];
-    let m;
-    while ((m = trackRegex.exec(listXml)) !== null) {
-      const attrStr = m[1];
-      const attrs = {};
-      attrStr.replace(/(\w+)="([^"]*)"/g, (_, k, v) => {
-        attrs[k] = v;
-      });
-      tracks.push(attrs);
+    let tracks = [];
+    try {
+      const listRes = await fetch(
+        `https://video.google.com/timedtext?type=list&v=${videoId}`
+      );
+      if (listRes.ok) {
+        const listXml = await listRes.text();
+        const trackRegex = /<track\s+([^>]+)\/>/g;
+        let m;
+        while ((m = trackRegex.exec(listXml)) !== null) {
+          const attrStr = m[1];
+          const attrs = {};
+          attrStr.replace(/(\w+)="([^"]*)"/g, (_, k, v) => {
+            attrs[k] = v;
+          });
+          tracks.push(attrs);
+        }
+      }
+    } catch {}
+
+    // If no tracks detected, create pseudo-tracks from langOrder so we still attempt direct fetch
+    if (tracks.length === 0) {
+      tracks = langOrder.map((l) => ({ lang_code: l, kind: "asr" }));
     }
-    // prioritize langOrder
+
     const orderedTracks = langOrder
       .flatMap((lang) => tracks.filter((t) => t.lang_code?.startsWith(lang)))
-      .concat(tracks); // fallback others
+      .concat(tracks);
 
     for (const t of orderedTracks) {
-      if (t.kind !== "asr" && t.kind) continue; // prefer auto captions
       const lang = t.lang_code;
+      const isAsr = t.kind === undefined || t.kind === "asr";
       const name = t.name ? `&name=${encodeURIComponent(t.name)}` : "";
-      // Try VTT first
-      const vttUrl = `https://video.google.com/timedtext?lang=${lang}&v=${videoId}&kind=asr${name}&fmt=vtt`;
-      const vttRes = await fetch(vttUrl);
-      if (vttRes.ok) {
-        const vtt = await vttRes.text();
-        if (vtt && vtt.includes("-->")) {
-          const cleaned = vtt
-            .replace(/WEBVTT[^\n]*\n/gi, "")
-            .replace(/NOTE[^\n]*\n/gi, "")
-            .replace(/<\d{2}:\d{2}:\d{2}\.\d{3}>/g, "")
-            .replace(/<c>|<\/c>/g, "")
-            .replace(/align:[^\n]+/g, "")
-            .replace(/position:[^\n]+/g, "")
-            .replace(/\n{2,}/g, "\n");
 
-          const regex = /(\d{2}:\d{2}:\d{2}\.\d{3}) --> (\d{2}:\d{2}:\d{2}\.\d{3})\s+([\s\S]*?)(?=\n\d|$)/g;
-          const segments = [];
-          let match;
-          while ((match = regex.exec(cleaned)) !== null) {
-            const text = match[3]
-              .replace(/\n/g, " ")
-              .replace(/\s+/g, " ")
-              .trim();
-            if (text) segments.push({ start: match[1], end: match[2], text });
+      // Build candidate URL list: prefer asr VTT, then manual VTT, then XML
+      const urlVariants = [];
+      if (isAsr)
+        urlVariants.push(
+          `https://video.google.com/timedtext?lang=${lang}&v=${videoId}&kind=asr${name}&fmt=vtt`
+        );
+      urlVariants.push(
+        `https://video.google.com/timedtext?lang=${lang}&v=${videoId}${
+          isAsr ? "&kind=asr" : ""
+        }${name}&fmt=vtt`
+      );
+      if (isAsr)
+        urlVariants.push(
+          `https://video.google.com/timedtext?lang=${lang}&v=${videoId}&kind=asr${name}`
+        );
+      urlVariants.push(
+        `https://video.google.com/timedtext?lang=${lang}&v=${videoId}${
+          isAsr ? "&kind=asr" : ""
+        }${name}`
+      );
+
+      for (const captionUrl of urlVariants) {
+        try {
+          const res = await fetch(captionUrl);
+          if (!res.ok) continue;
+
+          const bodyText = await res.text();
+          if (!bodyText || bodyText.trim().length === 0) continue;
+
+          // If VTT (contains "-->") parse with regex method
+          if (bodyText.includes("-->")) {
+            const cleaned = bodyText
+              .replace(/WEBVTT[^\n]*\n/gi, "")
+              .replace(/NOTE[^\n]*\n/gi, "")
+              .replace(/<\d{2}:\d{2}:\d{2}\.\d{3}>/g, "")
+              .replace(/<c>|<\/c>/g, "")
+              .replace(/align:[^\n]+/g, "")
+              .replace(/position:[^\n]+/g, "")
+              .replace(/\n{2,}/g, "\n");
+
+            const regex =
+              /(\d{2}:\d{2}:\d{2}\.\d{3}) --> (\d{2}:\d{2}:\d{2}\.\d{3})\s+([\s\S]*?)(?=\n\d|$)/g;
+            const segments = [];
+            let match;
+            while ((match = regex.exec(cleaned)) !== null) {
+              const text = match[3]
+                .replace(/\n/g, " ")
+                .replace(/\s+/g, " ")
+                .trim();
+              if (text) segments.push({ start: match[1], end: match[2], text });
+            }
+            if (segments.length) return segments;
+          } else if (bodyText.includes("<text")) {
+            // XML
+            const textRegex =
+              /<text start="([0-9.]+)" dur="([0-9.]+)">([\s\S]*?)<\/text>/g;
+            const segments = [];
+            let mm;
+            while ((mm = textRegex.exec(bodyText)) !== null) {
+              const startSec = parseFloat(mm[1]);
+              const dur = parseFloat(mm[2]);
+              const endSec = startSec + dur;
+              const text = mm[3]
+                .replace(/&amp;/g, "&")
+                .replace(/&#39;/g, "'")
+                .replace(/&quot;/g, '"')
+                .replace(/&lt;/g, "<")
+                .replace(/&gt;/g, ">")
+                .replace(/\s+/g, " ")
+                .trim();
+              if (text)
+                segments.push({
+                  start: secondsToHMS(startSec),
+                  end: secondsToHMS(endSec),
+                  text,
+                });
+            }
+            if (segments.length) return segments;
           }
-          if (segments.length) return segments;
-        }
+        } catch {}
       }
-      // If VTT not available, fetch XML and parse
-      const xmlUrl = `https://video.google.com/timedtext?lang=${lang}&v=${videoId}&kind=asr${name}`;
-      const xmlRes = await fetch(xmlUrl);
-      if (!xmlRes.ok) continue;
-      const xml = await xmlRes.text();
-      if (!xml.includes("<text")) continue;
-      const textRegex = /<text start="([0-9.]+)" dur="([0-9.]+)">([\s\S]*?)<\/text>/g;
-      const segments = [];
-      let mm;
-      while ((mm = textRegex.exec(xml)) !== null) {
-        const startSec = parseFloat(mm[1]);
-        const dur = parseFloat(mm[2]);
-        const endSec = startSec + dur;
-        const text = mm[3]
-          .replace(/&amp;/g, "&")
-          .replace(/&#39;/g, "'")
-          .replace(/&quot;/g, '"')
-          .replace(/&lt;/g, "<")
-          .replace(/&gt;/g, ">")
-          .replace(/\s+/g, " ")
-          .trim();
-        if (text) {
-          segments.push({ start: secondsToHMS(startSec), end: secondsToHMS(endSec), text });
-        }
-      }
-      if (segments.length) return segments;
     }
   } catch (err) {
     console.warn("TimedText fetch failed", err.message);
