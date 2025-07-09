@@ -1735,6 +1735,21 @@ function parseYouTubeDuration(duration) {
   return hours * 3600 + minutes * 60 + seconds;
 }
 
+// Debug endpoint untuk memeriksa konfigurasi
+app.get("/api/debug-config", (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  const config = {
+    hasYouTubeApiKey: !!process.env.YOUTUBE_API_KEY,
+    apiKeyLength: process.env.YOUTUBE_API_KEY ? process.env.YOUTUBE_API_KEY.length : 0,
+    apiKeyPrefix: process.env.YOUTUBE_API_KEY ? process.env.YOUTUBE_API_KEY.substring(0, 10) + '...' : 'Not set',
+    hasYouTubeCookies: !!process.env.YOUTUBE_COOKIES,
+    hasProxyList: !!process.env.PROXY_LIST,
+    nodeEnv: process.env.NODE_ENV || 'development',
+    timestamp: new Date().toISOString()
+  };
+  res.json(config);
+});
+
 // Handler 404 (Not Found) - harus di bawah semua route
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
