@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "start": "node api/server.js",
+    "start": "bash ./scripts/setup.sh && node api/server.js",
     "postinstall": "bash ./scripts/setup.sh"
   },
   "dependencies": {
