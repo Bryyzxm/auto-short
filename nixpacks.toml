@@ -1,16 +1,36 @@
+# Railway Nixpacks Configuration
+# Note: If this doesn't work, use Dockerfile instead
+
 [phases.setup]
-aptPkgs = ["python3", "python3-pip", "ffmpeg", "curl", "yt-dlp"]
+nixPkgs = ["nodejs_22", "npm-9_x", "python3", "python3Packages.pip", "ffmpeg", "gcc", "gnumake", "cmake", "curl", "git"]
 
 [phases.install]
 cmds = [
-    "unset NODE_ENV && npm ci", # install all deps incl dev (vite)
-    "npm run build",           # generate dist
-    "cd api && npm ci --only=production" # backend minimal deps
+  "npm ci",
+  "pip3 install yt-dlp"
 ]
 
-[start]
-# Start only backend on runtime; front-end is already static in /dist. Serve via Caddy.
-cmd = "cd api && npm start"
+[phases.build]
+cmds = [
+  # Clone and build whisper.cpp
+  "mkdir -p /app/bin /app/models",
+  "git clone --depth 1 https://github.com/ggerganov/whisper.cpp.git /tmp/whisper.cpp",
+  "cd /tmp/whisper.cpp && make -j $(nproc)",
+  "cp /tmp/whisper.cpp/main /app/bin/main",
+  "ln -sf /app/bin/main /app/bin/whisper",
+  "echo 'Downloading whisper model...'",
+  "curl -L https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin -o /app/models/ggml-tiny.bin",
+  "cp /app/models/ggml-tiny.bin /app/bin/ggml-tiny.bin",
+  "echo 'Setting up PATH...'",
+  "chmod +x /app/bin/main /app/bin/whisper",
+  "echo 'export PATH=/app/bin:$PATH' >> ~/.bashrc",
+  "echo 'Verifying installations...'",
+  "python3 -m pip show yt-dlp || echo 'yt-dlp pip package not found'",
+  "which yt-dlp || echo 'yt-dlp command not found'",
+  "ls -la /app/bin/ || echo 'bin directory not found'",
+  "/app/bin/main --help || echo 'whisper main binary test failed'",
+  "ls -la /app/models/ggml-tiny.bin || echo 'whisper model not found'"
+]
 
-[variables]
-NODE_ENV = "production"
+[phases.start]
+cmd = "npm start"
