@@ -258,9 +258,10 @@ async function fetchLemnosLifeTranscript(videoId) {
 
 // Download audio for whisper fallback
 async function downloadAudio(videoId) {
-  // Audio download via yt-dlp has been disabled - this function is deprecated
-  console.log('❌ Audio download disabled - yt-dlp dependency removed');
-  return null;
+  if (!YT_DLP_PATH) {
+    console.log('❌ yt-dlp not found, skipping audio download');
+    return null;
+  }
   
   try {
     const audioPath = path.join(process.cwd(), `temp_${videoId}.m4a`);
@@ -290,23 +291,56 @@ async function getTranscriptSegments(videoId, refresh = false) {
   // Update transcript stats
   transcriptStats.totalRequests++;
   
-  // Method 1: Try TimedText API first (fastest) - unless refresh is requested
+  // Method 1: Try yt-dlp first (most reliable and prioritized as PRIMARY method)
+  if (YT_DLP_PATH) {
+    console.log('🎯 Trying yt-dlp subtitle extraction (PRIMARY METHOD - most reliable)...');
+    const ytdlpSegments = await retryWithBackoff(
+      () => fetchYtDlpTranscript(videoId),
+      5, // Increased retries for yt-dlp as primary method
+      1500 // Reduced delay for faster response
+    );
+    if (ytdlpSegments && ytdlpSegments.length > 0) {
+      transcriptStats.successfulRequests++;
+      transcriptStats.ytdlp.success++;
+      console.log(`✅ yt-dlp PRIMARY SUCCESS: ${ytdlpSegments.length} segments`);
+      return cleanSegments(ytdlpSegments);
+    }
+    console.log('⚠️ yt-dlp primary method failed, trying with enhanced options...');
+    
+    // Enhanced yt-dlp attempt with more aggressive options
+    const enhancedYtdlpSegments = await retryWithBackoff(
+      () => fetchYtDlpTranscriptEnhanced(videoId),
+      3,
+      2000
+    );
+    if (enhancedYtdlpSegments && enhancedYtdlpSegments.length > 0) {
+      transcriptStats.successfulRequests++;
+      transcriptStats.ytdlp.success++;
+      console.log(`✅ yt-dlp ENHANCED SUCCESS: ${enhancedYtdlpSegments.length} segments`);
+      return cleanSegments(enhancedYtdlpSegments);
+    }
+    console.log('⚠️ yt-dlp enhanced method also failed');
+  } else {
+    console.log('❌ yt-dlp not available - this is critical as it\'s the primary method!');
+  }
+  
+  // Method 2: Try TimedText API as secondary fallback (reduced priority)
   if (!refresh) {
-    console.log('🎯 Trying enhanced TimedText API...');
+    console.log('🔄 Trying TimedText API as secondary fallback...');
     const timedTextSegments = await retryWithBackoff(
       () => fetchTimedTextSegments(videoId),
-      3,
-      1000
+      2, // Reduced retries since yt-dlp is primary
+      2000 // Increased delay to prioritize yt-dlp
     );
     if (timedTextSegments && timedTextSegments.length > 0) {
       transcriptStats.successfulRequests++;
-      console.log(`✅ TimedText API success: ${timedTextSegments.length} segments`);
+      console.log(`✅ TimedText API fallback success: ${timedTextSegments.length} segments`);
       return cleanSegments(timedTextSegments);
     }
-    console.log('⚠️ TimedText API failed or returned empty');
+    console.log('⚠️ TimedText API fallback failed or returned empty');
   }
   
-  // Method 2: Fallback to LemnosLife API with retry
+  // Method 3: Fallback to LemnosLife API with retry
   console.log('🔄 Trying LemnosLife API with retry...');
   const lemnosSegments = await retryWithBackoff(
     () => fetchLemnosLifeTranscript(videoId),
@@ -320,7 +354,7 @@ async function getTranscriptSegments(videoId, refresh = false) {
   }
   console.log('⚠️ LemnosLife API failed or returned empty');
   
-  // Method 3: Try YouTube Data API v3 as additional fallback
+  // Method 4: Try YouTube Data API v3 as additional fallback
   console.log('🔄 Trying YouTube Data API v3...');
   const youtubeApiSegments = await retryWithBackoff(
     () => fetchYouTubeDataAPI(videoId),
@@ -334,15 +368,228 @@ async function getTranscriptSegments(videoId, refresh = false) {
   }
   console.log('⚠️ YouTube Data API failed or returned empty');
   
-  console.log('❌ All transcript methods failed - no yt-dlp dependency');
-  transcriptStats.errors.push({ videoId, error: 'All API methods failed', timestamp: new Date() });
+  // Method 5: Final fallback - yt-dlp + whisper.cpp for audio transcription
+  if (YT_DLP_PATH && WHISPER_PATH) {
+    console.log('🔄 Trying yt-dlp + whisper.cpp fallback...');
+    try {
+      transcriptStats.ytdlp.total++;
+      transcriptStats.whisper.total++;
+      
+      const audioPath = await downloadAudio(videoId);
+      if (audioPath) {
+        const whisperSegments = await runWhisperCpp(audioPath);
+        if (whisperSegments && whisperSegments.length > 0) {
+          transcriptStats.successfulRequests++;
+          transcriptStats.ytdlp.success++;
+          transcriptStats.whisper.success++;
+          console.log(`✅ yt-dlp + whisper.cpp success: ${whisperSegments.length} segments`);
+          
+          // Clean up audio file
+          try {
+            fs.unlinkSync(audioPath);
+          } catch (e) {
+            console.warn(`⚠️ Failed to clean up audio file: ${e.message}`);
+          }
+          
+          return cleanSegments(whisperSegments);
+        }
+      }
+    } catch (error) {
+      console.warn(`⚠️ yt-dlp + whisper.cpp fallback failed: ${error.message}`);
+    }
+  }
+  
+  console.log('❌ All transcript methods failed');
+  transcriptStats.errors.push({ videoId, error: 'All methods failed', timestamp: new Date() });
   return [];
 }
+// Enhanced yt-dlp transcript extraction function
+async function fetchYtDlpTranscript(videoId) {
+  if (!YT_DLP_PATH) {
+    throw new Error('yt-dlp not found');
+  }
+
+  try {
+    transcriptStats.ytdlp.total++;
+    console.log(`🔍 Trying yt-dlp subtitle extraction for videoId: ${videoId}`);
+    
+    const ytUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    
+    // Try to get subtitles with multiple language preferences
+    const subtitleArgs = [
+      ytUrl,
+      '--write-auto-subs',
+      '--write-subs',
+      '--sub-langs', 'id,en,en-US,en-GB,auto',
+      '--sub-format', 'vtt',
+      '--skip-download',
+      '--output', `temp_${videoId}.%(ext)s`,
+      '--no-warnings'
+    ];
+    
+    console.log(`🔧 Running yt-dlp subtitle extraction...`);
+    const stdout = await runYtDlp(subtitleArgs, { timeout: 90000 });
+    
+    // Look for generated subtitle files
+    const possibleFiles = [
+      `temp_${videoId}.id.vtt`,
+      `temp_${videoId}.en.vtt`,
+      `temp_${videoId}.en-US.vtt`,
+      `temp_${videoId}.en-GB.vtt`
+    ];
+    
+    let subtitleContent = null;
+    let usedFile = null;
+    
+    for (const file of possibleFiles) {
+      if (fs.existsSync(file)) {
+        console.log(`✅ Found subtitle file: ${file}`);
+        subtitleContent = fs.readFileSync(file, 'utf-8');
+        usedFile = file;
+        break;
+      }
+    }
+    
+    // Clean up subtitle files
+    for (const file of possibleFiles) {
+      try {
+        if (fs.existsSync(file)) {
+          fs.unlinkSync(file);
+        }
+      } catch (e) {
+        console.warn(`⚠️ Failed to clean up subtitle file ${file}: ${e.message}`);
+      }
+    }
+    
+    if (!subtitleContent) {
+      console.log('❌ No subtitle files found after yt-dlp extraction');
+      return null;
+    }
+    
+    console.log(`✅ Successfully extracted subtitles from ${usedFile}`);
+    
+    // Parse VTT content
+    const segments = parseVTT(subtitleContent);
+    
+    if (segments.length > 0) {
+      console.log(`✅ yt-dlp extracted ${segments.length} subtitle segments`);
+      return segments;
+    } else {
+      console.log('❌ No segments found in subtitle content');
+      return null;
+    }
+    
+  } catch (error) {
+    console.error(`❌ yt-dlp subtitle extraction failed: ${error.message}`);
+    return null;
+  }
+}
+
+// Enhanced yt-dlp transcript extraction with more aggressive options
+async function fetchYtDlpTranscriptEnhanced(videoId) {
+  if (!YT_DLP_PATH) {
+    throw new Error('yt-dlp not found');
+  }
+
+  try {
+    console.log(`🔍 Trying ENHANCED yt-dlp subtitle extraction for videoId: ${videoId}`);
+    
+    const ytUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    
+    // More aggressive subtitle extraction with all possible options
+    const enhancedSubtitleArgs = [
+      ytUrl,
+      '--write-auto-subs',
+      '--write-subs',
+      '--all-subs', // Download all available subtitles
+      '--sub-langs', 'all', // Try all available languages
+      '--sub-format', 'vtt/srt/best',
+      '--skip-download',
+      '--output', `enhanced_${videoId}.%(ext)s`,
+      '--no-warnings',
+      '--ignore-errors',
+      '--force-overwrites'
+    ];
+    
+    console.log(`🔧 Running ENHANCED yt-dlp subtitle extraction with aggressive options...`);
+    const stdout = await runYtDlp(enhancedSubtitleArgs, { timeout: 120000 });
+    
+    // Look for any generated subtitle files with broader search
+    const files = fs.readdirSync('.').filter(file => 
+      file.startsWith(`enhanced_${videoId}.`) && 
+      (file.endsWith('.vtt') || file.endsWith('.srt'))
+    );
+    
+    let subtitleContent = null;
+    let usedFile = null;
+    
+    // Prioritize files by language preference
+    const languagePriority = ['id', 'en', 'en-US', 'en-GB'];
+    
+    for (const lang of languagePriority) {
+      const preferredFile = files.find(file => file.includes(`.${lang}.`));
+      if (preferredFile) {
+        console.log(`✅ Found preferred subtitle file: ${preferredFile}`);
+        subtitleContent = fs.readFileSync(preferredFile, 'utf-8');
+        usedFile = preferredFile;
+        break;
+      }
+    }
+    
+    // If no preferred language found, use any available file
+    if (!subtitleContent && files.length > 0) {
+      usedFile = files[0];
+      console.log(`✅ Found subtitle file: ${usedFile}`);
+      subtitleContent = fs.readFileSync(usedFile, 'utf-8');
+    }
+    
+    // Clean up all subtitle files
+    for (const file of files) {
+      try {
+        fs.unlinkSync(file);
+      } catch (e) {
+        console.warn(`⚠️ Failed to clean up subtitle file ${file}: ${e.message}`);
+      }
+    }
+    
+    if (!subtitleContent) {
+      console.log('❌ No subtitle files found after enhanced yt-dlp extraction');
+      return null;
+    }
+    
+    console.log(`✅ Successfully extracted subtitles from ${usedFile} using enhanced method`);
+    
+    // Parse content (support both VTT and SRT)
+    let segments;
+    if (usedFile.endsWith('.vtt')) {
+      segments = parseVTT(subtitleContent);
+    } else if (usedFile.endsWith('.srt')) {
+      segments = parseCaptionText(subtitleContent);
+    } else {
+      // Try both parsers
+      segments = parseVTT(subtitleContent);
+      if (segments.length === 0) {
+        segments = parseCaptionText(subtitleContent);
+      }
+    }
+    
+    if (segments.length > 0) {
+      console.log(`✅ Enhanced yt-dlp extracted ${segments.length} subtitle segments`);
+      return segments;
+    } else {
+      console.log('❌ No segments found in enhanced subtitle content');
+      return null;
+    }
+    
+  } catch (error) {
+    console.error(`❌ Enhanced yt-dlp subtitle extraction failed: ${error.message}`);
+    return null;
+  }
+}
+
 // Helper function to run yt-dlp and return a Promise with enhanced features
 function runYtDlp(args, options = {}) {
   return new Promise((resolve, reject) => {
-    // yt-dlp dependency has been removed - this function is deprecated
-    return reject(new Error("yt-dlp dependency has been removed. Use API-based methods instead."));
     
     if (!YT_DLP_PATH) {
       return reject(new Error("yt-dlp not found. Please check installation."));
@@ -383,9 +630,12 @@ function runYtDlp(args, options = {}) {
       console.log(`🍪 Using cookies: ${cookieArgs.join(' ')}`);
     }
 
+    const execArgs = USE_PYTHON_YT_DLP ? ["-m", "yt_dlp", ...finalArgs] : finalArgs;
+    const execPath = USE_PYTHON_YT_DLP ? "python" : YT_DLP_PATH;
+    
     execFile(
-      YT_DLP_PATH,
-      finalArgs,
+      execPath,
+      execArgs,
       { 
         timeout: options.timeout || 300000,
         maxBuffer: 1024 * 1024 * 10 // 10MB buffer
@@ -863,13 +1113,20 @@ const YT_DLP_PATHS = [
 ];
 
 let YT_DLP_PATH = null;
+let USE_PYTHON_YT_DLP = false;
+
+// Enhanced yt-dlp detection with priority for reliability
 try {
+  console.log('🔍 Detecting yt-dlp installation (PRIMARY TRANSCRIPT METHOD)...');
+  
   // First try to use yt-dlp from PATH (most reliable in Docker)
   try {
     execFileSync("which", ["yt-dlp"], { stdio: "ignore" });
     YT_DLP_PATH = "yt-dlp";
-    console.log(`✅ yt-dlp found in PATH`);
+    console.log(`✅ yt-dlp found in PATH - EXCELLENT!`);
   } catch {
+    console.log('⚠️ yt-dlp not in PATH, checking specific locations...');
+    
     // If not in PATH, try specific locations
     for (const path of YT_DLP_PATHS) {
       if (fs.existsSync(path) || binaryExists(path.split('/').pop())) {
@@ -878,19 +1135,64 @@ try {
         break;
       }
     }
+    
+    // If still not found, try python -m yt_dlp (fallback)
     if (!YT_DLP_PATH) {
-      console.log(`❌ yt-dlp NOT found in any of these locations: ${YT_DLP_PATHS.join(", ")}`);
-      console.log(`❌ yt-dlp also not found in PATH`);
+      console.log('⚠️ Binary yt-dlp not found, trying Python module...');
+      try {
+        execFileSync("python", ["-m", "yt_dlp", "--version"], { stdio: "ignore" });
+        YT_DLP_PATH = "python";
+        USE_PYTHON_YT_DLP = true;
+        console.log(`✅ yt-dlp found via python -m yt_dlp`);
+      } catch {
+        // Try python3 as well
+        try {
+          execFileSync("python3", ["-m", "yt_dlp", "--version"], { stdio: "ignore" });
+          YT_DLP_PATH = "python3";
+          USE_PYTHON_YT_DLP = true;
+          console.log(`✅ yt-dlp found via python3 -m yt_dlp`);
+        } catch {
+          console.log(`❌ CRITICAL: yt-dlp NOT found in any location!`);
+          console.log(`❌ Checked locations: ${YT_DLP_PATHS.join(", ")}`);
+          console.log(`❌ Also checked: PATH, python -m yt_dlp, python3 -m yt_dlp`);
+          console.log(`❌ This will severely impact transcript extraction capability!`);
+        }
+      }
     }
   }
+  
+  // Test yt-dlp functionality if found
+  if (YT_DLP_PATH) {
+    try {
+      const testCmd = USE_PYTHON_YT_DLP ? [YT_DLP_PATH, "-m", "yt_dlp", "--version"] : [YT_DLP_PATH, "--version"];
+      const result = execFileSync(testCmd[0], testCmd.slice(1), { encoding: 'utf8', timeout: 10000 });
+      console.log(`✅ yt-dlp version test successful: ${result.trim().split('\n')[0]}`);
+    } catch (testErr) {
+      console.log(`⚠️ yt-dlp found but version test failed: ${testErr.message}`);
+    }
+  }
+  
 } catch (err) {
-  console.log(`❌ Error checking yt-dlp: ${err.message}`);
+  console.log(`❌ Error during yt-dlp detection: ${err.message}`);
 }
 
-// Debug: log path yang digunakan
+// Debug: log configuration yang digunakan
 console.log(`🔧 Environment: ${isProduction ? "production" : "development"}`);
 console.log(`🔧 YT_DLP_PATH: ${YT_DLP_PATH}`);
+console.log(`🔧 USE_PYTHON_YT_DLP: ${USE_PYTHON_YT_DLP}`);
 console.log(`🔧 FFMPEG_PATH: ${FFMPEG_PATH}`);
+
+// yt-dlp configuration status
+if (YT_DLP_PATH) {
+  console.log(`🎯 yt-dlp is ACTIVE as PRIMARY transcript method`);
+  console.log(`🎯 Enhanced yt-dlp options enabled for maximum success rate`);
+  if (process.env.YOUTUBE_COOKIES) {
+    console.log(`🍪 YouTube cookies configured for enhanced access`);
+  }
+} else {
+  console.log(`❌ WARNING: yt-dlp not available - transcript quality will be significantly reduced!`);
+  console.log(`❌ Please install yt-dlp for optimal transcript extraction`);
+}
 
 // Check if whisper.cpp exists (multiple possible locations)
 const WHISPER_PATHS = [
