@@ -31,3 +31,7 @@ logs*
 
 # Ignore BFG Repo-Cleaner jar file
 bfg*.jar
+
+# Ignore setup script generated directories
+bin/
+models/

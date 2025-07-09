@@ -25,6 +25,11 @@ jobs:
           node-version: '18' # Sesuaikan dengan versi Node.js yang Anda gunakan
           cache: 'npm'
 
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential curl
+
       - name: Install dependencies
         run: npm install
 

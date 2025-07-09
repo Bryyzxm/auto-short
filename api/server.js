@@ -509,9 +509,9 @@ function runWhisperCpp(audioPath) {
 
     // Try multiple model paths
     const MODEL_PATHS = [
+      "./models/ggml-tiny.bin",
       "/app/models/ggml-tiny.bin",
       "/app/bin/ggml-tiny.bin",
-      "./models/ggml-tiny.bin",
       "ggml-tiny.bin"
     ];
 
@@ -831,6 +831,7 @@ function binaryExists(cmd) {
 
 // Check for yt-dlp in multiple possible locations
 const YT_DLP_PATHS = [
+  "./bin/yt-dlp",
   "/usr/local/bin/yt-dlp",
   "/usr/bin/yt-dlp",
   "yt-dlp",
@@ -869,6 +870,7 @@ console.log(`🔧 FFMPEG_PATH: ${FFMPEG_PATH}`);
 
 // Check if whisper.cpp exists (multiple possible locations)
 const WHISPER_PATHS = [
+  "./bin/whisper",
   "/app/bin/main",
   "/app/bin/whisper",
   "/app/whisper.cpp/main",
