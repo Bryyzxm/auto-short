@@ -18,10 +18,13 @@ fi
 
 ########## Build whisper.cpp ##########
 if [ ! -f ./bin/whisper ]; then
-  echo "🔧 Cloning whisper.cpp and building main binary ..."
+  echo "🔧 Cloning whisper.cpp and building with CMake ..."
   git clone --depth 1 https://github.com/ggerganov/whisper.cpp /tmp/whisper.cpp
-  cd /tmp/whisper.cpp && make -j$(nproc) main
-  cp /tmp/whisper.cpp/main ./bin/whisper
+  cd /tmp/whisper.cpp
+  cmake -B build -DCMAKE_BUILD_TYPE=Release
+  cmake --build build -j$(nproc) --config Release
+  # Copy the whisper-cli binary (the main executable)
+  cp build/bin/whisper-cli ../../../bin/whisper
   echo "✅ whisper.cpp built and copied to ./bin/whisper"
 else
   echo "✅ whisper.cpp binary already exists"
