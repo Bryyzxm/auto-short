@@ -239,21 +239,18 @@ try {
 // Deteksi path binary berdasarkan environment
 const isProduction = process.env.NODE_ENV === "production";
 
-// Helper: temukan binary di PATH jika tersedia
-function findBinary(cmd) {
-  try {
-    const out = execFileSync("which", [cmd], { encoding: "utf-8" }).trim();
-    if (out) return out;
-  } catch {}
-  return null;
-}
+// Gunakan nama binary saja; execFile akan mencari di PATH
+const YT_DLP_PATH = "yt-dlp";
+const FFMPEG_PATH = "ffmpeg";
 
-// Cari lokasi yt-dlp & ffmpeg secara dinamis; fallback ke path hard-coded lama
-const YT_DLP_PATH =
-  findBinary("yt-dlp") ||
-  (isProduction ? "/usr/bin/yt-dlp" : "/usr/local/bin/yt-dlp");
-const FFMPEG_PATH =
-  findBinary("ffmpeg") || (isProduction ? "ffmpeg" : "/usr/local/bin/ffmpeg");
+function binaryExists(cmd) {
+  try {
+    execFileSync("which", [cmd], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 // Debug: log path yang digunakan
 console.log(`🔧 Environment: ${isProduction ? "production" : "development"}`);
@@ -262,7 +259,7 @@ console.log(`🔧 FFMPEG_PATH: ${FFMPEG_PATH}`);
 
 // Check if yt-dlp exists
 try {
-  if (fs.existsSync(YT_DLP_PATH)) {
+  if (binaryExists(YT_DLP_PATH)) {
     console.log(`✅ yt-dlp found at: ${YT_DLP_PATH}`);
   } else {
     console.log(`❌ yt-dlp NOT found at: ${YT_DLP_PATH}`);

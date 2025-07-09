@@ -7,3 +7,11 @@ cmds = [
   "cd /app/whisper.cpp && make -j $(nproc)"
 ]
 dependsOn = ["install"] 
+
+[phases.build]
+cmds = [
+  "...",
+  "git clone --depth 1 https://github.com/ggerganov/whisper.cpp.git /app/whisper.cpp",
+  "cd /app/whisper.cpp && make -j $(nproc)",
+  "ln -s $(command -v yt-dlp) /usr/bin/yt-dlp || true"
+] 
