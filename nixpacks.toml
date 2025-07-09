@@ -11,11 +11,15 @@ cmds = [
 # build whisper.cpp & download model
 [phases.build]
 cmds = [
+  # clone & compile whisper.cpp (hanya target main agar cepat)
   "git clone --depth 1 https://github.com/ggerganov/whisper.cpp",
-  "cd whisper.cpp && make -j$(nproc) main", # compile hanya target utama agar bebas dari dependen cmake
+  "cd whisper.cpp && make -j$(nproc) main",
+
+  # download model tiny (digunakan Whisper fallback)
   "mkdir -p /app/models",
   "curl -L -o /app/models/ggml-tiny.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
-  # download yt-dlp binary statik ke /usr/bin
+
+  # download yt-dlp binary statik ke /usr/bin agar path sesuai server.js
   "curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/bin/yt-dlp",
   "chmod +x /usr/bin/yt-dlp"
 ]
