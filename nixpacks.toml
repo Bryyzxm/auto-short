@@ -1,17 +1,22 @@
 [phases.setup]
-nixPkgs = ["...", "yt-dlp", "ffmpeg", "gcc", "gnumake", "cmake", "curl", "git", "python3"]
+nixPkgs = ["nodejs_22", "npm-9_x", "yt-dlp", "ffmpeg", "gcc", "gnumake", "cmake", "curl", "git", "python3"]
 
-[phases.whisper]
-cmds = [
-  "git clone --depth 1 https://github.com/ggerganov/whisper.cpp.git /app/whisper.cpp",
-  "cd /app/whisper.cpp && make -j $(nproc)"
-]
-dependsOn = ["install"] 
+[phases.install]
+cmds = ["npm ci"]
 
 [phases.build]
 cmds = [
-  "...",
+  "echo 'Building whisper.cpp...'",
   "git clone --depth 1 https://github.com/ggerganov/whisper.cpp.git /app/whisper.cpp",
   "cd /app/whisper.cpp && make -j $(nproc)",
-  "ln -s $(command -v yt-dlp) /usr/bin/yt-dlp || true"
-] 
+  "echo 'Downloading whisper model...'",
+  "mkdir -p /app/models",
+  "curl -L https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin -o /app/models/ggml-tiny.bin",
+  "echo 'Verifying installations...'",
+  "which yt-dlp || echo 'yt-dlp not found'",
+  "ls -la /app/whisper.cpp/main || echo 'whisper.cpp not found'",
+  "ls -la /app/models/ggml-tiny.bin || echo 'whisper model not found'"
+]
+
+[phases.start]
+cmd = "npm start"
