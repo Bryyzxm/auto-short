@@ -1,13 +1,15 @@
 {
   "name": "ai-youtube-to-shorts-segmenter",
   "private": true,
-  "homepage": "https://bryyzxm.github.io/auto-short",
+  "homepage": "https://bryyzxm.github.io/ai-youtube-to-shorts-segmenter",
   "version": "0.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "predeploy": "npm run build",
+    "deploy": "gh-pages -d dist",
     "start": "bash ./scripts/setup.sh && node api/server.js",
     "postinstall": "bash ./scripts/setup.sh"
   },
@@ -22,6 +24,7 @@
     "@types/node": "^22.14.0",
     "@types/react": "^19.1.6",
     "@types/react-dom": "^19.1.6",
+    "gh-pages": "^6.1.1",
     "typescript": "~5.7.2",
     "vite": "^6.2.0"
   }
