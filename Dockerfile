@@ -19,7 +19,17 @@ RUN git clone https://github.com/ggerganov/whisper.cpp.git /tmp/whisper.cpp \
     && cd /tmp/whisper.cpp \
     && make \
     && mkdir -p /app/bin \
-    && cp bin/main /app/bin/main \
+    && echo "=== Debugging whisper.cpp structure ===" \
+    && ls -la \
+    && echo "=== Checking bin directory ===" \
+    && ls -la bin/ || echo "bin/ not found" \
+    && echo "=== Checking build directory ===" \
+    && ls -la build/ || echo "build/ not found" \
+    && echo "=== Checking build/bin directory ===" \
+    && ls -la build/bin/ || echo "build/bin/ not found" \
+    && echo "=== Finding main binary ===" \
+    && find . -name "main" -type f \
+    && cp $(find . -name "main" -type f | head -1) /app/bin/main \
     && ln -sf /app/bin/main /app/bin/whisper \
     && chmod +x /app/bin/main /app/bin/whisper
 
@@ -34,6 +44,9 @@ COPY api/package*.json ./
 RUN npm ci --only=production
 
 COPY api/ ./
+
+# Copy start script from root
+COPY start.sh /app/start.sh
 
 # Make start script executable
 RUN chmod +x /app/start.sh
