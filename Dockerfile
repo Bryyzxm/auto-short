@@ -35,5 +35,15 @@ RUN npm ci --only=production
 
 COPY api/ ./
 
+# Make start script executable
+RUN chmod +x /app/start.sh
+
+# Set environment variables for runtime
+ENV PATH="/app/bin:$PATH"
+ENV NODE_ENV=production
+
+# Create outputs directory
+RUN mkdir -p /app/outputs
+
 EXPOSE 8080
-CMD ["npm", "start"]
+CMD ["/app/start.sh"]

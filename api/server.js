@@ -255,10 +255,27 @@ console.log("📁 Current working directory:", process.cwd());
 console.log("🌍 Environment variables:");
 console.log("  - NODE_ENV:", process.env.NODE_ENV);
 console.log("  - PORT:", process.env.PORT);
+console.log("  - PATH:", process.env.PATH);
 console.log(
   "  - GEMINI_API_KEY:",
   process.env.GEMINI_API_KEY ? "✅ Set" : "❌ Missing"
 );
+
+// Debug: Check if directories exist
+console.log("📂 Checking critical directories:");
+const criticalDirs = ["/app/bin", "/app/models", "/usr/local/bin", "/usr/bin"];
+criticalDirs.forEach(dir => {
+  try {
+    if (fs.existsSync(dir)) {
+      const files = fs.readdirSync(dir);
+      console.log(`  - ${dir}: ✅ (${files.length} files: ${files.slice(0, 5).join(", ")}${files.length > 5 ? "..." : ""})`);
+    } else {
+      console.log(`  - ${dir}: ❌ Not found`);
+    }
+  } catch (err) {
+    console.log(`  - ${dir}: ❌ Error: ${err.message}`);
+  }
+});
 
 try {
   console.log("📦 Loading dependencies...");

@@ -65,6 +65,11 @@ README.md
 # GitHub
 .github/
 
+# Scripts (but keep start.sh)
+scripts/
+*.sh
+!start.sh
+
 # Backup files
 *.backup
 Dockerfile.backup
