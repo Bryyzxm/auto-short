@@ -1,7 +1,7 @@
 {
   "name": "ai-youtube-to-shorts-segmenter",
   "private": true,
-  "homepage": "https://bryyzxm.github.io/ai-youtube-to-shorts-segmenter",
+  "homepage": "https://bryyzxm.github.io/auto-short",
   "version": "0.0.0",
   "type": "module",
   "scripts": {
