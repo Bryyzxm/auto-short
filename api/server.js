@@ -223,7 +223,9 @@ try {
 
 // Deteksi path binary berdasarkan environment
 const isProduction = process.env.NODE_ENV === "production";
-const YT_DLP_PATH = isProduction ? "yt-dlp" : "/usr/local/bin/yt-dlp";
+// Pada image Nixpacks/Ubuntu, paket yt-dlp ter-install di /usr/bin/yt-dlp
+// Gunakan path absolut agar execFile tidak gagal ENOENT
+const YT_DLP_PATH = isProduction ? "/usr/bin/yt-dlp" : "/usr/local/bin/yt-dlp";
 const FFMPEG_PATH = isProduction ? "ffmpeg" : "/usr/local/bin/ffmpeg";
 
 // Polyfill __dirname for ES module
