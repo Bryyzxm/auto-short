@@ -839,20 +839,22 @@ const YT_DLP_PATHS = [
 
 let YT_DLP_PATH = null;
 try {
-  for (const path of YT_DLP_PATHS) {
-    if (fs.existsSync(path) || binaryExists(path.split('/').pop())) {
-      YT_DLP_PATH = path;
-      console.log(`✅ yt-dlp found at: ${path}`);
-      break;
+  // First try to use yt-dlp from PATH (most reliable in Docker)
+  try {
+    execFileSync("which", ["yt-dlp"], { stdio: "ignore" });
+    YT_DLP_PATH = "yt-dlp";
+    console.log(`✅ yt-dlp found in PATH`);
+  } catch {
+    // If not in PATH, try specific locations
+    for (const path of YT_DLP_PATHS) {
+      if (fs.existsSync(path) || binaryExists(path.split('/').pop())) {
+        YT_DLP_PATH = path;
+        console.log(`✅ yt-dlp found at: ${path}`);
+        break;
+      }
     }
-  }
-  if (!YT_DLP_PATH) {
-    console.log(`❌ yt-dlp NOT found in any of these locations: ${YT_DLP_PATHS.join(", ")}`);
-    // Try to find yt-dlp in PATH
-    if (binaryExists("yt-dlp")) {
-      YT_DLP_PATH = "yt-dlp";
-      console.log(`✅ yt-dlp found in PATH`);
-    } else {
+    if (!YT_DLP_PATH) {
+      console.log(`❌ yt-dlp NOT found in any of these locations: ${YT_DLP_PATHS.join(", ")}`);
       console.log(`❌ yt-dlp also not found in PATH`);
     }
   }
