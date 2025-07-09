@@ -14,7 +14,10 @@ cmds = [
   "git clone --depth 1 https://github.com/ggerganov/whisper.cpp",
   "cd whisper.cpp && make -j$(nproc) main", # compile hanya target utama agar bebas dari dependen cmake
   "mkdir -p /app/models",
-  "curl -L -o /app/models/ggml-tiny.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin"
+  "curl -L -o /app/models/ggml-tiny.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
+  # download yt-dlp binary statik
+  "curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp",
+  "chmod +x /usr/local/bin/yt-dlp"
 ]
 
 [start]
