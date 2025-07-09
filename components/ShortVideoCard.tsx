@@ -8,34 +8,64 @@ const API_BASE_URL = 'https://auto-short-backend-production.up.railway.app';
 
 // Helper: fetch transcript for a segment
 async function fetchTranscript(videoId: string, start: number, end: number): Promise<string> {
- // Fetch transcript via backend yt-dlp proxy
+ // Fetch transcript via backend API
  const url = `${API_BASE_URL}/api/yt-transcript?videoId=${videoId}`;
  try {
+  console.log(`🔍 [ShortVideoCard] Fetching transcript from: ${url}`);
   const res = await fetch(url);
+  console.log(`📡 [ShortVideoCard] Transcript API response status: ${res.status}`);
+  
   if (!res.ok) {
-   console.error('Gagal fetch transkrip (yt-dlp):', res.status, res.statusText, url);
-   return 'Transkrip tidak tersedia.';
+   const errorText = await res.text();
+   console.error(`❌ [ShortVideoCard] Transcript API error: ${res.status} - ${errorText}`);
+   return 'Transkrip tidak tersedia untuk segmen ini.';
   }
+  
   const data = await res.json();
+  console.log(`📊 [ShortVideoCard] Transcript API response:`, {
+   hasSegments: !!data?.segments,
+   segmentCount: data?.segments?.length || 0,
+   hasMetadata: !!data?.metadata,
+   source: data?.metadata?.source
+  });
+  
   if (!data || !data.segments || !Array.isArray(data.segments)) {
-   console.warn('Format transkrip yt-dlp tidak sesuai atau kosong:', data);
-   return 'Transkrip tidak tersedia.';
+   console.warn(`⚠️ [ShortVideoCard] Invalid transcript data structure:`, data);
+   return 'Transkrip tidak tersedia untuk segmen ini.';
   }
+  
+  if (data.segments.length === 0) {
+   console.warn(`⚠️ [ShortVideoCard] No transcript segments found`);
+   return 'Transkrip tidak tersedia untuk segmen ini.';
+  }
+  
   // VTT: start dan end dalam format "00:00:00.000"
   // Ubah ke detik untuk filter
   const toSeconds = (vtt: string) => {
-   const [h, m, s] = vtt.split(':');
+   if (!vtt || typeof vtt !== 'string') return 0;
+   const parts = vtt.split(':');
+   if (parts.length !== 3) return 0;
+   const [h, m, s] = parts;
    return parseInt(h) * 3600 + parseInt(m) * 60 + parseFloat(s.replace(',', '.'));
   };
+  
   const filtered = data.segments.filter((seg: any) => {
+   if (!seg || !seg.start || !seg.end) return false;
    const segStart = toSeconds(seg.start);
    const segEnd = toSeconds(seg.end);
    return segEnd > start && segStart < end;
   });
+  
+  console.log(`✅ [ShortVideoCard] Filtered ${filtered.length} segments for time range ${start}-${end}s`);
+  
+  if (filtered.length === 0) {
+   return 'Tidak ada transkrip untuk rentang waktu ini.';
+  }
+  
   return filtered.map((seg: any) => seg.text).join(' ');
  } catch (err) {
-  console.error('Error fetchTranscript (yt-dlp):', err, url);
-  return 'Transkrip tidak tersedia.';
+  console.error(`❌ [ShortVideoCard] Error fetching transcript:`, err);
+  return 'Transkrip tidak tersedia untuk segmen ini.';
  }
 }
 

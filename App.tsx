@@ -81,13 +81,40 @@ const App: React.FC = () => {
   const fetchFullTranscript = async (videoId: string): Promise<string> => {
     const url = `${BASE_API_URL}/api/yt-transcript?videoId=${videoId}`;
     try {
+      console.log(`🔍 Fetching transcript from: ${url}`);
       const res = await fetch(url);
-      if (!res.ok) return "";
+      console.log(`📡 Transcript API response status: ${res.status}`);
+      
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error(`❌ Transcript API error: ${res.status} - ${errorText}`);
+        return "";
+      }
+      
       const data = await res.json();
-      if (!data?.segments || !Array.isArray(data.segments)) return "";
+      console.log(`📊 Transcript API response:`, {
+        hasSegments: !!data?.segments,
+        segmentCount: data?.segments?.length || 0,
+        hasMetadata: !!data?.metadata,
+        source: data?.metadata?.source
+      });
+      
+      if (!data?.segments || !Array.isArray(data.segments)) {
+        console.warn(`⚠️ Invalid transcript data structure`);
+        return "";
+      }
+      
+      if (data.segments.length === 0) {
+        console.warn(`⚠️ No transcript segments found`);
+        return "";
+      }
+      
       const raw = data.segments.map((seg: any) => seg.text).join(" ");
-      return cleanTranscript(raw);
-    } catch {
+      const cleaned = cleanTranscript(raw);
+      console.log(`✅ Transcript processed: ${cleaned.length} characters`);
+      return cleaned;
+    } catch (error) {
+      console.error(`❌ Error fetching transcript:`, error);
       return "";
     }
   };
@@ -98,12 +125,33 @@ const App: React.FC = () => {
   ): Promise<Array<{ start: string; end: string; text: string }>> => {
     const url = `${BASE_API_URL}/api/yt-transcript?videoId=${videoId}`;
     try {
+      console.log(`🔍 Fetching subtitle segments from: ${url}`);
       const res = await fetch(url);
-      if (!res.ok) return [];
+      console.log(`📡 Subtitle segments API response status: ${res.status}`);
+      
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error(`❌ Subtitle segments API error: ${res.status} - ${errorText}`);
+        return [];
+      }
+      
       const data = await res.json();
-      if (!data?.segments || !Array.isArray(data.segments)) return [];
+      console.log(`📊 Subtitle segments API response:`, {
+        hasSegments: !!data?.segments,
+        segmentCount: data?.segments?.length || 0,
+        hasMetadata: !!data?.metadata,
+        source: data?.metadata?.source
+      });
+      
+      if (!data?.segments || !Array.isArray(data.segments)) {
+        console.warn(`⚠️ Invalid subtitle segments data structure`);
+        return [];
+      }
+      
+      console.log(`✅ Subtitle segments fetched: ${data.segments.length} segments`);
       return data.segments;
-    } catch {
+    } catch (error) {
+      console.error(`❌ Error fetching subtitle segments:`, error);
       return [];
     }
   };
@@ -195,15 +243,43 @@ const App: React.FC = () => {
       }
 
       let transcript = "";
+      let transcriptAvailable = false;
+      
       try {
+        console.log(`🔍 Fetching transcript for videoId: ${videoId}`);
         transcript = await fetchFullTranscript(videoId);
-      } catch {}
+        if (transcript && transcript.trim().length > 0) {
+          transcriptAvailable = true;
+          console.log(`✅ Transcript available, length: ${transcript.length}`);
+        } else {
+          console.log(`⚠️ Transcript is empty or null`);
+        }
+      } catch (error) {
+        console.error(`❌ Error fetching transcript:`, error);
+      }
 
-      // If transcript is not available, skip AI and use automatic segmentation
-      if (!transcript || transcript.trim().length === 0) {
+      // If transcript is not available, try to get it anyway for segmentation
+      if (!transcriptAvailable) {
+        console.log(`🔄 Transcript not available, trying to fetch segments directly...`);
+        try {
+          const subtitleSegments = await fetchSubtitleSegments(videoId);
+          if (subtitleSegments && subtitleSegments.length > 0) {
+            // Create a basic transcript from segments for AI processing
+            transcript = subtitleSegments.map(seg => seg.text).join(' ');
+            transcriptAvailable = true;
+            console.log(`✅ Created transcript from segments, length: ${transcript.length}`);
+          }
+        } catch (segmentError) {
+          console.error(`❌ Error fetching subtitle segments:`, segmentError);
+        }
+      }
+
+      // If still no transcript, use automatic segmentation
+      if (!transcriptAvailable || !transcript || transcript.trim().length === 0) {
+        console.log(`⚠️ No transcript available, using automatic segmentation`);
         const videoDuration = await getVideoDuration(videoId);
         setGeneratedShorts(generateAutoSegments(videoDuration, videoId));
-        setError("Transkrip tidak tersedia. Ditampilkan segmentasi otomatis.");
+        setError("Transkrip tidak tersedia untuk video ini. Ditampilkan segmentasi otomatis berdasarkan durasi video.");
         setIsLoading(false);
         return;
       }
@@ -377,20 +453,36 @@ const App: React.FC = () => {
 
   async function getVideoDuration(videoId: string): Promise<number> {
     let videoDuration = 0;
+    const url = `${BASE_API_URL}/api/video-meta?videoId=${videoId}`;
+    
     try {
-      const metaRes = await fetch(
-        `${BASE_API_URL}/api/video-meta?videoId=${videoId}`
-      );
+      console.log(`🔍 Fetching video duration from: ${url}`);
+      const metaRes = await fetch(url);
+      console.log(`📡 Video meta API response status: ${metaRes.status}`);
+      
       if (metaRes.ok) {
         const data = await metaRes.json();
+        console.log(`📊 Video meta API response:`, data);
+        
         if (data.duration && !isNaN(data.duration)) {
           videoDuration = data.duration;
+          console.log(`✅ Video duration found: ${videoDuration} seconds`);
+        } else {
+          console.warn(`⚠️ Invalid duration in response: ${data.duration}`);
         }
+      } else {
+        const errorText = await metaRes.text();
+        console.error(`❌ Video meta API error: ${metaRes.status} - ${errorText}`);
       }
-    } catch {}
+    } catch (error) {
+      console.error(`❌ Error fetching video duration:`, error);
+    }
+    
     if (!videoDuration || isNaN(videoDuration) || videoDuration < 30) {
+      console.log(`⚠️ Using default duration: 600 seconds`);
       videoDuration = 600;
     }
+    
     return videoDuration;
   }
 

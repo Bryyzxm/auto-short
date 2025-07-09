@@ -263,6 +263,10 @@ async function fetchLemnosLifeTranscript(videoId) {
 
 // Download audio for whisper fallback
 async function downloadAudio(videoId) {
+  // Audio download via yt-dlp has been disabled - this function is deprecated
+  console.log('❌ Audio download disabled - yt-dlp dependency removed');
+  return null;
+  
   try {
     const audioPath = path.join(process.cwd(), `temp_${videoId}.m4a`);
     const ytUrl = `https://www.youtube.com/watch?v=${videoId}`;
@@ -307,79 +311,7 @@ async function getTranscriptSegments(videoId, refresh = false) {
     console.log('⚠️ TimedText API failed or returned empty');
   }
   
-  // Method 2: Try enhanced yt-dlp with cookies and anti-detection
-  console.log('🔄 Trying enhanced yt-dlp...');
-  const maxYtDlpRetries = 3;
-  for (let attempt = 1; attempt <= maxYtDlpRetries; attempt++) {
-    try {
-      console.log(`🔄 yt-dlp attempt ${attempt}/${maxYtDlpRetries}`);
-      
-      // Validate video first
-      const validation = await validateVideoAvailability(videoId);
-      if (!validation.available) {
-        console.log(`❌ Video not available: ${validation.error}`);
-        break;
-      }
-      
-      const proxy = getNextProxy();
-      const proxyArgs = proxy ? ['--proxy', proxy] : [];
-      
-      // Try to get subtitles with yt-dlp
-      const subtitleArgs = [
-        "--write-auto-sub",
-        "--write-sub",
-        "--sub-lang", "id,en",
-        "--sub-format", "vtt",
-        "--skip-download",
-        "-o", `./temp/%(title)s.%(ext)s`,
-        ...proxyArgs,
-        `https://www.youtube.com/watch?v=${videoId}`
-      ];
-      
-      await runYtDlp(subtitleArgs, { timeout: 90000 });
-      
-      // Find and parse VTT file
-      const tempDir = './temp';
-      if (!fs.existsSync(tempDir)) {
-        fs.mkdirSync(tempDir, { recursive: true });
-      }
-      
-      const files = fs.readdirSync(tempDir);
-      const vttFile = files.find(file => file.endsWith('.vtt'));
-      
-      if (vttFile) {
-        const vttPath = path.join(tempDir, vttFile);
-        const vttContent = fs.readFileSync(vttPath, 'utf8');
-        const segments = parseVTT(vttContent);
-        
-        // Clean up
-        try {
-          fs.unlinkSync(vttPath);
-        } catch (cleanupError) {
-          console.warn(`⚠️ Failed to cleanup VTT file: ${cleanupError.message}`);
-        }
-        
-        if (segments && segments.length > 0) {
-          transcriptStats.successfulRequests++;
-          transcriptStats.ytdlp.success++;
-          console.log(`✅ yt-dlp success: ${segments.length} segments`);
-          return cleanSegments(segments);
-        }
-      }
-      
-    } catch (error) {
-      const errorType = categorizeError(error.message);
-      console.error(`❌ yt-dlp attempt ${attempt} failed (${errorType}): ${error.message}`);
-      
-      if (attempt < maxYtDlpRetries) {
-        const waitTime = Math.min(5000 * Math.pow(2, attempt - 1), 30000);
-        console.log(`⏳ Waiting ${waitTime}ms before retry...`);
-        await new Promise(resolve => setTimeout(resolve, waitTime));
-      }
-    }
-  }
-  
-  // Method 3: Fallback to LemnosLife API with retry
+  // Method 2: Fallback to LemnosLife API with retry
   console.log('🔄 Trying LemnosLife API with retry...');
   const lemnosSegments = await retryWithBackoff(
     () => fetchLemnosLifeTranscript(videoId),
@@ -393,38 +325,30 @@ async function getTranscriptSegments(videoId, refresh = false) {
   }
   console.log('⚠️ LemnosLife API failed or returned empty');
   
-  // Method 4: Final fallback to yt-dlp + whisper
-  console.log('🔄 Trying yt-dlp + whisper fallback...');
-  try {
-    const audioPath = await downloadAudio(videoId);
-    if (audioPath) {
-      const whisperSegments = await runWhisperCpp(audioPath);
-      // Clean up audio file
-      try {
-        fs.unlinkSync(audioPath);
-      } catch (cleanupError) {
-        console.warn(`⚠️ Failed to cleanup audio file: ${cleanupError.message}`);
-      }
-      
-      if (whisperSegments && whisperSegments.length > 0) {
-        transcriptStats.successfulRequests++;
-        transcriptStats.whisper.success++;
-        console.log(`✅ Whisper fallback success: ${whisperSegments.length} segments`);
-        return cleanSegments(whisperSegments);
-      }
-    }
-  } catch (error) {
-    console.error(`❌ Whisper fallback failed: ${error.message}`);
-    transcriptStats.errors.push({ videoId, error: error.message, timestamp: new Date() });
+  // Method 3: Try YouTube Data API v3 as additional fallback
+  console.log('🔄 Trying YouTube Data API v3...');
+  const youtubeApiSegments = await retryWithBackoff(
+    () => fetchYouTubeDataAPI(videoId),
+    2,
+    1500
+  );
+  if (youtubeApiSegments && youtubeApiSegments.length > 0) {
+    transcriptStats.successfulRequests++;
+    console.log(`✅ YouTube Data API success: ${youtubeApiSegments.length} segments`);
+    return cleanSegments(youtubeApiSegments);
   }
+  console.log('⚠️ YouTube Data API failed or returned empty');
   
-  console.log('❌ All transcript methods failed');
-  transcriptStats.errors.push({ videoId, error: 'All methods failed', timestamp: new Date() });
+  console.log('❌ All transcript methods failed - no yt-dlp dependency');
+  transcriptStats.errors.push({ videoId, error: 'All API methods failed', timestamp: new Date() });
   return [];
 }
 // Helper function to run yt-dlp and return a Promise with enhanced features
 function runYtDlp(args, options = {}) {
   return new Promise((resolve, reject) => {
+    // yt-dlp dependency has been removed - this function is deprecated
+    return reject(new Error("yt-dlp dependency has been removed. Use API-based methods instead."));
+    
     if (!YT_DLP_PATH) {
       return reject(new Error("yt-dlp not found. Please check installation."));
     }
@@ -601,6 +525,111 @@ async function fetchTimedTextSegments(videoId, langOrder = ["id", "en"]) {
   
   // Update transcript stats
   transcriptStats.timedText.total++;
+  
+  // Method 0: Enhanced direct TimedText API approach
+  console.log('🎯 Attempting enhanced direct TimedText API...');
+  
+  // Try direct TimedText API with multiple language and format combinations
+  const directApiAttempts = [];
+  for (const lang of langOrder) {
+    // Add various format and parameter combinations
+    directApiAttempts.push(
+      `https://video.google.com/timedtext?lang=${lang}&v=${videoId}&fmt=vtt`,
+      `https://video.google.com/timedtext?lang=${lang}&v=${videoId}&fmt=srv3`,
+      `https://video.google.com/timedtext?lang=${lang}&v=${videoId}&kind=asr&fmt=vtt`,
+      `https://video.google.com/timedtext?lang=${lang}&v=${videoId}&kind=asr&fmt=srv3`,
+      `https://video.google.com/timedtext?lang=${lang}&v=${videoId}&kind=asr`,
+      `https://video.google.com/timedtext?lang=${lang}&v=${videoId}`
+    );
+  }
+  
+  for (const apiUrl of directApiAttempts) {
+    try {
+      console.log(`🔗 Trying direct API: ${apiUrl}`);
+      const response = await fetch(apiUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        },
+        timeout: 10000
+      });
+      
+      if (response.ok) {
+        const text = await response.text();
+        console.log(`📝 Direct API response length: ${text.length}`);
+        
+        if (text && text.trim().length > 0) {
+          // Parse VTT format
+          if (text.includes('-->')) {
+            const cleaned = text
+              .replace(/WEBVTT[^\n]*\n/gi, "")
+              .replace(/NOTE[^\n]*\n/gi, "")
+              .replace(/<\d{2}:\d{2}:\d{2}\.\d{3}>/g, "")
+              .replace(/<c>|<\/c>/g, "")
+              .replace(/align:[^\n]+/g, "")
+              .replace(/position:[^\n]+/g, "")
+              .replace(/\n{2,}/g, "\n");
+            
+            const regex = /(\d{2}:\d{2}:\d{2}\.\d{3}) --> (\d{2}:\d{2}:\d{2}\.\d{3})\s+([\s\S]*?)(?=\n\d|$)/g;
+            const segments = [];
+            let match;
+            while ((match = regex.exec(cleaned)) !== null) {
+              const segmentText = match[3]
+                .replace(/\n/g, " ")
+                .replace(/\s+/g, " ")
+                .trim();
+              if (segmentText) {
+                segments.push({
+                  start: match[1],
+                  end: match[2],
+                  text: segmentText
+                });
+              }
+            }
+            
+            if (segments.length > 0) {
+              transcriptStats.timedText.success++;
+              console.log(`✅ Direct API VTT success: ${segments.length} segments`);
+              return segments;
+            }
+          }
+          // Parse XML format
+          else if (text.includes('<text')) {
+            const textRegex = /<text start="([0-9.]+)" dur="([0-9.]+)"[^>]*>([\s\S]*?)<\/text>/g;
+            const segments = [];
+            let match;
+            while ((match = textRegex.exec(text)) !== null) {
+              const startSec = parseFloat(match[1]);
+              const dur = parseFloat(match[2]);
+              const endSec = startSec + dur;
+              const segmentText = match[3]
+                .replace(/&amp;/g, '&')
+                .replace(/&#39;/g, "'")
+                .replace(/&quot;/g, '"')
+                .replace(/&lt;/g, '<')
+                .replace(/&gt;/g, '>')
+                .replace(/\s+/g, ' ')
+                .trim();
+              if (segmentText) {
+                segments.push({
+                  start: secondsToHMS(startSec),
+                  end: secondsToHMS(endSec),
+                  text: segmentText
+                });
+              }
+            }
+            
+            if (segments.length > 0) {
+              transcriptStats.timedText.success++;
+              console.log(`✅ Direct API XML success: ${segments.length} segments`);
+              return segments;
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.log(`⚠️ Direct API attempt failed: ${error.message}`);
+    }
+  }
   
   // Method 1: Try YouTube Data API first (if available)
   if (process.env.YOUTUBE_API_KEY) {
@@ -1298,24 +1327,24 @@ app.get("/api/yt-transcript", async (req, res) => {
   const ytUrl = `https://www.youtube.com/watch?v=${videoId}`;
   const subLang = lang ? String(lang) : "id,en";
 
-  console.log(`🔍 Step 0: Trying comprehensive transcript fetch for videoId: ${videoId}`);
+  console.log(`🔍 Step 0: Trying enhanced TimedText API first for videoId: ${videoId}`);
   
+  // Primary method: Try enhanced TimedText API with player response parsing
   try {
-    // Use the enhanced getTranscriptSegments function
-    const segments = await getTranscriptSegments(videoId, refresh === 'true');
-    
-    if (segments && segments.length > 0) {
+    console.log(`🔍 Attempting enhanced TimedText API for videoId: ${videoId}`);
+    const timedTextSegments = await fetchTimedTextSegments(videoId);
+    if (timedTextSegments && timedTextSegments.length > 0) {
       transcriptStats.successfulRequests++;
       const duration = Date.now() - startTime;
-      console.log(`✅ Transcript fetch successful: ${segments.length} segments (took ${duration}ms)`);
+      console.log(`✅ Enhanced TimedText API successful: ${timedTextSegments.length} segments (took ${duration}ms)`);
       
       const payload = {
-        segments,
+        segments: timedTextSegments,
         metadata: {
           videoId,
-          segmentCount: segments.length,
+          segmentCount: timedTextSegments.length,
           processingTime: duration,
-          source: 'enhanced_fetch',
+          source: 'enhanced_timedtext',
           timestamp: new Date().toISOString()
         }
       };
@@ -1324,14 +1353,50 @@ app.get("/api/yt-transcript", async (req, res) => {
       return res.json(payload);
     }
     
-    console.log(`❌ Enhanced transcript fetch returned no segments for videoId: ${videoId}`);
+    console.log(`⚠️ Enhanced TimedText API returned no segments for videoId: ${videoId}`);
+  } catch (timedTextError) {
+    console.error(`❌ Enhanced TimedText API failed for ${videoId}:`, timedTextError.message);
+    transcriptStats.errors.push({ 
+      videoId, 
+      error: timedTextError.message, 
+      timestamp: new Date(),
+      source: 'enhanced_timedtext'
+    });
+  }
+  
+  // Fallback method: Try comprehensive transcript fetch (yt-dlp + other methods)
+  console.log(`🔍 Trying comprehensive transcript fetch fallback for videoId: ${videoId}`);
+  try {
+    const segments = await getTranscriptSegments(videoId, refresh === 'true');
+    
+    if (segments && segments.length > 0) {
+      transcriptStats.successfulRequests++;
+      const duration = Date.now() - startTime;
+      console.log(`✅ Comprehensive transcript fetch successful: ${segments.length} segments (took ${duration}ms)`);
+      
+      const payload = {
+        segments,
+        metadata: {
+          videoId,
+          segmentCount: segments.length,
+          processingTime: duration,
+          source: 'comprehensive_fetch',
+          timestamp: new Date().toISOString()
+        }
+      };
+      
+      transcriptCache.set(videoId, payload);
+      return res.json(payload);
+    }
+    
+    console.log(`⚠️ Comprehensive transcript fetch returned no segments for videoId: ${videoId}`);
   } catch (enhancedError) {
-    console.error(`❌ Enhanced transcript fetch failed for ${videoId}:`, enhancedError.message);
+    console.error(`❌ Comprehensive transcript fetch failed for ${videoId}:`, enhancedError.message);
     transcriptStats.errors.push({ 
       videoId, 
       error: enhancedError.message, 
       timestamp: new Date(),
-      source: 'enhanced_fetch'
+      source: 'comprehensive_fetch'
     });
   }
   
@@ -1393,135 +1458,24 @@ app.get("/api/yt-transcript", async (req, res) => {
       console.warn("❌ LemnosLife transcript fetch failed", lemErr.message);
     }
 
-    console.log(`🔍 Step 2: Trying yt-dlp for videoId: ${videoId}`);
-    // 2️⃣ Fallback to yt-dlp if LemnosLife didn't return segments
-    await runYtDlp([
-      ytUrl,
-      "--write-auto-subs",
-      "--sub-lang",
-      subLang,
-      "--skip-download",
-      "-o",
-      path.join(process.cwd(), `${id}`),
-    ]);
-
-    // Cari file .id.vtt (Indonesia) lebih dulu, jika tidak ada baru cari .en.vtt
-    let vttFile = null;
-    const files = fs.readdirSync(process.cwd());
-    for (const file of files) {
-      if (file.startsWith(id) && file.endsWith(".id.vtt")) {
-        vttFile = path.join(process.cwd(), file);
-        break;
+    console.log(`🔍 Step 2: All API methods exhausted for videoId: ${videoId}`);
+    // yt-dlp dependency has been removed - no longer using legacy methods
+    
+    const duration = Date.now() - startTime;
+    console.log(`❌ All API methods failed, returning empty segments (took ${duration}ms)`);
+    const emptyPayload = {
+      segments: [],
+      metadata: {
+        videoId,
+        segmentCount: 0,
+        processingTime: duration,
+        source: 'failed_all_api_methods',
+        timestamp: new Date().toISOString(),
+        error: 'No transcript available through API methods'
       }
-    }
-    if (!vttFile) {
-      for (const file of files) {
-        if (file.startsWith(id) && file.endsWith(".en.vtt")) {
-          vttFile = path.join(process.cwd(), file);
-          break;
-        }
-      }
-    }
-    if (!vttFile) {
-      console.warn("❌ No VTT found – attempting local Whisper fallback...");
-
-      try {
-        console.log(`🔍 Step 3: Downloading audio for Whisper fallback`);
-        const audioPath = path.join(process.cwd(), `${id}.m4a`);
-        await runYtDlp([
-          ytUrl,
-          "-f",
-          "bestaudio[ext=m4a]/bestaudio",
-          "--max-filesize",
-          "20M",
-          "-o",
-          audioPath,
-        ]);
-
-        console.log(`🔍 Step 4: Running Whisper on downloaded audio`);
-        const whisperSegs = await runWhisperCpp(audioPath);
-        try {
-          fs.unlinkSync(audioPath);
-        } catch {}
-
-        if (whisperSegs.length) {
-          transcriptStats.successfulRequests++;
-          transcriptStats.whisper.success++;
-          const duration = Date.now() - startTime;
-          console.log(
-            `✅ Whisper fallback returned ${whisperSegs.length} segments (took ${duration}ms)`
-          );
-          const payload = {
-            segments: whisperSegs,
-            metadata: {
-              videoId,
-              segmentCount: whisperSegs.length,
-              processingTime: duration,
-              source: 'whisper_fallback',
-              timestamp: new Date().toISOString()
-            }
-          };
-          transcriptCache.set(videoId, payload);
-          return res.json(payload);
-        }
-        console.log(`❌ Whisper fallback returned no segments`);
-        transcriptStats.whisper.total++;
-      } catch (e) {
-        console.error("❌ Whisper fallback failed", e.message);
-        transcriptStats.whisper.total++;
-        transcriptStats.errors.push({ 
-          videoId, 
-          error: e.message, 
-          timestamp: new Date(),
-          source: 'whisper_fallback'
-        });
-      }
-
-      const duration = Date.now() - startTime;
-      console.log(`❌ All methods failed, returning empty segments (took ${duration}ms)`);
-      const emptyPayload = {
-        segments: [],
-        metadata: {
-          videoId,
-          segmentCount: 0,
-          processingTime: duration,
-          source: 'failed_all_methods',
-          timestamp: new Date().toISOString()
-        }
-      };
-      transcriptCache.set(videoId, emptyPayload);
-      return res.status(200).json(emptyPayload);
-    }
-    // Baca dan parse VTT
-    let vttContent = fs.readFileSync(vttFile, "utf-8");
-    fs.unlinkSync(vttFile);
-    vttContent = vttContent
-      .replace(/align:[^\n]+/g, "")
-      .replace(/position:[^\n]+/g, "")
-      .replace(/<\d{2}:\d{2}:\d{2}\.\d{3}>/g, "")
-      .replace(/<c>|<\/c>/g, "")
-      .replace(/WEBVTT[^\n]*\n/g, "")
-      .replace(/NOTE[^\n]*\n/g, "")
-      .replace(/\n{2,}/g, "\n");
-    const segments = [];
-    const regex = /([0-9:.]+) --> ([0-9:.]+)\s+([\s\S]*?)(?=\n\d|$)/g;
-    let match;
-    while ((match = regex.exec(vttContent)) !== null) {
-      const cleanText = match[3]
-        .replace(/\n/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-      if (cleanText) {
-        segments.push({
-          start: match[1],
-          end: match[2],
-          text: cleanText,
-        });
-      }
-    }
-    const payload = { segments };
-    transcriptCache.set(videoId, payload);
-    return res.json(payload);
+    };
+    transcriptCache.set(videoId, emptyPayload);
+    return res.status(200).json(emptyPayload);
   } catch (err) {
     const duration = Date.now() - startTime;
     console.error(
@@ -1697,51 +1651,94 @@ app.get("/api/yt-transcript/cache", async (req, res) => {
   return res.json({ cacheEntries, totalCached: cacheEntries.length });
 });
 
-// Endpoint baru: Mendapatkan durasi video dari file .vtt
+// Endpoint baru: Mendapatkan durasi video dari transkrip atau YouTube API
 app.get("/api/video-meta", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  const id = req.query.videoId;
-  if (!id) return res.status(400).json({ error: "videoId is required" });
-  // Cari file .id.vtt atau .en.vtt
-  let vttFile = null;
-  const files = fs.readdirSync(process.cwd());
-  for (const file of files) {
-    if (
-      file.startsWith(id) &&
-      (file.endsWith(".id.vtt") || file.endsWith(".en.vtt"))
-    ) {
-      vttFile = path.join(process.cwd(), file);
-      break;
-    }
-  }
-  if (!vttFile) {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    return res
-      .status(404)
-      .json({ error: "Subtitle file not found for this videoId" });
-  }
+  const videoId = req.query.videoId;
+  if (!videoId) return res.status(400).json({ error: "videoId is required" });
+  
+  console.log(`🔍 Getting video metadata for videoId: ${videoId}`);
+  
   try {
-    const vttContent = fs.readFileSync(vttFile, "utf-8");
-    // Cari timestamp terakhir di file VTT
-    const matches = [
-      ...vttContent.matchAll(
-        /(\d{2}:\d{2}:\d{2}\.\d{3}) --> (\d{2}:\d{2}:\d{2}\.\d{3})/g
-      ),
-    ];
-    if (matches.length === 0)
-      return res.status(400).json({ error: "No segments found in VTT" });
-    const last = matches[matches.length - 1][2]; // ambil end time segmen terakhir
-    // Konversi ke detik
-    const [h, m, s] = last.split(":");
-    const duration = Math.round(
-      parseInt(h) * 3600 + parseInt(m) * 60 + parseFloat(s)
-    );
-    res.json({ duration });
-  } catch (e) {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.status(500).json({ error: "Failed to read VTT", details: e.message });
+    // Method 1: Check if we have transcript data in cache
+    if (transcriptCache.has(videoId)) {
+      const cachedData = transcriptCache.get(videoId);
+      if (cachedData.segments && cachedData.segments.length > 0) {
+        // Get duration from last segment
+        const lastSegment = cachedData.segments[cachedData.segments.length - 1];
+        if (lastSegment.end) {
+          const duration = parseTimeToSeconds(lastSegment.end);
+          console.log(`✅ Got duration from cached transcript: ${duration}s`);
+          return res.json({ duration: Math.round(duration) });
+        }
+      }
+    }
+    
+    // Method 2: Try to get transcript first to extract duration
+    console.log(`🔍 Fetching transcript to extract duration...`);
+    const segments = await getTranscriptSegments(videoId, false);
+    
+    if (segments && segments.length > 0) {
+      const lastSegment = segments[segments.length - 1];
+      if (lastSegment.end) {
+        const duration = parseTimeToSeconds(lastSegment.end);
+        console.log(`✅ Got duration from transcript: ${duration}s`);
+        return res.json({ duration: Math.round(duration) });
+      }
+    }
+    
+    // Method 3: Try YouTube Data API if available
+    if (process.env.YOUTUBE_API_KEY) {
+      console.log(`🔍 Trying YouTube Data API for video duration...`);
+      try {
+        const apiResponse = await fetch(
+          `https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=${videoId}&key=${process.env.YOUTUBE_API_KEY}`
+        );
+        
+        if (apiResponse.ok) {
+          const data = await apiResponse.json();
+          if (data.items && data.items.length > 0) {
+            const duration = parseYouTubeDuration(data.items[0].contentDetails.duration);
+            console.log(`✅ Got duration from YouTube API: ${duration}s`);
+            return res.json({ duration: Math.round(duration) });
+          }
+        }
+      } catch (apiError) {
+        console.log(`⚠️ YouTube API failed: ${apiError.message}`);
+      }
+    }
+    
+    // Method 4: Fallback - return default duration
+    console.log(`⚠️ Could not determine video duration, using default`);
+    return res.json({ duration: 600 }); // Default 10 minutes
+    
+  } catch (error) {
+    console.error(`❌ Error getting video metadata: ${error.message}`);
+    res.status(500).json({ error: "Failed to get video metadata", details: error.message });
   }
 });
+
+// Helper function to parse time string to seconds
+function parseTimeToSeconds(timeStr) {
+  if (!timeStr) return 0;
+  const parts = timeStr.split(':');
+  if (parts.length === 3) {
+    const [h, m, s] = parts;
+    return parseInt(h) * 3600 + parseInt(m) * 60 + parseFloat(s);
+  }
+  return 0;
+}
+
+// Helper function to parse YouTube duration format (PT1H2M3S)
+function parseYouTubeDuration(duration) {
+  if (!duration) return 0;
+  const match = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+  if (!match) return 0;
+  const hours = parseInt(match[1]) || 0;
+  const minutes = parseInt(match[2]) || 0;
+  const seconds = parseInt(match[3]) || 0;
+  return hours * 3600 + minutes * 60 + seconds;
+}
 
 // Handler 404 (Not Found) - harus di bawah semua route
 app.use((req, res, next) => {
