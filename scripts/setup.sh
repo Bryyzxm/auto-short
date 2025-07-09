@@ -32,36 +32,46 @@ if [ ! -f ./bin/whisper ]; then
   
   # Build with optimized flags for CI
   cmake -B build \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DWHISPER_BUILD_TESTS=OFF \
-    -DWHISPER_BUILD_EXAMPLES=OFF
-  
-  cmake --build build --config Release --parallel 2
+      -DCMAKE_BUILD_TYPE=Release \
+      -DWHISPER_BUILD_TESTS=OFF \
+      -DWHISPER_BUILD_EXAMPLES=ON
    
-   # Try to build whisper-cli specifically if it wasn't built
-   cmake --build build --target whisper-cli --config Release 2>/dev/null || echo "⚠️ whisper-cli target not available, using available binaries"
+   cmake --build build --config Release --parallel 2
+   
+   # Build specific targets that create executables
+   cmake --build build --target main --config Release 2>/dev/null || echo "⚠️ main target not available"
+   cmake --build build --target whisper-cli --config Release 2>/dev/null || echo "⚠️ whisper-cli target not available"
   
   # Copy binary to project - search for whisper binary in multiple locations
-   if [ -f build/bin/whisper-cli ]; then
-       cp build/bin/whisper-cli "$ORIGINAL_DIR/bin/whisper"
-       echo "✅ Found and copied whisper-cli from build/bin/"
-   elif [ -f build/bin/whisper ]; then
-       cp build/bin/whisper "$ORIGINAL_DIR/bin/whisper"
-       echo "✅ Found and copied whisper from build/bin/"
-   elif [ -f build/whisper-cli ]; then
-       cp build/whisper-cli "$ORIGINAL_DIR/bin/whisper"
-       echo "✅ Found and copied whisper-cli from build/"
-   elif [ -f build/whisper ]; then
-       cp build/whisper "$ORIGINAL_DIR/bin/whisper"
-       echo "✅ Found and copied whisper from build/"
-   else
-       echo "❌ Whisper binary not found in expected locations"
-       echo "📁 Available files in build directory:"
-       find build -name "*whisper*" -type f 2>/dev/null || echo "No whisper files found"
-       echo "📁 All executable files in build:"
-       find build -type f -executable 2>/dev/null || echo "No executable files found"
-       exit 1
-   fi
+    if [ -f build/bin/main ]; then
+        cp build/bin/main "$ORIGINAL_DIR/bin/whisper"
+        echo "✅ Found and copied main from build/bin/"
+    elif [ -f build/examples/main ]; then
+        cp build/examples/main "$ORIGINAL_DIR/bin/whisper"
+        echo "✅ Found and copied main from build/examples/"
+    elif [ -f build/bin/whisper-cli ]; then
+        cp build/bin/whisper-cli "$ORIGINAL_DIR/bin/whisper"
+        echo "✅ Found and copied whisper-cli from build/bin/"
+    elif [ -f build/bin/whisper ]; then
+        cp build/bin/whisper "$ORIGINAL_DIR/bin/whisper"
+        echo "✅ Found and copied whisper from build/bin/"
+    elif [ -f build/whisper-cli ]; then
+        cp build/whisper-cli "$ORIGINAL_DIR/bin/whisper"
+        echo "✅ Found and copied whisper-cli from build/"
+    elif [ -f build/whisper ]; then
+        cp build/whisper "$ORIGINAL_DIR/bin/whisper"
+        echo "✅ Found and copied whisper from build/"
+    elif [ -f build/main ]; then
+        cp build/main "$ORIGINAL_DIR/bin/whisper"
+        echo "✅ Found and copied main from build/"
+    else
+        echo "❌ Whisper binary not found in expected locations"
+        echo "📁 Available files in build directory:"
+        find build -name "*main*" -o -name "*whisper*" -type f 2>/dev/null || echo "No whisper/main files found"
+        echo "📁 All executable files in build:"
+        find build -type f -executable 2>/dev/null || echo "No executable files found"
+        exit 1
+    fi
   
   cd "$ORIGINAL_DIR"
   echo "✅ whisper.cpp built and copied to ./bin/whisper"
