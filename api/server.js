@@ -758,16 +758,38 @@ app.get("/api/yt-transcript", async (req, res) => {
     transcriptCache.set(videoId, payload);
     return res.json(payload);
   }
-  console.log(`❌ TimedText API returned no segments`);
+  console.log(`❌ TimedText API returned no segments for videoId: ${videoId}`);
+  
+  // Debug: Test TimedText API directly
+  try {
+    const testUrl = `https://video.google.com/timedtext?type=list&v=${videoId}`;
+    console.log(`🔍 Debug: Testing TimedText list URL: ${testUrl}`);
+    const testRes = await fetch(testUrl);
+    console.log(`🔍 Debug: TimedText list response status: ${testRes.status}`);
+    if (testRes.ok) {
+      const testText = await testRes.text();
+      console.log(`🔍 Debug: TimedText list response (first 200 chars): ${testText.substring(0, 200)}`);
+    }
+  } catch (debugErr) {
+    console.log(`🔍 Debug: TimedText list test failed: ${debugErr.message}`);
+  }
 
   try {
     console.log(`🔍 Step 1: Trying LemnosLife API for videoId: ${videoId}`);
     // 1️⃣ Try LemnosLife API first (no quota, usually works)
     try {
       const apiUrl = `https://yt.lemnoslife.com/noKey/transcript?videoId=${videoId}`;
+      console.log(`🔍 Debug: LemnosLife API URL: ${apiUrl}`);
       const apiRes = await fetch(apiUrl);
+      console.log(`🔍 Debug: LemnosLife API response status: ${apiRes.status}`);
       if (apiRes.ok) {
         const data = await apiRes.json();
+        console.log(`🔍 Debug: LemnosLife API response structure:`, {
+          hasTranscript: !!data?.transcript,
+          hasSegments: !!data?.transcript?.segments,
+          segmentCount: data?.transcript?.segments?.length || 0,
+          firstSegment: data?.transcript?.segments?.[0] || null
+        });
         if (data?.transcript?.segments?.length) {
           console.log(
             `✅ LemnosLife API returned ${data.transcript.segments.length} segments`
@@ -787,6 +809,9 @@ app.get("/api/yt-transcript", async (req, res) => {
           transcriptCache.set(videoId, payload);
           return res.json(payload);
         }
+      } else {
+        const errorText = await apiRes.text();
+        console.log(`🔍 Debug: LemnosLife API error response: ${errorText.substring(0, 200)}`);
       }
       console.log(`❌ LemnosLife API returned no segments`);
     } catch (lemErr) {
