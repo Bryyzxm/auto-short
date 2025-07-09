@@ -9,7 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "predeploy": "npm run build",
-    "deploy": "gh-pages -d dist",
+    "deploy": "npx gh-pages -d dist",
     "start": "bash ./scripts/setup.sh && node api/server.js",
     "postinstall": "bash ./scripts/setup.sh"
   },
