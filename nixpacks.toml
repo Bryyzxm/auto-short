@@ -1,24 +1,21 @@
 [phases.setup]
 aptPkgs = ["python3", "python3-pip", "ffmpeg", "curl", "yt-dlp", "git", "build-essential", "cmake"]
-cmds = [
-  # clone & compile whisper.cpp (hanya target main agar cepat)
-  "git clone --depth 1 https://github.com/ggerganov/whisper.cpp",
-  "cd whisper.cpp && make -j$(nproc) main",
-
-  # download model tiny (digunakan Whisper fallback)
-  "mkdir -p /app/models",
-  "curl -L -o /app/models/ggml-tiny.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
-
-  # download yt-dlp binary statik ke /usr/bin agar path sesuai server.js
-  "curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/bin/yt-dlp",
-  "chmod +x /usr/bin/yt-dlp"
-]
 
 [phases.install]
 cmds = [
     "unset NODE_ENV && npm ci", # install all deps incl dev (vite)
     "npm run build",           # generate dist
-    "cd api && npm ci --only=production" # backend minimal deps
+    "cd api && npm ci --only=production", # backend minimal deps
+    
+    # Setup whisper.cpp & download model
+    "git clone --depth 1 https://github.com/ggerganov/whisper.cpp",
+    "cd whisper.cpp && make -j$(nproc) main",
+    "mkdir -p /app/models",
+    "curl -L -o /app/models/ggml-tiny.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
+    
+    # Download yt-dlp binary statik ke /usr/bin
+    "curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/bin/yt-dlp",
+    "chmod +x /usr/bin/yt-dlp"
 ]
 
 [start]
