@@ -19,7 +19,7 @@ RUN git clone https://github.com/ggerganov/whisper.cpp.git /tmp/whisper.cpp \
     && cd /tmp/whisper.cpp \
     && make \
     && mkdir -p /app/bin \
-    && cp main /app/bin/main \
+    && cp bin/main /app/bin/main \
     && ln -sf /app/bin/main /app/bin/whisper \
     && chmod +x /app/bin/main /app/bin/whisper
 

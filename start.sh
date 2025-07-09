@@ -25,7 +25,7 @@ if [ ! -f "/app/bin/main" ] && [ ! -f "/app/bin/whisper" ]; then
     make -j $(nproc)
     
     # Copy binaries
-    cp main /app/bin/main
+    cp bin/main /app/bin/main
     ln -sf /app/bin/main /app/bin/whisper
     chmod +x /app/bin/main /app/bin/whisper
     
