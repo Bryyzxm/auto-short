@@ -1,7 +1,7 @@
 // Simple Express backend for YouTube video download & segment cut
 import express from "express";
 import cors from "cors";
-import { execFile } from "child_process";
+import { execFile, execFileSync } from "child_process";
 import { v4 as uuidv4 } from "uuid";
 // Helper function to run yt-dlp and return a Promise
 function runYtDlp(args) {
@@ -238,9 +238,22 @@ try {
 
 // Deteksi path binary berdasarkan environment
 const isProduction = process.env.NODE_ENV === "production";
-// Gunakan path absolut agar tidak tergantung PATH lingkungan
-const YT_DLP_PATH = isProduction ? "/usr/bin/yt-dlp" : "/usr/local/bin/yt-dlp";
-const FFMPEG_PATH = isProduction ? "ffmpeg" : "/usr/local/bin/ffmpeg";
+
+// Helper: temukan binary di PATH jika tersedia
+function findBinary(cmd) {
+  try {
+    const out = execFileSync("which", [cmd], { encoding: "utf-8" }).trim();
+    if (out) return out;
+  } catch {}
+  return null;
+}
+
+// Cari lokasi yt-dlp & ffmpeg secara dinamis; fallback ke path hard-coded lama
+const YT_DLP_PATH =
+  findBinary("yt-dlp") ||
+  (isProduction ? "/usr/bin/yt-dlp" : "/usr/local/bin/yt-dlp");
+const FFMPEG_PATH =
+  findBinary("ffmpeg") || (isProduction ? "ffmpeg" : "/usr/local/bin/ffmpeg");
 
 // Debug: log path yang digunakan
 console.log(`🔧 Environment: ${isProduction ? "production" : "development"}`);

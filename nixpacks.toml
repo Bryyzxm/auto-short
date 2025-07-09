@@ -1,8 +1,9 @@
 [phases.setup]
 nixPkgs = ["...", "yt-dlp", "ffmpeg", "gcc", "gnumake", "cmake", "curl", "git", "python3"]
 
-[phases.build]
+[phases.whisper]
 cmds = [
   "git clone --depth 1 https://github.com/ggerganov/whisper.cpp.git /app/whisper.cpp",
   "cd /app/whisper.cpp && make -j $(nproc)"
-] 
+]
+dependsOn = ["install"] 
