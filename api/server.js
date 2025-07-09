@@ -728,10 +728,16 @@ const transcriptCache = new Map();
 // Endpoint: GET /api/yt-transcript?videoId=...
 app.get("/api/yt-transcript", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  const { videoId, lang } = req.query;
+  const { videoId, lang, refresh } = req.query;
   if (!videoId) return res.status(400).json({ error: "videoId required" });
 
   console.log(`🔍 Processing transcript request for videoId: ${videoId}`);
+
+  // Check if refresh is requested
+  if (refresh === 'true' && transcriptCache.has(videoId)) {
+    console.log(`🔄 Refresh requested, clearing cache for videoId: ${videoId}`);
+    transcriptCache.delete(videoId);
+  }
 
   // Serve from cache if available
   if (transcriptCache.has(videoId)) {
@@ -895,6 +901,32 @@ app.get("/api/yt-transcript", async (req, res) => {
     transcriptCache.set(videoId, emptyPayload);
     return res.status(200).json(emptyPayload);
   }
+});
+
+// Endpoint untuk menghapus cache transcript
+app.delete("/api/yt-transcript/cache/:videoId", async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  const { videoId } = req.params;
+  if (!videoId) return res.status(400).json({ error: "videoId required" });
+
+  if (transcriptCache.has(videoId)) {
+    transcriptCache.delete(videoId);
+    console.log(`🗑️ Cache cleared for videoId: ${videoId}`);
+    return res.json({ message: `Cache cleared for videoId: ${videoId}` });
+  } else {
+    return res.json({ message: `No cache found for videoId: ${videoId}` });
+  }
+});
+
+// Endpoint untuk melihat semua cache
+app.get("/api/yt-transcript/cache", async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  const cacheEntries = Array.from(transcriptCache.entries()).map(([videoId, data]) => ({
+    videoId,
+    segmentCount: data.segments ? data.segments.length : 0,
+    hasSegments: data.segments && data.segments.length > 0
+  }));
+  return res.json({ cacheEntries, totalCached: cacheEntries.length });
 });
 
 // Endpoint baru: Mendapatkan durasi video dari file .vtt
