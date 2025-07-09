@@ -1,8 +1,8 @@
 [phases.setup]
-aptPkgs = ["git", "build-essential", "cmake", "curl", "ffmpeg", "python3", "yt-dlp", "wget"]
+nixPkgs = ["...", "yt-dlp", "ffmpeg", "gcc", "gnumake", "cmake", "curl", "git", "python3"]
 
 [phases.build]
-commands = [
+cmds = [
   "git clone --depth 1 https://github.com/ggerganov/whisper.cpp.git /app/whisper.cpp",
-  "cd /app/whisper.cpp && make"
+  "cd /app/whisper.cpp && make -j $(nproc)"
 ] 
