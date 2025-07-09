@@ -15,14 +15,18 @@ RUN apt-get update && apt-get install -y \
 RUN pip3 install yt-dlp
 
 # Build whisper.cpp
-WORKDIR /app
-RUN git clone --depth 1 https://github.com/ggerganov/whisper.cpp.git whisper.cpp
-WORKDIR /app/whisper.cpp
-RUN make -j $(nproc)
+RUN git clone https://github.com/ggerganov/whisper.cpp.git /tmp/whisper.cpp \
+    && cd /tmp/whisper.cpp \
+    && make \
+    && mkdir -p /app/bin \
+    && cp main /app/bin/main \
+    && ln -sf /app/bin/main /app/bin/whisper \
+    && chmod +x /app/bin/main /app/bin/whisper
 
 # Download whisper model
-RUN mkdir -p /app/models
-RUN curl -L https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin -o /app/models/ggml-tiny.bin
+RUN mkdir -p /app/models \
+    && curl -L https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin -o /app/models/ggml-tiny.bin \
+    && cp /app/models/ggml-tiny.bin /app/bin/ggml-tiny.bin
 
 # Setup app
 WORKDIR /app

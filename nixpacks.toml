@@ -1,20 +1,34 @@
+# Railway Nixpacks Configuration
+# Note: If this doesn't work, use Dockerfile instead
+
 [phases.setup]
-nixPkgs = ["nodejs_22", "npm-9_x", "yt-dlp", "ffmpeg", "gcc", "gnumake", "cmake", "curl", "git", "python3"]
+nixPkgs = ["nodejs_22", "npm-9_x", "python3", "python3Packages.pip", "ffmpeg", "gcc", "gnumake", "cmake", "curl", "git"]
 
 [phases.install]
-cmds = ["npm ci"]
+cmds = [
+  "npm ci",
+  "pip3 install yt-dlp"
+]
 
 [phases.build]
 cmds = [
-  "echo 'Building whisper.cpp...'",
-  "git clone --depth 1 https://github.com/ggerganov/whisper.cpp.git /app/whisper.cpp",
-  "cd /app/whisper.cpp && make -j $(nproc)",
+  # Clone and build whisper.cpp
+  "mkdir -p /app/bin /app/models",
+  "git clone --depth 1 https://github.com/ggerganov/whisper.cpp.git /tmp/whisper.cpp",
+  "cd /tmp/whisper.cpp && make -j $(nproc)",
+  "cp /tmp/whisper.cpp/main /app/bin/main",
+  "ln -sf /app/bin/main /app/bin/whisper",
   "echo 'Downloading whisper model...'",
-  "mkdir -p /app/models",
   "curl -L https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin -o /app/models/ggml-tiny.bin",
+  "cp /app/models/ggml-tiny.bin /app/bin/ggml-tiny.bin",
+  "echo 'Setting up PATH...'",
+  "chmod +x /app/bin/main /app/bin/whisper",
+  "echo 'export PATH=/app/bin:$PATH' >> ~/.bashrc",
   "echo 'Verifying installations...'",
-  "which yt-dlp || echo 'yt-dlp not found'",
-  "ls -la /app/whisper.cpp/main || echo 'whisper.cpp not found'",
+  "python3 -m pip show yt-dlp || echo 'yt-dlp pip package not found'",
+  "which yt-dlp || echo 'yt-dlp command not found'",
+  "ls -la /app/bin/ || echo 'bin directory not found'",
+  "/app/bin/main --help || echo 'whisper main binary test failed'",
   "ls -la /app/models/ggml-tiny.bin || echo 'whisper model not found'"
 ]
 

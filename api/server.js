@@ -6,6 +6,11 @@ import { v4 as uuidv4 } from "uuid";
 // Helper function to run yt-dlp and return a Promise
 function runYtDlp(args) {
   return new Promise((resolve, reject) => {
+    if (!YT_DLP_PATH) {
+      
+      return reject(new Error("yt-dlp not found. Please check installation."));
+    }
+
     console.log(`🔧 Running yt-dlp with args: ${args.join(" ")}`);
     console.log(`🔧 Using binary: ${YT_DLP_PATH}`);
 
@@ -34,15 +39,42 @@ import { fileURLToPath } from "url";
 // Helper: run whisper.cpp on an audio file and return segments [{start,end,text}]
 function runWhisperCpp(audioPath) {
   return new Promise((resolve, reject) => {
+    if (!WHISPER_PATH) {
+      return reject(new Error("whisper.cpp not found. Please check installation."));
+    }
+
     const jsonOut = `${audioPath}.json`;
     console.log(`🔧 Running whisper.cpp on: ${audioPath}`);
+    console.log(`🔧 Using whisper binary: ${WHISPER_PATH}`);
     console.log(`🔧 Output will be: ${jsonOut}`);
 
+    // Try multiple model paths
+    const MODEL_PATHS = [
+      "/app/models/ggml-tiny.bin",
+      "/app/bin/ggml-tiny.bin",
+      "./models/ggml-tiny.bin",
+      "ggml-tiny.bin"
+    ];
+
+    let modelPath = null;
+    for (const path of MODEL_PATHS) {
+      if (fs.existsSync(path)) {
+        modelPath = path;
+        break;
+      }
+    }
+
+    if (!modelPath) {
+      return reject(new Error(`Whisper model not found in any of these locations: ${MODEL_PATHS.join(", ")}`));
+    }
+
+    console.log(`🔧 Using model: ${modelPath}`);
+
     execFile(
-      "/app/whisper.cpp/main",
+      WHISPER_PATH,
       [
         "-m",
-        "/app/models/ggml-tiny.bin",
+        modelPath,
         "-f",
         audioPath,
         "-of",
@@ -238,18 +270,48 @@ try {
 
 // Deteksi path binary berdasarkan environment
 const isProduction = process.env.NODE_ENV === "production";
-
-// Gunakan nama binary saja; execFile akan mencari di PATH
-const YT_DLP_PATH = "yt-dlp";
 const FFMPEG_PATH = "ffmpeg";
 
 function binaryExists(cmd) {
   try {
-    execFileSync("which", [cmd], { stdio: "ignore" });
+    // Use 'where' on Windows, 'which' on Unix-like systems
+    const whichCmd = process.platform === 'win32' ? 'where' : 'which';
+    execFileSync(whichCmd, [cmd], { stdio: "ignore" });
     return true;
   } catch {
     return false;
   }
+}
+
+// Check for yt-dlp in multiple possible locations
+const YT_DLP_PATHS = [
+  "/usr/local/bin/yt-dlp",
+  "/usr/bin/yt-dlp",
+  "yt-dlp",
+  "yt-dlp.exe"
+];
+
+let YT_DLP_PATH = null;
+try {
+  for (const path of YT_DLP_PATHS) {
+    if (fs.existsSync(path) || binaryExists(path.split('/').pop())) {
+      YT_DLP_PATH = path;
+      console.log(`✅ yt-dlp found at: ${path}`);
+      break;
+    }
+  }
+  if (!YT_DLP_PATH) {
+    console.log(`❌ yt-dlp NOT found in any of these locations: ${YT_DLP_PATHS.join(", ")}`);
+    // Try to find yt-dlp in PATH
+    if (binaryExists("yt-dlp")) {
+      YT_DLP_PATH = "yt-dlp";
+      console.log(`✅ yt-dlp found in PATH`);
+    } else {
+      console.log(`❌ yt-dlp also not found in PATH`);
+    }
+  }
+} catch (err) {
+  console.log(`❌ Error checking yt-dlp: ${err.message}`);
 }
 
 // Debug: log path yang digunakan
@@ -257,23 +319,35 @@ console.log(`🔧 Environment: ${isProduction ? "production" : "development"}`);
 console.log(`🔧 YT_DLP_PATH: ${YT_DLP_PATH}`);
 console.log(`🔧 FFMPEG_PATH: ${FFMPEG_PATH}`);
 
-// Check if yt-dlp exists
-try {
-  if (binaryExists(YT_DLP_PATH)) {
-    console.log(`✅ yt-dlp found at: ${YT_DLP_PATH}`);
-  } else {
-    console.log(`❌ yt-dlp NOT found at: ${YT_DLP_PATH}`);
-  }
-} catch (err) {
-  console.log(`❌ Error checking yt-dlp: ${err.message}`);
-}
+// Check if whisper.cpp exists (multiple possible locations)
+const WHISPER_PATHS = [
+  "/app/bin/main",
+  "/app/bin/whisper",
+  "/app/whisper.cpp/main",
+  "/usr/local/bin/whisper",
+  "whisper",
+  "main"
+];
 
-// Check if whisper.cpp exists
+let WHISPER_PATH = null;
 try {
-  if (fs.existsSync("/app/whisper.cpp/main")) {
-    console.log(`✅ whisper.cpp found at: /app/whisper.cpp/main`);
-  } else {
-    console.log(`❌ whisper.cpp NOT found at: /app/whisper.cpp/main`);
+  for (const path of WHISPER_PATHS) {
+    if (fs.existsSync(path)) {
+      WHISPER_PATH = path;
+      console.log(`✅ whisper.cpp found at: ${path}`);
+      break;
+    }
+  }
+  if (!WHISPER_PATH) {
+    console.log(`❌ whisper.cpp NOT found in any of these locations: ${WHISPER_PATHS.join(", ")}`);
+    // Try to find whisper in PATH
+    try {
+      execFileSync("which", ["whisper"], { stdio: "ignore" });
+      WHISPER_PATH = "whisper";
+      console.log(`✅ whisper found in PATH`);
+    } catch {
+      console.log(`❌ whisper also not found in PATH`);
+    }
   }
 } catch (err) {
   console.log(`❌ Error checking whisper.cpp: ${err.message}`);
