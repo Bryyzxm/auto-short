@@ -786,8 +786,8 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 const API_KEY = process.env.GEMINI_API_KEY;
 
 if (!API_KEY) {
-  console.error(
-    "Gemini API Key is not configured. Please set the GEMINI_API_KEY environment variable."
+  console.warn(
+    "⚠️ Gemini API Key is not configured. AI segment generation will be disabled. Set GEMINI_API_KEY environment variable to enable this feature."
   );
 }
 const ai = API_KEY ? new GoogleGenerativeAI(API_KEY) : null;
@@ -852,8 +852,10 @@ const generatePrompt = (videoUrlHint, transcript) => {
 
 app.post("/api/generate-segments", async (req, res) => {
   if (!ai) {
-    return res.status(500).json({
-      error: "Gemini API client is not initialized. API_KEY might be missing.",
+    return res.status(503).json({
+      error: "AI segment generation is currently unavailable. Please configure GEMINI_API_KEY environment variable to enable this feature.",
+      feature: "ai_segments",
+      status: "disabled"
     });
   }
 
