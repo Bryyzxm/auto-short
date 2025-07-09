@@ -14,6 +14,7 @@ permissions:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 15  # Timeout otomatis untuk mencegah build yang terlalu lama
 
     steps:
       - name: Checkout code
@@ -22,10 +23,20 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18' # Sesuaikan dengan versi Node.js yang Anda gunakan
-          cache: 'npm'
+          node-version: '18'
+          cache: 'npm'  # Cache npm dependencies
 
-      - name: Install build dependencies
+      - name: Cache whisper.cpp build
+        uses: actions/cache@v3
+        with:
+          path: |
+            /tmp/whisper.cpp/build
+            ./bin
+          key: whisper-cpp-${{ runner.os }}-${{ hashFiles('scripts/setup.sh') }}
+          restore-keys: |
+            whisper-cpp-${{ runner.os }}-
+
+      - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential curl cmake
