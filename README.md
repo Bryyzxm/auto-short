@@ -44,12 +44,9 @@ npm install
 npm run dev
 ```
 
-## Transcript Method Priority
+## Transcript Method Priority (Simplified)
 
 1. **yt-dlp** (Primary) - Most reliable, supports auto-generated and manual subtitles
 2. **Enhanced yt-dlp** (Fallback) - Aggressive extraction with all subtitle formats
-3. **TimedText API** (Secondary) - YouTube's native API
-4. **LemnosLife API** (Tertiary) - Community API
-5. **YouTube Data API v3** (Quaternary) - Official Google API
-6. **Whisper.cpp + yt-dlp** (Last resort) - Audio transcription
+3. **Whisper.cpp + yt-dlp** (Last resort) - Audio transcription when subtitles unavailable
 # Force rebuild Tue, Jul  8, 2025 12:22:53 PM

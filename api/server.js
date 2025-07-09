@@ -4,11 +4,8 @@ import cors from "cors";
 import { execFile, execFileSync } from "child_process";
 import { v4 as uuidv4 } from "uuid";
 
-// Transcript statistics for monitoring
+// Transcript statistics for monitoring (simplified to yt-dlp and whisper.cpp only)
 const transcriptStats = {
-  youtubeDataAPI: { success: 0, total: 0 },
-  timedText: { success: 0, total: 0 },
-  lemnosLife: { success: 0, total: 0 },
   ytdlp: { success: 0, total: 0 },
   whisper: { success: 0, total: 0 },
   totalRequests: 0,
@@ -71,112 +68,9 @@ function categorizeError(error) {
   return ERROR_TYPES.AUTH_REQUIRED;
 }
 
-// YouTube Data API v3 function
-async function fetchYouTubeDataAPI(videoId) {
-  const API_KEY = process.env.YOUTUBE_API_KEY;
-  if (!API_KEY) {
-    console.log('⚠️ YouTube Data API key not configured');
-    return null;
-  }
+// YouTube Data API function removed - using only yt-dlp and whisper.cpp
 
-  try {
-    transcriptStats.youtubeDataAPI.total++;
-    console.log(`🔍 Trying YouTube Data API v3 for videoId: ${videoId}`);
-    
-    // First, get available captions
-    const captionsResponse = await fetch(
-      `https://www.googleapis.com/youtube/v3/captions?part=snippet&videoId=${videoId}&key=${API_KEY}`
-    );
-    
-    if (!captionsResponse.ok) {
-      throw new Error(`YouTube Data API error: ${captionsResponse.status}`);
-    }
-    
-    const captionsData = await captionsResponse.json();
-    
-    if (!captionsData.items || captionsData.items.length === 0) {
-      console.log('❌ No captions available via YouTube Data API');
-      return null;
-    }
-    
-    // Find the best caption track (prefer Indonesian, then English)
-    const preferredLangs = ['id', 'en'];
-    let selectedCaption = null;
-    
-    for (const lang of preferredLangs) {
-      selectedCaption = captionsData.items.find(item => 
-        item.snippet.language === lang
-      );
-      if (selectedCaption) break;
-    }
-    
-    if (!selectedCaption) {
-      selectedCaption = captionsData.items[0]; // Use first available
-    }
-    
-    console.log(`✅ Found caption track: ${selectedCaption.snippet.language} (${selectedCaption.snippet.trackKind})`);
-    
-    // Download the caption content
-    const captionResponse = await fetch(
-      `https://www.googleapis.com/youtube/v3/captions/${selectedCaption.id}?key=${API_KEY}`
-    );
-    
-    if (captionResponse.ok) {
-      const captionText = await captionResponse.text();
-      // Parse caption format (usually SRT or VTT)
-      const segments = parseCaptionText(captionText);
-      if (segments.length > 0) {
-        transcriptStats.youtubeDataAPI.success++;
-        console.log(`✅ YouTube Data API returned ${segments.length} segments`);
-        return segments;
-      }
-    }
-    
-    return null;
-  } catch (err) {
-    console.warn(`❌ YouTube Data API failed: ${err.message}`);
-    return null;
-  }
-}
-
-// Parse caption text (SRT/VTT format)
-function parseCaptionText(text) {
-  const segments = [];
-  
-  // Try VTT format first
-  if (text.includes('-->')) {
-    const vttRegex = /(\d{2}:\d{2}:\d{2}\.\d{3}) --> (\d{2}:\d{2}:\d{2}\.\d{3})\s+([\s\S]*?)(?=\n\d|$)/g;
-    let match;
-    while ((match = vttRegex.exec(text)) !== null) {
-      const cleanText = match[3].replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
-      if (cleanText) {
-        segments.push({
-          start: match[1],
-          end: match[2],
-          text: cleanText
-        });
-      }
-    }
-  }
-  
-  // Try SRT format
-  if (segments.length === 0) {
-    const srtRegex = /\d+\s+(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})\s+([\s\S]*?)(?=\n\n|\n\d+\s+|$)/g;
-    let match;
-    while ((match = srtRegex.exec(text)) !== null) {
-      const cleanText = match[3].replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
-      if (cleanText) {
-        segments.push({
-          start: match[1].replace(',', '.'),
-          end: match[2].replace(',', '.'),
-          text: cleanText
-        });
-      }
-    }
-  }
-  
-  return segments;
-}
+// parseCaptionText function removed - using only yt-dlp and whisper.cpp
 
 // Parse VTT content
 function parseVTT(vttContent) {
@@ -211,50 +105,7 @@ function parseVTT(vttContent) {
   return segments;
 }
 
-// Enhanced LemnosLife API function
-async function fetchLemnosLifeTranscript(videoId) {
-  try {
-    transcriptStats.lemnosLife.total++;
-    console.log(`🔍 Trying LemnosLife API for videoId: ${videoId}`);
-    
-    const apiUrl = `https://yt.lemnoslife.com/noKey/transcript?videoId=${videoId}`;
-    const response = await fetch(apiUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      },
-      timeout: 15000
-    });
-    
-    if (!response.ok) {
-      throw new Error(`LemnosLife API error: ${response.status}`);
-    }
-    
-    const data = await response.json();
-    
-    if (data?.transcript?.segments?.length) {
-      const segments = data.transcript.segments.map((seg) => ({
-        start: new Date(seg.startMs)
-          .toISOString()
-          .substr(11, 12)
-          .replace("Z", ""),
-        end: new Date(seg.startMs + seg.durationMs)
-          .toISOString()
-          .substr(11, 12)
-          .replace("Z", ""),
-        text: seg.text,
-      }));
-      
-      transcriptStats.lemnosLife.success++;
-      console.log(`✅ LemnosLife API returned ${segments.length} segments`);
-      return segments;
-    }
-    
-    return null;
-  } catch (err) {
-    console.warn(`❌ LemnosLife API failed: ${err.message}`);
-    return null;
-  }
-}
+// LemnosLife API function removed - using only yt-dlp and whisper.cpp
 
 // Download audio for whisper fallback
 async function downloadAudio(videoId) {
@@ -291,21 +142,21 @@ async function getTranscriptSegments(videoId, refresh = false) {
   // Update transcript stats
   transcriptStats.totalRequests++;
   
-  // Method 1: Try yt-dlp first (most reliable and prioritized as PRIMARY method)
+  // Method 1: Try yt-dlp subtitle extraction (PRIMARY METHOD)
   if (YT_DLP_PATH) {
-    console.log('🎯 Trying yt-dlp subtitle extraction (PRIMARY METHOD - most reliable)...');
+    console.log('🎯 Trying yt-dlp subtitle extraction (PRIMARY METHOD)...');
     const ytdlpSegments = await retryWithBackoff(
       () => fetchYtDlpTranscript(videoId),
-      5, // Increased retries for yt-dlp as primary method
-      1500 // Reduced delay for faster response
+      5, // Multiple retries for yt-dlp
+      1500
     );
     if (ytdlpSegments && ytdlpSegments.length > 0) {
       transcriptStats.successfulRequests++;
       transcriptStats.ytdlp.success++;
-      console.log(`✅ yt-dlp PRIMARY SUCCESS: ${ytdlpSegments.length} segments`);
+      console.log(`✅ yt-dlp SUCCESS: ${ytdlpSegments.length} segments`);
       return cleanSegments(ytdlpSegments);
     }
-    console.log('⚠️ yt-dlp primary method failed, trying with enhanced options...');
+    console.log('⚠️ yt-dlp subtitle extraction failed, trying enhanced options...');
     
     // Enhanced yt-dlp attempt with more aggressive options
     const enhancedYtdlpSegments = await retryWithBackoff(
@@ -321,56 +172,12 @@ async function getTranscriptSegments(videoId, refresh = false) {
     }
     console.log('⚠️ yt-dlp enhanced method also failed');
   } else {
-    console.log('❌ yt-dlp not available - this is critical as it\'s the primary method!');
+    console.log('❌ yt-dlp not available!');
   }
   
-  // Method 2: Try TimedText API as secondary fallback (reduced priority)
-  if (!refresh) {
-    console.log('🔄 Trying TimedText API as secondary fallback...');
-    const timedTextSegments = await retryWithBackoff(
-      () => fetchTimedTextSegments(videoId),
-      2, // Reduced retries since yt-dlp is primary
-      2000 // Increased delay to prioritize yt-dlp
-    );
-    if (timedTextSegments && timedTextSegments.length > 0) {
-      transcriptStats.successfulRequests++;
-      console.log(`✅ TimedText API fallback success: ${timedTextSegments.length} segments`);
-      return cleanSegments(timedTextSegments);
-    }
-    console.log('⚠️ TimedText API fallback failed or returned empty');
-  }
-  
-  // Method 3: Fallback to LemnosLife API with retry
-  console.log('🔄 Trying LemnosLife API with retry...');
-  const lemnosSegments = await retryWithBackoff(
-    () => fetchLemnosLifeTranscript(videoId),
-    3,
-    2000
-  );
-  if (lemnosSegments && lemnosSegments.length > 0) {
-    transcriptStats.successfulRequests++;
-    console.log(`✅ LemnosLife API success: ${lemnosSegments.length} segments`);
-    return cleanSegments(lemnosSegments);
-  }
-  console.log('⚠️ LemnosLife API failed or returned empty');
-  
-  // Method 4: Try YouTube Data API v3 as additional fallback
-  console.log('🔄 Trying YouTube Data API v3...');
-  const youtubeApiSegments = await retryWithBackoff(
-    () => fetchYouTubeDataAPI(videoId),
-    2,
-    1500
-  );
-  if (youtubeApiSegments && youtubeApiSegments.length > 0) {
-    transcriptStats.successfulRequests++;
-    console.log(`✅ YouTube Data API success: ${youtubeApiSegments.length} segments`);
-    return cleanSegments(youtubeApiSegments);
-  }
-  console.log('⚠️ YouTube Data API failed or returned empty');
-  
-  // Method 5: Final fallback - yt-dlp + whisper.cpp for audio transcription
+  // Method 2: Final fallback - yt-dlp + whisper.cpp for audio transcription
   if (YT_DLP_PATH && WHISPER_PATH) {
-    console.log('🔄 Trying yt-dlp + whisper.cpp fallback...');
+    console.log('🔄 Trying yt-dlp + whisper.cpp audio transcription...');
     try {
       transcriptStats.ytdlp.total++;
       transcriptStats.whisper.total++;
@@ -395,12 +202,14 @@ async function getTranscriptSegments(videoId, refresh = false) {
         }
       }
     } catch (error) {
-      console.warn(`⚠️ yt-dlp + whisper.cpp fallback failed: ${error.message}`);
+      console.warn(`⚠️ yt-dlp + whisper.cpp failed: ${error.message}`);
     }
+  } else {
+    console.log('❌ whisper.cpp not available for audio transcription');
   }
   
-  console.log('❌ All transcript methods failed');
-  transcriptStats.errors.push({ videoId, error: 'All methods failed', timestamp: new Date() });
+  console.log('❌ All transcript methods failed - only yt-dlp and whisper.cpp are available');
+  transcriptStats.errors.push({ videoId, error: 'yt-dlp and whisper.cpp failed', timestamp: new Date() });
   return [];
 }
 // Enhanced yt-dlp transcript extraction function
@@ -765,293 +574,7 @@ function getNextProxy() {
 }
 
 // Enhanced fetch subtitles via official TimedText API with retry and fallbacks
-async function fetchTimedTextSegments(videoId, langOrder = ["id", "en"]) {
-  console.log(`🔍 Starting comprehensive transcript fetch for video: ${videoId}`);
-  
-  // Update transcript stats
-  transcriptStats.timedText.total++;
-  
-  // Method 0: Enhanced direct TimedText API approach
-  console.log('🎯 Attempting enhanced direct TimedText API...');
-  
-  // Try direct TimedText API with multiple language and format combinations
-  const directApiAttempts = [];
-  for (const lang of langOrder) {
-    // Add various format and parameter combinations
-    directApiAttempts.push(
-      `https://video.google.com/timedtext?lang=${lang}&v=${videoId}&fmt=vtt`,
-      `https://video.google.com/timedtext?lang=${lang}&v=${videoId}&fmt=srv3`,
-      `https://video.google.com/timedtext?lang=${lang}&v=${videoId}&kind=asr&fmt=vtt`,
-      `https://video.google.com/timedtext?lang=${lang}&v=${videoId}&kind=asr&fmt=srv3`,
-      `https://video.google.com/timedtext?lang=${lang}&v=${videoId}&kind=asr`,
-      `https://video.google.com/timedtext?lang=${lang}&v=${videoId}`
-    );
-  }
-  
-  for (const apiUrl of directApiAttempts) {
-    try {
-      console.log(`🔗 Trying direct API: ${apiUrl}`);
-      const response = await fetch(apiUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        },
-        timeout: 10000
-      });
-      
-      if (response.ok) {
-        const text = await response.text();
-        console.log(`📝 Direct API response length: ${text.length}`);
-        
-        if (text && text.trim().length > 0) {
-          // Parse VTT format
-          if (text.includes('-->')) {
-            const cleaned = text
-              .replace(/WEBVTT[^\n]*\n/gi, "")
-              .replace(/NOTE[^\n]*\n/gi, "")
-              .replace(/<\d{2}:\d{2}:\d{2}\.\d{3}>/g, "")
-              .replace(/<c>|<\/c>/g, "")
-              .replace(/align:[^\n]+/g, "")
-              .replace(/position:[^\n]+/g, "")
-              .replace(/\n{2,}/g, "\n");
-            
-            const regex = /(\d{2}:\d{2}:\d{2}\.\d{3}) --> (\d{2}:\d{2}:\d{2}\.\d{3})\s+([\s\S]*?)(?=\n\d|$)/g;
-            const segments = [];
-            let match;
-            while ((match = regex.exec(cleaned)) !== null) {
-              const segmentText = match[3]
-                .replace(/\n/g, " ")
-                .replace(/\s+/g, " ")
-                .trim();
-              if (segmentText) {
-                segments.push({
-                  start: match[1],
-                  end: match[2],
-                  text: segmentText
-                });
-              }
-            }
-            
-            if (segments.length > 0) {
-              transcriptStats.timedText.success++;
-              console.log(`✅ Direct API VTT success: ${segments.length} segments`);
-              return segments;
-            }
-          }
-          // Parse XML format
-          else if (text.includes('<text')) {
-            const textRegex = /<text start="([0-9.]+)" dur="([0-9.]+)"[^>]*>([\s\S]*?)<\/text>/g;
-            const segments = [];
-            let match;
-            while ((match = textRegex.exec(text)) !== null) {
-              const startSec = parseFloat(match[1]);
-              const dur = parseFloat(match[2]);
-              const endSec = startSec + dur;
-              const segmentText = match[3]
-                .replace(/&amp;/g, '&')
-                .replace(/&#39;/g, "'")
-                .replace(/&quot;/g, '"')
-                .replace(/&lt;/g, '<')
-                .replace(/&gt;/g, '>')
-                .replace(/\s+/g, ' ')
-                .trim();
-              if (segmentText) {
-                segments.push({
-                  start: secondsToHMS(startSec),
-                  end: secondsToHMS(endSec),
-                  text: segmentText
-                });
-              }
-            }
-            
-            if (segments.length > 0) {
-              transcriptStats.timedText.success++;
-              console.log(`✅ Direct API XML success: ${segments.length} segments`);
-              return segments;
-            }
-          }
-        }
-      }
-    } catch (error) {
-      console.log(`⚠️ Direct API attempt failed: ${error.message}`);
-    }
-  }
-  
-  // Method 1: Try YouTube Data API first (if available)
-  if (process.env.YOUTUBE_API_KEY) {
-    try {
-      console.log('🎯 Attempting YouTube Data API...');
-      const apiSegments = await fetchYouTubeDataAPI(videoId);
-      if (apiSegments && apiSegments.length > 0) {
-        transcriptStats.timedText.success++;
-        console.log(`✅ YouTube Data API success: ${apiSegments.length} segments`);
-        return apiSegments;
-      }
-    } catch (error) {
-      console.log(`⚠️ YouTube Data API failed: ${error.message}`);
-    }
-  }
-  
-  // Method 2: Enhanced TimedText API with retry
-  const maxRetries = 3;
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      console.log(`🔄 TimedText API attempt ${attempt}/${maxRetries}`);
-      
-      let tracks = [];
-      try {
-        const listRes = await fetch(
-          `https://video.google.com/timedtext?type=list&v=${videoId}`,
-          {
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            },
-            timeout: 10000
-          }
-        );
-        if (listRes.ok) {
-          const listXml = await listRes.text();
-          const trackRegex = /<track\s+([^>]+)\/>/g;
-          let m;
-          while ((m = trackRegex.exec(listXml)) !== null) {
-            const attrStr = m[1];
-            const attrs = {};
-            attrStr.replace(/(\w+)="([^"]*)"/g, (_, k, v) => {
-              attrs[k] = v;
-            });
-            tracks.push(attrs);
-          }
-        }
-      } catch (listError) {
-        console.log(`⚠️ Track list fetch failed: ${listError.message}`);
-      }
-
-      // If no tracks detected, create pseudo-tracks from langOrder so we still attempt direct fetch
-      if (tracks.length === 0) {
-        tracks = langOrder.map((l) => ({ lang_code: l, kind: "asr" }));
-      }
-
-      const orderedTracks = langOrder
-        .flatMap((lang) => tracks.filter((t) => t.lang_code?.startsWith(lang)))
-        .concat(tracks);
-
-      for (const t of orderedTracks) {
-        const lang = t.lang_code;
-        const isAsr = t.kind === undefined || t.kind === "asr";
-        const name = t.name ? `&name=${encodeURIComponent(t.name)}` : "";
-
-        // Build candidate URL list: prefer asr VTT, then manual VTT, then XML
-        const urlVariants = [];
-        if (isAsr)
-          urlVariants.push(
-            `https://video.google.com/timedtext?lang=${lang}&v=${videoId}&kind=asr${name}&fmt=vtt`
-          );
-        urlVariants.push(
-          `https://video.google.com/timedtext?lang=${lang}&v=${videoId}${
-            isAsr ? "&kind=asr" : ""
-          }${name}&fmt=vtt`
-        );
-        if (isAsr)
-          urlVariants.push(
-            `https://video.google.com/timedtext?lang=${lang}&v=${videoId}&kind=asr${name}`
-          );
-        urlVariants.push(
-          `https://video.google.com/timedtext?lang=${lang}&v=${videoId}${
-            isAsr ? "&kind=asr" : ""
-          }${name}`
-        );
-
-        for (const captionUrl of urlVariants) {
-          try {
-            const res = await fetch(captionUrl, {
-              headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-              },
-              timeout: 15000
-            });
-            if (!res.ok) continue;
-
-            const bodyText = await res.text();
-            if (!bodyText || bodyText.trim().length === 0) continue;
-
-            // If VTT (contains "-->") parse with regex method
-            if (bodyText.includes("-->")) {
-              const cleaned = bodyText
-                .replace(/WEBVTT[^\n]*\n/gi, "")
-                .replace(/NOTE[^\n]*\n/gi, "")
-                .replace(/<\d{2}:\d{2}:\d{2}\.\d{3}>/g, "")
-                .replace(/<c>|<\/c>/g, "")
-                .replace(/align:[^\n]+/g, "")
-                .replace(/position:[^\n]+/g, "")
-                .replace(/\n{2,}/g, "\n");
-
-              const regex =
-                /(\d{2}:\d{2}:\d{2}\.\d{3}) --> (\d{2}:\d{2}:\d{2}\.\d{3})\s+([\s\S]*?)(?=\n\d|$)/g;
-              const segments = [];
-              let match;
-              while ((match = regex.exec(cleaned)) !== null) {
-                const text = match[3]
-                  .replace(/\n/g, " ")
-                  .replace(/\s+/g, " ")
-                  .trim();
-                if (text) segments.push({ start: match[1], end: match[2], text });
-              }
-              if (segments.length) {
-                transcriptStats.timedText.success++;
-                console.log(`✅ TimedText API success: ${segments.length} segments`);
-                return segments;
-              }
-            } else if (bodyText.includes("<text")) {
-              // XML
-              const textRegex =
-                /<text start="([0-9.]+)" dur="([0-9.]+)">([\s\S]*?)<\/text>/g;
-              const segments = [];
-              let mm;
-              while ((mm = textRegex.exec(bodyText)) !== null) {
-                const startSec = parseFloat(mm[1]);
-                const dur = parseFloat(mm[2]);
-                const endSec = startSec + dur;
-                const text = mm[3]
-                  .replace(/&amp;/g, "&")
-                  .replace(/&#39;/g, "'")
-                  .replace(/&quot;/g, '"')
-                  .replace(/&lt;/g, "<")
-                  .replace(/&gt;/g, ">")
-                  .replace(/\s+/g, " ")
-                  .trim();
-                if (text)
-                  segments.push({
-                    start: secondsToHMS(startSec),
-                    end: secondsToHMS(endSec),
-                    text,
-                  });
-              }
-              if (segments.length) {
-                transcriptStats.timedText.success++;
-                console.log(`✅ TimedText API success: ${segments.length} segments`);
-                return segments;
-              }
-            }
-          } catch (fetchError) {
-            console.log(`⚠️ Caption fetch failed for ${captionUrl}: ${fetchError.message}`);
-          }
-        }
-      }
-      
-      // If this attempt failed, wait before retry
-      if (attempt < maxRetries) {
-        const waitTime = 2000 * attempt;
-        console.log(`⏳ Waiting ${waitTime}ms before retry...`);
-        await new Promise(resolve => setTimeout(resolve, waitTime));
-      }
-      
-    } catch (err) {
-      console.warn(`TimedText attempt ${attempt} failed:`, err.message);
-    }
-  }
-  
-  console.log(`❌ All TimedText attempts failed for video: ${videoId}`);
-  return [];
-}
+// TimedText API function removed - using only yt-dlp and whisper.cpp
 
 console.log("🚀 Starting server initialization...");
 console.log("📁 Current working directory:", process.cwd());

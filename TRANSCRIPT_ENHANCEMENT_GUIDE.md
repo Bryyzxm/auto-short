@@ -2,14 +2,12 @@
 
 ## 🚀 Fitur Baru yang Diimplementasikan
 
-### 1. Sistem Fallback Komprehensif
-Sistem transkrip sekarang menggunakan strategi fallback berlapis untuk memastikan ketersediaan transkrip:
+### 1. Sistem Transkrip Disederhanakan
+Sistem transkrip telah disederhanakan untuk fokus pada metode yang paling reliable:
 
-1. **YouTube Data API v3** (jika tersedia)
-2. **TimedText API** dengan retry dan proxy rotation
-3. **LemnosLife API** dengan enhanced error handling
-4. **yt-dlp** dengan cookies dan anti-detection
-5. **Whisper.cpp** sebagai fallback terakhir
+1. **yt-dlp** (Primary) - Ekstraksi subtitle dengan berbagai format
+2. **yt-dlp Enhanced** (Fallback) - Opsi ekstraksi yang lebih agresif
+3. **Whisper.cpp + yt-dlp** (Last resort) - Transkripsi audio ketika subtitle tidak tersedia
 
 ### 2. Statistik dan Monitoring Real-time
 
