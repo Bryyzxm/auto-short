@@ -118,12 +118,7 @@ async function fetchYouTubeDataAPI(videoId) {
     
     // Download the caption content
     const captionResponse = await fetch(
-      `https://www.googleapis.com/youtube/v3/captions/${selectedCaption.id}?key=${API_KEY}`,
-      {
-        headers: {
-          'Authorization': `Bearer ${API_KEY}`
-        }
-      }
+      `https://www.googleapis.com/youtube/v3/captions/${selectedCaption.id}?key=${API_KEY}`
     );
     
     if (captionResponse.ok) {
