@@ -6,16 +6,21 @@ import { v4 as uuidv4 } from "uuid";
 // Helper function to run yt-dlp and return a Promise
 function runYtDlp(args) {
   return new Promise((resolve, reject) => {
+    console.log(`🔧 Running yt-dlp with args: ${args.join(" ")}`);
+    console.log(`🔧 Using binary: ${YT_DLP_PATH}`);
+
     execFile(
       YT_DLP_PATH,
       args,
       { timeout: 300000 },
       (error, stdout, stderr) => {
         if (error) {
-          console.error(`yt-dlp error: ${error.message}`);
-          console.error(`yt-dlp stderr: ${stderr}`);
+          console.error(`❌ yt-dlp error: ${error.message}`);
+          console.error(`❌ yt-dlp stderr: ${stderr}`);
+          console.error(`❌ yt-dlp stdout: ${stdout}`);
           return reject(error);
         }
+        console.log(`✅ yt-dlp success: ${stdout.substring(0, 100)}...`);
         resolve(stdout);
       }
     );
@@ -30,6 +35,9 @@ import { fileURLToPath } from "url";
 function runWhisperCpp(audioPath) {
   return new Promise((resolve, reject) => {
     const jsonOut = `${audioPath}.json`;
+    console.log(`🔧 Running whisper.cpp on: ${audioPath}`);
+    console.log(`🔧 Output will be: ${jsonOut}`);
+
     execFile(
       "/app/whisper.cpp/main",
       [
@@ -44,21 +52,28 @@ function runWhisperCpp(audioPath) {
       { timeout: 300000 },
       (err, stdout, stderr) => {
         if (err) {
-          console.error("whisper.cpp error", err.message);
+          console.error("❌ whisper.cpp error", err.message);
+          console.error("❌ whisper.cpp stderr:", stderr);
           return reject(err);
         }
+        console.log("✅ whisper.cpp success, parsing output...");
         try {
           const raw = fs.readFileSync(jsonOut, "utf-8");
           fs.unlinkSync(jsonOut);
           const obj = JSON.parse(raw);
-          if (!obj.segments || !Array.isArray(obj.segments)) return resolve([]);
+          if (!obj.segments || !Array.isArray(obj.segments)) {
+            console.log("❌ No segments found in whisper output");
+            return resolve([]);
+          }
           const segments = obj.segments.map((s) => ({
             start: secondsToHMS(s.start),
             end: secondsToHMS(s.end),
             text: s.text.trim(),
           }));
+          console.log(`✅ whisper.cpp generated ${segments.length} segments`);
           resolve(segments);
         } catch (e) {
+          console.error("❌ Error parsing whisper output:", e.message);
           reject(e);
         }
       }
@@ -226,6 +241,33 @@ const isProduction = process.env.NODE_ENV === "production";
 // Gunakan path absolut agar tidak tergantung PATH lingkungan
 const YT_DLP_PATH = isProduction ? "/usr/bin/yt-dlp" : "/usr/local/bin/yt-dlp";
 const FFMPEG_PATH = isProduction ? "ffmpeg" : "/usr/local/bin/ffmpeg";
+
+// Debug: log path yang digunakan
+console.log(`🔧 Environment: ${isProduction ? "production" : "development"}`);
+console.log(`🔧 YT_DLP_PATH: ${YT_DLP_PATH}`);
+console.log(`🔧 FFMPEG_PATH: ${FFMPEG_PATH}`);
+
+// Check if yt-dlp exists
+try {
+  if (fs.existsSync(YT_DLP_PATH)) {
+    console.log(`✅ yt-dlp found at: ${YT_DLP_PATH}`);
+  } else {
+    console.log(`❌ yt-dlp NOT found at: ${YT_DLP_PATH}`);
+  }
+} catch (err) {
+  console.log(`❌ Error checking yt-dlp: ${err.message}`);
+}
+
+// Check if whisper.cpp exists
+try {
+  if (fs.existsSync("/app/whisper.cpp/main")) {
+    console.log(`✅ whisper.cpp found at: /app/whisper.cpp/main`);
+  } else {
+    console.log(`❌ whisper.cpp NOT found at: /app/whisper.cpp/main`);
+  }
+} catch (err) {
+  console.log(`❌ Error checking whisper.cpp: ${err.message}`);
+}
 
 // Polyfill __dirname for ES module
 const __filename = fileURLToPath(import.meta.url);
@@ -588,8 +630,11 @@ app.get("/api/yt-transcript", async (req, res) => {
   const { videoId, lang } = req.query;
   if (!videoId) return res.status(400).json({ error: "videoId required" });
 
+  console.log(`🔍 Processing transcript request for videoId: ${videoId}`);
+
   // Serve from cache if available
   if (transcriptCache.has(videoId)) {
+    console.log(`✅ Serving from cache for videoId: ${videoId}`);
     return res.json(transcriptCache.get(videoId));
   }
 
@@ -597,15 +642,19 @@ app.get("/api/yt-transcript", async (req, res) => {
   const ytUrl = `https://www.youtube.com/watch?v=${videoId}`;
   const subLang = lang ? String(lang) : "id,en";
 
+  console.log(`🔍 Step 0: Trying TimedText API for videoId: ${videoId}`);
   // 0️⃣ Try official TimedText API first
   const timedSegs = await fetchTimedTextSegments(videoId, subLang.split(","));
   if (timedSegs.length) {
+    console.log(`✅ TimedText API returned ${timedSegs.length} segments`);
     const payload = { segments: timedSegs };
     transcriptCache.set(videoId, payload);
     return res.json(payload);
   }
+  console.log(`❌ TimedText API returned no segments`);
 
   try {
+    console.log(`🔍 Step 1: Trying LemnosLife API for videoId: ${videoId}`);
     // 1️⃣ Try LemnosLife API first (no quota, usually works)
     try {
       const apiUrl = `https://yt.lemnoslife.com/noKey/transcript?videoId=${videoId}`;
@@ -613,6 +662,9 @@ app.get("/api/yt-transcript", async (req, res) => {
       if (apiRes.ok) {
         const data = await apiRes.json();
         if (data?.transcript?.segments?.length) {
+          console.log(
+            `✅ LemnosLife API returned ${data.transcript.segments.length} segments`
+          );
           const segments = data.transcript.segments.map((seg) => ({
             start: new Date(seg.startMs)
               .toISOString()
@@ -629,10 +681,12 @@ app.get("/api/yt-transcript", async (req, res) => {
           return res.json(payload);
         }
       }
+      console.log(`❌ LemnosLife API returned no segments`);
     } catch (lemErr) {
-      console.warn("LemnosLife transcript fetch failed", lemErr.message);
+      console.warn("❌ LemnosLife transcript fetch failed", lemErr.message);
     }
 
+    console.log(`🔍 Step 2: Trying yt-dlp for videoId: ${videoId}`);
     // 2️⃣ Fallback to yt-dlp if LemnosLife didn't return segments
     await runYtDlp([
       ytUrl,
@@ -662,9 +716,10 @@ app.get("/api/yt-transcript", async (req, res) => {
       }
     }
     if (!vttFile) {
-      console.warn("No VTT found – attempting local Whisper fallback...");
+      console.warn("❌ No VTT found – attempting local Whisper fallback...");
 
       try {
+        console.log(`🔍 Step 3: Downloading audio for Whisper fallback`);
         const audioPath = path.join(process.cwd(), `${id}.m4a`);
         await runYtDlp([
           ytUrl,
@@ -676,20 +731,26 @@ app.get("/api/yt-transcript", async (req, res) => {
           audioPath,
         ]);
 
+        console.log(`🔍 Step 4: Running Whisper on downloaded audio`);
         const whisperSegs = await runWhisperCpp(audioPath);
         try {
           fs.unlinkSync(audioPath);
         } catch {}
 
         if (whisperSegs.length) {
+          console.log(
+            `✅ Whisper fallback returned ${whisperSegs.length} segments`
+          );
           const payload = { segments: whisperSegs };
           transcriptCache.set(videoId, payload);
           return res.json(payload);
         }
+        console.log(`❌ Whisper fallback returned no segments`);
       } catch (e) {
-        console.error("Whisper fallback failed", e.message);
+        console.error("❌ Whisper fallback failed", e.message);
       }
 
+      console.log(`❌ All methods failed, returning empty segments`);
       const emptyPayload = { segments: [] };
       transcriptCache.set(videoId, emptyPayload);
       return res.status(200).json(emptyPayload);
@@ -726,7 +787,7 @@ app.get("/api/yt-transcript", async (req, res) => {
     return res.json(payload);
   } catch (err) {
     console.warn(
-      "yt-dlp subtitle fetch failed, falling back to Lemnoslife API",
+      "❌ yt-dlp subtitle fetch failed, falling back to Lemnoslife API",
       err.message
     );
     const emptyPayload = { segments: [] };
