@@ -368,19 +368,8 @@ async function fetchYtDlpTranscriptEnhanced(videoId) {
     
     console.log(`✅ Successfully extracted subtitles from ${usedFile} using enhanced method`);
     
-    // Parse content (support both VTT and SRT)
-    let segments;
-    if (usedFile.endsWith('.vtt')) {
-      segments = parseVTT(subtitleContent);
-    } else if (usedFile.endsWith('.srt')) {
-      segments = parseCaptionText(subtitleContent);
-    } else {
-      // Try both parsers
-      segments = parseVTT(subtitleContent);
-      if (segments.length === 0) {
-        segments = parseCaptionText(subtitleContent);
-      }
-    }
+    // Parse content (VTT format only - using yt-dlp with --sub-format vtt)
+    const segments = parseVTT(subtitleContent);
     
     if (segments.length > 0) {
       console.log(`✅ Enhanced yt-dlp extracted ${segments.length} subtitle segments`);
@@ -573,8 +562,7 @@ function getNextProxy() {
   return proxy;
 }
 
-// Enhanced fetch subtitles via official TimedText API with retry and fallbacks
-// TimedText API function removed - using only yt-dlp and whisper.cpp
+// Using only yt-dlp and whisper.cpp for transcript extraction
 
 console.log("🚀 Starting server initialization...");
 console.log("📁 Current working directory:", process.cwd());
@@ -1083,34 +1071,15 @@ app.post("/api/shorts", async (req, res) => {
   }
 });
 
-// Proxy endpoint for transcript (to avoid CORS)
-app.get("/api/transcript", async (req, res) => {
-  const { videoId } = req.query;
-  if (!videoId) return res.status(400).json({ error: "videoId required" });
-  try {
-    const apiUrl = `https://yt.lemnoslife.com/noKey/transcript?videoId=${videoId}`;
-    const apiRes = await fetch(apiUrl);
-    if (!apiRes.ok) {
-      return res
-        .status(apiRes.status)
-        .json({ error: "Failed to fetch transcript", status: apiRes.status });
-    }
-    const data = await apiRes.json();
-    res.json(data);
-  } catch (err) {
-    res
-      .status(500)
-      .json({ error: "Proxy transcript error", details: err.message });
-  }
-});
+// Proxy endpoint removed - using only yt-dlp and whisper.cpp
 
 // Simple in-memory cache to avoid repeated fetches during container lifetime
 const transcriptCache = new Map();
 
-// Endpoint: GET /api/yt-transcript?videoId=... (Enhanced with comprehensive fallback)
+// Endpoint: GET /api/yt-transcript?videoId=... (Using only yt-dlp and whisper.cpp)
 app.get("/api/yt-transcript", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  const { videoId, lang, refresh } = req.query;
+  const { videoId, refresh } = req.query;
   if (!videoId) return res.status(400).json({ error: "videoId required" });
 
   const startTime = Date.now();
@@ -1143,56 +1112,16 @@ app.get("/api/yt-transcript", async (req, res) => {
     });
   }
 
-  const id = uuidv4();
-  const ytUrl = `https://www.youtube.com/watch?v=${videoId}`;
-  const subLang = lang ? String(lang) : "id,en";
-
-  console.log(`🔍 Step 0: Trying enhanced TimedText API first for videoId: ${videoId}`);
+  // Use only yt-dlp and whisper.cpp for transcript extraction
+  console.log(`🔍 Using yt-dlp and whisper.cpp for videoId: ${videoId}`);
   
-  // Primary method: Try enhanced TimedText API with player response parsing
-  try {
-    console.log(`🔍 Attempting enhanced TimedText API for videoId: ${videoId}`);
-    const timedTextSegments = await fetchTimedTextSegments(videoId);
-    if (timedTextSegments && timedTextSegments.length > 0) {
-      transcriptStats.successfulRequests++;
-      const duration = Date.now() - startTime;
-      console.log(`✅ Enhanced TimedText API successful: ${timedTextSegments.length} segments (took ${duration}ms)`);
-      
-      const payload = {
-        segments: timedTextSegments,
-        metadata: {
-          videoId,
-          segmentCount: timedTextSegments.length,
-          processingTime: duration,
-          source: 'enhanced_timedtext',
-          timestamp: new Date().toISOString()
-        }
-      };
-      
-      transcriptCache.set(videoId, payload);
-      return res.json(payload);
-    }
-    
-    console.log(`⚠️ Enhanced TimedText API returned no segments for videoId: ${videoId}`);
-  } catch (timedTextError) {
-    console.error(`❌ Enhanced TimedText API failed for ${videoId}:`, timedTextError.message);
-    transcriptStats.errors.push({ 
-      videoId, 
-      error: timedTextError.message, 
-      timestamp: new Date(),
-      source: 'enhanced_timedtext'
-    });
-  }
-  
-  // Fallback method: Try comprehensive transcript fetch (yt-dlp + other methods)
-  console.log(`🔍 Trying comprehensive transcript fetch fallback for videoId: ${videoId}`);
   try {
     const segments = await getTranscriptSegments(videoId, refresh === 'true');
     
     if (segments && segments.length > 0) {
       transcriptStats.successfulRequests++;
       const duration = Date.now() - startTime;
-      console.log(`✅ Comprehensive transcript fetch successful: ${segments.length} segments (took ${duration}ms)`);
+      console.log(`✅ yt-dlp/whisper.cpp transcript successful: ${segments.length} segments (took ${duration}ms)`);
       
       const payload = {
         segments,
@@ -1200,7 +1129,7 @@ app.get("/api/yt-transcript", async (req, res) => {
           videoId,
           segmentCount: segments.length,
           processingTime: duration,
-          source: 'comprehensive_fetch',
+          source: 'yt-dlp_whisper',
           timestamp: new Date().toISOString()
         }
       };
@@ -1209,119 +1138,33 @@ app.get("/api/yt-transcript", async (req, res) => {
       return res.json(payload);
     }
     
-    console.log(`⚠️ Comprehensive transcript fetch returned no segments for videoId: ${videoId}`);
-  } catch (enhancedError) {
-    console.error(`❌ Comprehensive transcript fetch failed for ${videoId}:`, enhancedError.message);
+    console.log(`⚠️ yt-dlp/whisper.cpp returned no segments for videoId: ${videoId}`);
+  } catch (error) {
+    console.error(`❌ yt-dlp/whisper.cpp failed for ${videoId}:`, error.message);
     transcriptStats.errors.push({ 
       videoId, 
-      error: enhancedError.message, 
+      error: error.message, 
       timestamp: new Date(),
-      source: 'comprehensive_fetch'
+      source: 'yt-dlp_whisper'
     });
   }
-  
-  // Debug: Test TimedText API directly
-  try {
-    const testUrl = `https://video.google.com/timedtext?type=list&v=${videoId}`;
-    console.log(`🔍 Debug: Testing TimedText list URL: ${testUrl}`);
-    const testRes = await fetch(testUrl);
-    console.log(`🔍 Debug: TimedText list response status: ${testRes.status}`);
-    if (testRes.ok) {
-      const testText = await testRes.text();
-      console.log(`🔍 Debug: TimedText list response (first 200 chars): ${testText.substring(0, 200)}`);
-    }
-  } catch (debugErr) {
-    console.log(`🔍 Debug: TimedText list test failed: ${debugErr.message}`);
-  }
 
-  try {
-    console.log(`🔍 Step 1: Trying LemnosLife API for videoId: ${videoId}`);
-    // 1️⃣ Try LemnosLife API first (no quota, usually works)
-    try {
-      const apiUrl = `https://yt.lemnoslife.com/noKey/transcript?videoId=${videoId}`;
-      console.log(`🔍 Debug: LemnosLife API URL: ${apiUrl}`);
-      const apiRes = await fetch(apiUrl);
-      console.log(`🔍 Debug: LemnosLife API response status: ${apiRes.status}`);
-      if (apiRes.ok) {
-        const data = await apiRes.json();
-        console.log(`🔍 Debug: LemnosLife API response structure:`, {
-          hasTranscript: !!data?.transcript,
-          hasSegments: !!data?.transcript?.segments,
-          segmentCount: data?.transcript?.segments?.length || 0,
-          firstSegment: data?.transcript?.segments?.[0] || null
-        });
-        if (data?.transcript?.segments?.length) {
-          console.log(
-            `✅ LemnosLife API returned ${data.transcript.segments.length} segments`
-          );
-          const segments = data.transcript.segments.map((seg) => ({
-            start: new Date(seg.startMs)
-              .toISOString()
-              .substr(11, 12)
-              .replace("Z", ""),
-            end: new Date(seg.startMs + seg.durationMs)
-              .toISOString()
-              .substr(11, 12)
-              .replace("Z", ""),
-            text: seg.text,
-          }));
-          const payload = { segments };
-          transcriptCache.set(videoId, payload);
-          return res.json(payload);
-        }
-      } else {
-        const errorText = await apiRes.text();
-        console.log(`🔍 Debug: LemnosLife API error response: ${errorText.substring(0, 200)}`);
-      }
-      console.log(`❌ LemnosLife API returned no segments`);
-    } catch (lemErr) {
-      console.warn("❌ LemnosLife transcript fetch failed", lemErr.message);
+  // If all methods fail, return empty result
+  const duration = Date.now() - startTime;
+  console.log(`❌ yt-dlp and whisper.cpp failed, returning empty segments (took ${duration}ms)`);
+  const emptyPayload = {
+    segments: [],
+    metadata: {
+      videoId,
+      segmentCount: 0,
+      processingTime: duration,
+      source: 'failed_yt_dlp_whisper',
+      timestamp: new Date().toISOString(),
+      error: 'No transcript available through yt-dlp or whisper.cpp'
     }
-
-    console.log(`🔍 Step 2: All API methods exhausted for videoId: ${videoId}`);
-    // yt-dlp dependency has been removed - no longer using legacy methods
-    
-    const duration = Date.now() - startTime;
-    console.log(`❌ All API methods failed, returning empty segments (took ${duration}ms)`);
-    const emptyPayload = {
-      segments: [],
-      metadata: {
-        videoId,
-        segmentCount: 0,
-        processingTime: duration,
-        source: 'failed_all_api_methods',
-        timestamp: new Date().toISOString(),
-        error: 'No transcript available through API methods'
-      }
-    };
-    transcriptCache.set(videoId, emptyPayload);
-    return res.status(200).json(emptyPayload);
-  } catch (err) {
-    const duration = Date.now() - startTime;
-    console.error(
-      `❌ Legacy yt-dlp subtitle fetch failed for ${videoId} (took ${duration}ms):`,
-      err.message
-    );
-    transcriptStats.errors.push({ 
-      videoId, 
-      error: err.message, 
-      timestamp: new Date(),
-      source: 'legacy_ytdlp'
-    });
-    const emptyPayload = {
-      segments: [],
-      metadata: {
-        videoId,
-        segmentCount: 0,
-        processingTime: duration,
-        source: 'error_fallback',
-        timestamp: new Date().toISOString(),
-        error: err.message
-      }
-    };
-    transcriptCache.set(videoId, emptyPayload);
-    return res.status(200).json(emptyPayload);
-  }
+  };
+  transcriptCache.set(videoId, emptyPayload);
+  return res.status(200).json(emptyPayload);
 });
 
 // Endpoint: Get transcript statistics
@@ -1342,24 +1185,6 @@ app.get("/api/transcript-stats", (req, res) => {
     }));
     
   const methodStats = {
-    youtubeDataAPI: {
-      ...transcriptStats.youtubeDataAPI,
-      successRate: transcriptStats.youtubeDataAPI.total > 0 
-        ? (transcriptStats.youtubeDataAPI.success / transcriptStats.youtubeDataAPI.total * 100).toFixed(2) + '%'
-        : '0%'
-    },
-    timedText: {
-      ...transcriptStats.timedText,
-      successRate: transcriptStats.timedText.total > 0 
-        ? (transcriptStats.timedText.success / transcriptStats.timedText.total * 100).toFixed(2) + '%'
-        : '0%'
-    },
-    lemnosLife: {
-      ...transcriptStats.lemnosLife,
-      successRate: transcriptStats.lemnosLife.total > 0 
-        ? (transcriptStats.lemnosLife.success / transcriptStats.lemnosLife.total * 100).toFixed(2) + '%'
-        : '0%'
-    },
     ytdlp: {
       ...transcriptStats.ytdlp,
       successRate: transcriptStats.ytdlp.total > 0 
@@ -1390,9 +1215,6 @@ app.get("/api/transcript-stats", (req, res) => {
 app.post("/api/transcript-stats/reset", (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   
-  transcriptStats.youtubeDataAPI = { success: 0, total: 0 };
-  transcriptStats.timedText = { success: 0, total: 0 };
-  transcriptStats.lemnosLife = { success: 0, total: 0 };
   transcriptStats.ytdlp = { success: 0, total: 0 };
   transcriptStats.whisper = { success: 0, total: 0 };
   transcriptStats.totalRequests = 0;
@@ -1409,9 +1231,6 @@ app.get("/api/transcript-performance", (req, res) => {
   
   const performance = {
     methodRanking: [
-      { method: 'YouTube Data API', ...transcriptStats.youtubeDataAPI },
-      { method: 'TimedText API', ...transcriptStats.timedText },
-      { method: 'LemnosLife API', ...transcriptStats.lemnosLife },
       { method: 'yt-dlp', ...transcriptStats.ytdlp },
       { method: 'Whisper', ...transcriptStats.whisper }
     ].map(method => ({
@@ -1433,10 +1252,9 @@ app.get("/api/transcript-performance", (req, res) => {
     },
     
     recommendations: [
-      transcriptStats.youtubeDataAPI.total === 0 ? 'Consider setting up YouTube Data API v3 for better reliability' : null,
-      transcriptStats.timedText.success / Math.max(transcriptStats.timedText.total, 1) < 0.5 ? 'TimedText API success rate is low, check for IP restrictions' : null,
-      transcriptStats.lemnosLife.success / Math.max(transcriptStats.lemnosLife.total, 1) < 0.3 ? 'LemnosLife API may be experiencing issues' : null,
-      transcriptStats.errors.length > 50 ? 'High error count detected, consider implementing additional fallback methods' : null
+      transcriptStats.ytdlp.success / Math.max(transcriptStats.ytdlp.total, 1) < 0.5 ? 'yt-dlp success rate is low, check installation and network' : null,
+      transcriptStats.whisper.success / Math.max(transcriptStats.whisper.total, 1) < 0.3 ? 'Whisper.cpp may be experiencing issues, check model files' : null,
+      transcriptStats.errors.length > 50 ? 'High error count detected, consider checking yt-dlp and whisper.cpp configuration' : null
     ].filter(Boolean),
     
     timestamp: new Date().toISOString()
