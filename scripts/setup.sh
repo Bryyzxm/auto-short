@@ -37,9 +37,31 @@ if [ ! -f ./bin/whisper ]; then
     -DWHISPER_BUILD_EXAMPLES=OFF
   
   cmake --build build --config Release --parallel 2
+   
+   # Try to build whisper-cli specifically if it wasn't built
+   cmake --build build --target whisper-cli --config Release 2>/dev/null || echo "⚠️ whisper-cli target not available, using available binaries"
   
-  # Copy binary to project
-  cp build/bin/whisper-cli "$ORIGINAL_DIR/bin/whisper"
+  # Copy binary to project - search for whisper binary in multiple locations
+   if [ -f build/bin/whisper-cli ]; then
+       cp build/bin/whisper-cli "$ORIGINAL_DIR/bin/whisper"
+       echo "✅ Found and copied whisper-cli from build/bin/"
+   elif [ -f build/bin/whisper ]; then
+       cp build/bin/whisper "$ORIGINAL_DIR/bin/whisper"
+       echo "✅ Found and copied whisper from build/bin/"
+   elif [ -f build/whisper-cli ]; then
+       cp build/whisper-cli "$ORIGINAL_DIR/bin/whisper"
+       echo "✅ Found and copied whisper-cli from build/"
+   elif [ -f build/whisper ]; then
+       cp build/whisper "$ORIGINAL_DIR/bin/whisper"
+       echo "✅ Found and copied whisper from build/"
+   else
+       echo "❌ Whisper binary not found in expected locations"
+       echo "📁 Available files in build directory:"
+       find build -name "*whisper*" -type f 2>/dev/null || echo "No whisper files found"
+       echo "📁 All executable files in build:"
+       find build -type f -executable 2>/dev/null || echo "No executable files found"
+       exit 1
+   fi
   
   cd "$ORIGINAL_DIR"
   echo "✅ whisper.cpp built and copied to ./bin/whisper"
