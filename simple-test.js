@@ -1,7 +1,11 @@
 async function testEndpoint() {
   try {
-    console.log('Testing http://localhost:5001/api/transcript-stats...');
-    const response = await fetch('http://localhost:5001/api/transcript-stats');
+    console.log('Testing https://auto-short-backend-production.up.railway.app/api/generate-segments...');
+    const response = await fetch('https://auto-short-backend-production.up.railway.app/api/generate-segments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ videoUrl: 'test', transcript: 'test' })
+    });
     console.log('Status:', response.status);
     const data = await response.json();
     console.log('Response:', JSON.stringify(data, null, 2));
