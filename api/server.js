@@ -142,6 +142,11 @@ async function downloadAudio(videoId) {
 async function getTranscriptSegments(videoId, refresh = false) {
   console.log(`🔍 Getting transcript for video: ${videoId}, refresh: ${refresh}`);
   
+  // Add natural delay to avoid rate limiting (1-3 seconds)
+  const delay = Math.floor(Math.random() * 2000) + 1000;
+  console.log(`⏱️ Adding natural delay: ${delay}ms`);
+  await new Promise(resolve => setTimeout(resolve, delay));
+  
   // Update transcript stats
   transcriptStats.totalRequests++;
   
@@ -473,35 +478,51 @@ function runYtDlp(args, options = {}) {
       }
     }
     
-    // Rotate user agents to avoid detection
+    // Rotate user agents to avoid detection with more realistic options
     const userAgents = [
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0'
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0',
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0'
     ];
     
     const randomUserAgent = userAgents[Math.floor(Math.random() * userAgents.length)];
     
-    // Add user agent to avoid detection
+    // Add user agent and browser simulation headers
     const userAgentArgs = [
-      '--user-agent', randomUserAgent
+      '--user-agent', randomUserAgent,
+      '--add-header', 'Accept:text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+      '--add-header', 'Accept-Language:en-US,en;q=0.9,id;q=0.8',
+      '--add-header', 'Accept-Encoding:gzip, deflate, br',
+      '--add-header', 'DNT:1',
+      '--add-header', 'Connection:keep-alive',
+      '--add-header', 'Upgrade-Insecure-Requests:1',
+      '--add-header', 'Sec-Fetch-Dest:document',
+      '--add-header', 'Sec-Fetch-Mode:navigate',
+      '--add-header', 'Sec-Fetch-Site:none',
+      '--add-header', 'Sec-Fetch-User:?1',
+      '--add-header', 'Cache-Control:max-age=0',
+      '--add-header', 'Sec-Ch-Ua:"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+      '--add-header', 'Sec-Ch-Ua-Mobile:?0',
+      '--add-header', 'Sec-Ch-Ua-Platform:"Windows"'
     ];
     
-    // Add additional anti-detection measures with compatible options
+    // Add additional anti-detection measures with more natural timing
     const antiDetectionArgs = [
-      '--sleep-interval', '2',
-      '--max-sleep-interval', '5',
-      '--extractor-retries', '5',
-      '--fragment-retries', '5',
-      '--retry-sleep', 'exp=1:120',
+      '--sleep-interval', '3',
+      '--max-sleep-interval', '8',
+      '--extractor-retries', '3',
+      '--fragment-retries', '3',
+      '--retry-sleep', 'linear=1:5',
       '--no-check-certificate',
       '--prefer-free-formats',
       '--youtube-skip-dash-manifest',
       '--no-warnings',
       '--ignore-errors',
       '--no-abort-on-error',
-      '--no-playlist'
+      '--no-playlist',
+      '--socket-timeout', '30'
     ];
     
     const finalArgs = [...cookieArgs, ...userAgentArgs, ...antiDetectionArgs, ...args];
