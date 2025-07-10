@@ -1269,6 +1269,57 @@ app.post("/api/shorts", async (req, res) => {
 // Simple in-memory cache to avoid repeated fetches during container lifetime
 const transcriptCache = new Map();
 
+// Debug endpoint to test yt-dlp directly
+app.get('/api/debug-ytdlp/:videoId', async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  const { videoId } = req.params;
+  const debugLogs = [];
+  
+  // Override console.log to capture logs
+  const originalLog = console.log;
+  const originalError = console.error;
+  
+  console.log = (...args) => {
+    debugLogs.push({ type: 'log', message: args.join(' '), timestamp: new Date().toISOString() });
+    originalLog(...args);
+  };
+  
+  console.error = (...args) => {
+    debugLogs.push({ type: 'error', message: args.join(' '), timestamp: new Date().toISOString() });
+    originalError(...args);
+  };
+  
+  try {
+    debugLogs.push({ type: 'info', message: `Starting debug for video: ${videoId}`, timestamp: new Date().toISOString() });
+    
+    // Test basic yt-dlp command
+    const testArgs = [
+      `https://www.youtube.com/watch?v=${videoId}`,
+      '--print', 'title',
+      '--no-warnings'
+    ];
+    
+    debugLogs.push({ type: 'info', message: `Testing basic yt-dlp command with args: ${testArgs.join(' ')}`, timestamp: new Date().toISOString() });
+    
+    const result = await runYtDlp(testArgs);
+    debugLogs.push({ type: 'success', message: `Basic yt-dlp test successful: ${result}`, timestamp: new Date().toISOString() });
+    
+  } catch (error) {
+    debugLogs.push({ type: 'error', message: `Basic yt-dlp test failed: ${error.message}`, timestamp: new Date().toISOString() });
+    debugLogs.push({ type: 'error', message: `Error details: ${JSON.stringify(error, null, 2)}`, timestamp: new Date().toISOString() });
+  }
+  
+  // Restore original console functions
+  console.log = originalLog;
+  console.error = originalError;
+  
+  res.json({
+    videoId,
+    debugLogs,
+    timestamp: new Date().toISOString()
+  });
+});
+
 // Endpoint: GET /api/yt-transcript?videoId=... (Using only yt-dlp and whisper.cpp)
 app.get("/api/yt-transcript", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
