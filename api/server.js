@@ -236,34 +236,72 @@ async function fetchYtDlpTranscript(videoId) {
       '--sub-format', 'vtt',
       '--skip-download',
       '--output', `temp_${videoId}.%(ext)s`,
-      '--no-warnings'
+      '--no-warnings',
+      '--ignore-errors'
     ];
     
     console.log(`🔧 Running yt-dlp subtitle extraction...`);
-    const stdout = await runYtDlp(subtitleArgs, { timeout: 90000 });
+    console.log(`🔧 Command: ${USE_PYTHON_YT_DLP ? 'python -m yt_dlp' : YT_DLP_PATH} ${subtitleArgs.join(' ')}`);
     
-    // Look for generated subtitle files
-    const possibleFiles = [
-      `temp_${videoId}.id.vtt`,
-      `temp_${videoId}.en.vtt`,
-      `temp_${videoId}.en-US.vtt`,
-      `temp_${videoId}.en-GB.vtt`
-    ];
+    try {
+      const stdout = await runYtDlp(subtitleArgs, { timeout: 90000 });
+      console.log(`🔧 yt-dlp stdout: ${stdout.substring(0, 200)}...`);
+    } catch (ytdlpError) {
+      console.error(`❌ yt-dlp execution failed: ${ytdlpError.message}`);
+      
+      // Try simpler approach without auto-subs
+      console.log(`🔄 Retrying with manual subtitles only...`);
+      const simpleArgs = [
+        ytUrl,
+        '--write-subs',
+        '--sub-langs', 'en,id',
+        '--sub-format', 'vtt',
+        '--skip-download',
+        '--output', `simple_${videoId}.%(ext)s`,
+        '--no-warnings',
+        '--ignore-errors'
+      ];
+      
+      try {
+        await runYtDlp(simpleArgs, { timeout: 60000 });
+      } catch (simpleError) {
+        console.error(`❌ Simple yt-dlp also failed: ${simpleError.message}`);
+        throw simpleError;
+      }
+    }
+    
+    // Look for generated subtitle files with broader search
+    const allFiles = fs.readdirSync('.').filter(file => 
+      (file.includes(videoId) && (file.endsWith('.vtt') || file.endsWith('.srt')))
+    );
+    
+    console.log(`🔍 Found subtitle files: ${allFiles.join(', ')}`);
     
     let subtitleContent = null;
     let usedFile = null;
     
-    for (const file of possibleFiles) {
-      if (fs.existsSync(file)) {
-        console.log(`✅ Found subtitle file: ${file}`);
-        subtitleContent = fs.readFileSync(file, 'utf-8');
-        usedFile = file;
+    // Prioritize files by language preference
+    const languagePriority = ['id', 'en', 'en-US', 'en-GB'];
+    
+    for (const lang of languagePriority) {
+      const matchingFile = allFiles.find(file => file.includes(`.${lang}.`));
+      if (matchingFile) {
+        console.log(`✅ Found preferred subtitle file: ${matchingFile}`);
+        subtitleContent = fs.readFileSync(matchingFile, 'utf-8');
+        usedFile = matchingFile;
         break;
       }
     }
     
+    // If no preferred language found, use any available file
+    if (!subtitleContent && allFiles.length > 0) {
+      usedFile = allFiles[0];
+      console.log(`✅ Using available subtitle file: ${usedFile}`);
+      subtitleContent = fs.readFileSync(usedFile, 'utf-8');
+    }
+    
     // Clean up subtitle files
-    for (const file of possibleFiles) {
+    for (const file of allFiles) {
       try {
         if (fs.existsSync(file)) {
           fs.unlinkSync(file);
@@ -279,6 +317,7 @@ async function fetchYtDlpTranscript(videoId) {
     }
     
     console.log(`✅ Successfully extracted subtitles from ${usedFile}`);
+    console.log(`📝 Subtitle content preview: ${subtitleContent.substring(0, 200)}...`);
     
     // Parse VTT content
     const segments = parseVTT(subtitleContent);
@@ -463,7 +502,7 @@ function runYtDlp(args, options = {}) {
 
 // Helper: run whisper.cpp on an audio file and return segments [{start,end,text}]
 function runWhisperCpp(audioPath) {
-  return new Promise((resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
     if (!WHISPER_PATH) {
       return reject(new Error("whisper.cpp not found. Please check installation."));
     }
@@ -489,8 +528,35 @@ function runWhisperCpp(audioPath) {
       }
     }
 
+    // If no model found, try to download it
     if (!modelPath) {
-      return reject(new Error(`Whisper model not found in any of these locations: ${MODEL_PATHS.join(", ")}`));
+      console.log(`⚠️ Whisper model not found, attempting to download...`);
+      try {
+        // Create models directory if it doesn't exist
+        const modelsDir = isProduction ? "/app/models" : "./models";
+        if (!fs.existsSync(modelsDir)) {
+          fs.mkdirSync(modelsDir, { recursive: true });
+        }
+        
+        modelPath = path.join(modelsDir, "ggml-tiny.bin");
+        
+        // Download tiny model (smallest, fastest)
+        const modelUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin";
+        console.log(`📥 Downloading whisper model from: ${modelUrl}`);
+        
+        const response = await fetch(modelUrl);
+        if (!response.ok) {
+          throw new Error(`Failed to download model: ${response.statusText}`);
+        }
+        
+        const buffer = await response.arrayBuffer();
+        fs.writeFileSync(modelPath, Buffer.from(buffer));
+        console.log(`✅ Model downloaded successfully to: ${modelPath}`);
+        
+      } catch (downloadError) {
+        console.error(`❌ Failed to download whisper model: ${downloadError.message}`);
+        return reject(new Error(`Whisper model not found and download failed: ${downloadError.message}`));
+      }
     }
 
     console.log(`🔧 Using model: ${modelPath}`);
