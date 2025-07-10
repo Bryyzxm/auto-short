@@ -447,6 +447,9 @@ function runYtDlp(args, options = {}) {
         // If it's a file path
         cookieArgs.push('--cookies', YOUTUBE_COOKIES);
       }
+    } else {
+      // Try to use browser cookies automatically
+      cookieArgs.push('--cookies-from-browser', 'chrome');
     }
     
     // Rotate user agents to avoid detection
@@ -464,20 +467,23 @@ function runYtDlp(args, options = {}) {
       '--user-agent', randomUserAgent
     ];
     
-    // Add additional anti-detection measures
+    // Add additional anti-detection measures with more aggressive options
     const antiDetectionArgs = [
-      '--sleep-interval', '1',
-      '--max-sleep-interval', '3',
-      '--sleep-subtitles', '1',
-      '--extractor-retries', '3',
-      '--fragment-retries', '3',
-      '--retry-sleep', 'linear=1::2',
+      '--sleep-interval', '2',
+      '--max-sleep-interval', '5',
+      '--sleep-subtitles', '2',
+      '--extractor-retries', '5',
+      '--fragment-retries', '5',
+      '--retry-sleep', 'exp=1:120',
       '--no-check-certificate',
       '--prefer-free-formats',
       '--youtube-skip-dash-manifest',
       '--no-warnings',
       '--ignore-errors',
-      '--no-abort-on-error'
+      '--no-abort-on-error',
+      '--force-json',
+      '--no-playlist',
+      '--extract-flat', 'false'
     ];
     
     const finalArgs = [...cookieArgs, ...userAgentArgs, ...antiDetectionArgs, ...args];
@@ -518,43 +524,90 @@ function runYtDlp(args, options = {}) {
               stderr.includes('Sign in to confirm') ||
               stderr.includes('verify') ||
               stderr.includes('captcha')) {
-            console.log('🤖 Bot detection triggered - trying alternative approach');
+            console.log('🤖 Bot detection triggered - trying alternative approaches');
             
-            // Try with different approach - use invidious or alternative extractor
-            const alternativeArgs = finalArgs.map(arg => {
-              if (arg.includes('youtube.com/watch?v=')) {
-                // Try with different URL format or extractor
-                return arg.replace('youtube.com/watch?v=', 'youtu.be/');
-              }
-              return arg;
-            });
-            
-            // Add geo-bypass options
-            alternativeArgs.push('--geo-bypass');
-            alternativeArgs.push('--geo-bypass-country', 'US');
-            
-            console.log('🔄 Retrying with alternative URL format and geo-bypass...');
-            
-            execFile(
-              execPath,
-              USE_PYTHON_YT_DLP ? ["-m", "yt_dlp", ...alternativeArgs] : alternativeArgs,
-              { 
-                timeout: options.timeout || 300000,
-                maxBuffer: 1024 * 1024 * 10
+            // Try multiple alternative approaches
+            const alternatives = [
+              // Approach 1: Use invidious extractor
+              {
+                name: 'Invidious',
+                args: finalArgs.map(arg => {
+                  if (arg.includes('youtube.com/watch?v=')) {
+                    const videoId = arg.split('v=')[1];
+                    return `https://invidious.io/watch?v=${videoId}`;
+                  }
+                  return arg;
+                }).concat(['--extractor', 'invidious'])
               },
-              (retryError, retryStdout, retryStderr) => {
-                console.log(`📤 Retry stdout: ${retryStdout || '(empty)'}`);
-                console.log(`📤 Retry stderr: ${retryStderr || '(empty)'}`);
-                
-                if (retryError) {
-                  console.error(`❌ Alternative approach also failed: ${retryError.message}`);
-                  console.error(`❌ Retry exit code: ${retryError.code}`);
-                  return reject(Object.assign(error, { errorType, alternativeFailed: true }));
-                }
-                console.log(`✅ Alternative approach succeeded!`);
-                resolve(retryStdout);
+              // Approach 2: Use different URL format with geo-bypass
+              {
+                name: 'Alternative URL + Geo-bypass',
+                args: finalArgs.map(arg => {
+                  if (arg.includes('youtube.com/watch?v=')) {
+                    return arg.replace('youtube.com/watch?v=', 'youtu.be/');
+                  }
+                  return arg;
+                }).concat(['--geo-bypass', '--geo-bypass-country', 'US'])
+              },
+              // Approach 3: Use mobile user agent
+              {
+                name: 'Mobile User Agent',
+                args: finalArgs.map(arg => {
+                  if (arg === randomUserAgent) {
+                    return 'Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1';
+                  }
+                  return arg;
+                })
               }
-            );
+            ];
+            
+            let attemptCount = 0;
+            
+            function tryAlternative() {
+              if (attemptCount >= alternatives.length) {
+                console.error(`❌ All ${alternatives.length} alternative approaches failed`);
+                return reject(Object.assign(error, { errorType, allAlternativesFailed: true }));
+              }
+              
+              const alternative = alternatives[attemptCount];
+              attemptCount++;
+              
+              console.log(`🔄 Trying alternative approach ${attemptCount}/${alternatives.length}: ${alternative.name}`);
+              
+              execFile(
+                execPath,
+                USE_PYTHON_YT_DLP ? ["-m", "yt_dlp", ...alternative.args] : alternative.args,
+                { 
+                  timeout: options.timeout || 300000,
+                  maxBuffer: 1024 * 1024 * 10
+                },
+                (retryError, retryStdout, retryStderr) => {
+                  console.log(`📤 ${alternative.name} stdout: ${retryStdout || '(empty)'}`);
+                  console.log(`📤 ${alternative.name} stderr: ${retryStderr || '(empty)'}`);
+                  
+                  if (retryError) {
+                    console.error(`❌ ${alternative.name} approach failed: ${retryError.message}`);
+                    console.error(`❌ ${alternative.name} exit code: ${retryError.code}`);
+                    
+                    // If this alternative also has bot detection, try next one
+                    if (retryError.message.includes('bot') || retryStderr.includes('bot')) {
+                      console.log(`🤖 ${alternative.name} also triggered bot detection, trying next approach...`);
+                      setTimeout(tryAlternative, 2000); // Wait 2 seconds before next attempt
+                    } else {
+                      // Different error, try next approach
+                      setTimeout(tryAlternative, 1000);
+                    }
+                    return;
+                  }
+                  
+                  console.log(`✅ ${alternative.name} approach succeeded!`);
+                  resolve(retryStdout);
+                }
+              );
+            }
+            
+            // Start trying alternatives with a delay
+            setTimeout(tryAlternative, 1000);
             return;
           }
           
