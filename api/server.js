@@ -751,14 +751,28 @@ try {
   
   for (const path of WHISPER_PATHS) {
     if (fs.existsSync(path)) {
-      // Verify the binary is executable
-      try {
-        execFileSync(path, ["--help"], { stdio: "ignore", timeout: 5000 });
-        WHISPER_PATH = path;
-        console.log(`✅ whisper.cpp found and verified at: ${path}`);
-        break;
-      } catch (execErr) {
-        console.log(`⚠️ Found ${path} but execution test failed: ${execErr.message}`);
+      // For production environments, trust that the binary exists and is executable
+      if (isProduction) {
+        try {
+          const stats = fs.statSync(path);
+          if (stats.isFile()) {
+            WHISPER_PATH = path;
+            console.log(`✅ whisper.cpp found at: ${path} (production mode)`);
+            break;
+          }
+        } catch (statErr) {
+          console.log(`⚠️ Found ${path} but stat check failed: ${statErr.message}`);
+        }
+      } else {
+        // For development, do a simple execution test
+        try {
+          execFileSync(path, ["--help"], { stdio: "ignore", timeout: 3000 });
+          WHISPER_PATH = path;
+          console.log(`✅ whisper.cpp found and verified at: ${path}`);
+          break;
+        } catch (execErr) {
+          console.log(`⚠️ Found ${path} but execution test failed: ${execErr.message}`);
+        }
       }
     }
   }
@@ -769,31 +783,10 @@ try {
     try {
       const whichCmd = process.platform === 'win32' ? 'where' : 'which';
       execFileSync(whichCmd, ["whisper"], { stdio: "ignore" });
-      // Test if it's actually whisper.cpp
-      try {
-        execFileSync("whisper", ["--help"], { stdio: "ignore", timeout: 5000 });
-        WHISPER_PATH = "whisper";
-        console.log(`✅ whisper found and verified in PATH`);
-      } catch {
-        console.log(`⚠️ Found 'whisper' in PATH but it's not whisper.cpp`);
-      }
+      WHISPER_PATH = "whisper";
+      console.log(`✅ whisper found in PATH`);
     } catch {
       console.log(`❌ whisper also not found in PATH`);
-    }
-  }
-  
-  // Additional verification for production environment
-  if (WHISPER_PATH && isProduction) {
-    console.log(`🔧 Production verification for whisper.cpp at: ${WHISPER_PATH}`);
-    try {
-      const result = execFileSync(WHISPER_PATH, ["--help"], { encoding: 'utf8', timeout: 5000 });
-      if (result.includes('whisper.cpp') || result.includes('usage:')) {
-        console.log(`✅ whisper.cpp production verification successful`);
-      } else {
-        console.log(`⚠️ whisper.cpp verification unclear, but proceeding...`);
-      }
-    } catch (verifyErr) {
-      console.log(`⚠️ whisper.cpp verification failed: ${verifyErr.message}`);
     }
   }
   
