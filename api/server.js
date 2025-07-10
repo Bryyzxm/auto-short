@@ -3,6 +3,9 @@ import express from "express";
 import cors from "cors";
 import { execFile, execFileSync } from "child_process";
 import { v4 as uuidv4 } from "uuid";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 
 // Transcript statistics for monitoring (simplified to yt-dlp and whisper.cpp only)
 const transcriptStats = {
@@ -457,10 +460,6 @@ function runYtDlp(args, options = {}) {
     );
   });
 }
-import path from "path";
-import fs from "fs";
-import fetch from "node-fetch";
-import { fileURLToPath } from "url";
 
 // Helper: run whisper.cpp on an audio file and return segments [{start,end,text}]
 function runWhisperCpp(audioPath) {
@@ -614,11 +613,11 @@ function binaryExists(cmd) {
   }
 }
 
-// Check for yt-dlp in multiple possible locations
+// Check for yt-dlp in multiple possible locations (Railway/Docker optimized)
 const YT_DLP_PATHS = [
-  "./bin/yt-dlp",
   "/usr/local/bin/yt-dlp",
-  "/usr/bin/yt-dlp",
+  "/usr/bin/yt-dlp", 
+  "./bin/yt-dlp",
   "yt-dlp",
   "yt-dlp.exe"
 ];
@@ -626,47 +625,75 @@ const YT_DLP_PATHS = [
 let YT_DLP_PATH = null;
 let USE_PYTHON_YT_DLP = false;
 
-// Enhanced yt-dlp detection with priority for reliability
+// Enhanced yt-dlp detection with priority for Railway/Docker environments
 try {
   console.log('🔍 Detecting yt-dlp installation (PRIMARY TRANSCRIPT METHOD)...');
+  console.log(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🔧 Platform: ${process.platform}`);
   
-  // First try to use yt-dlp from PATH (most reliable in Docker)
-  try {
-    execFileSync("which", ["yt-dlp"], { stdio: "ignore" });
-    YT_DLP_PATH = "yt-dlp";
-    console.log(`✅ yt-dlp found in PATH - EXCELLENT!`);
-  } catch {
-    console.log('⚠️ yt-dlp not in PATH, checking specific locations...');
+  // For production environments (Railway/Docker), prioritize Python module first
+  if (isProduction) {
+    console.log('🐳 Production environment detected, trying Python module first...');
     
-    // If not in PATH, try specific locations
-    for (const path of YT_DLP_PATHS) {
-      if (fs.existsSync(path) || binaryExists(path.split('/').pop())) {
-        YT_DLP_PATH = path;
-        console.log(`✅ yt-dlp found at: ${path}`);
-        break;
-      }
-    }
-    
-    // If still not found, try python -m yt_dlp (fallback)
-    if (!YT_DLP_PATH) {
-      console.log('⚠️ Binary yt-dlp not found, trying Python module...');
+    // Try python3 -m yt_dlp first (most reliable in Docker)
+    try {
+      execFileSync("python3", ["-m", "yt_dlp", "--version"], { stdio: "ignore" });
+      YT_DLP_PATH = "python3";
+      USE_PYTHON_YT_DLP = true;
+      console.log(`✅ yt-dlp found via python3 -m yt_dlp (PRODUCTION OPTIMIZED)`);
+    } catch {
+      // Try python -m yt_dlp
       try {
         execFileSync("python", ["-m", "yt_dlp", "--version"], { stdio: "ignore" });
         YT_DLP_PATH = "python";
         USE_PYTHON_YT_DLP = true;
         console.log(`✅ yt-dlp found via python -m yt_dlp`);
       } catch {
-        // Try python3 as well
+        console.log('⚠️ Python module not working, trying binary paths...');
+      }
+    }
+  }
+  
+  // If not found via Python or in development, try binary paths
+  if (!YT_DLP_PATH) {
+    // Try to use yt-dlp from PATH
+    try {
+      const whichCmd = process.platform === 'win32' ? 'where' : 'which';
+      execFileSync(whichCmd, ["yt-dlp"], { stdio: "ignore" });
+      YT_DLP_PATH = "yt-dlp";
+      console.log(`✅ yt-dlp found in PATH`);
+    } catch {
+      console.log('⚠️ yt-dlp not in PATH, checking specific locations...');
+      
+      // If not in PATH, try specific locations
+      for (const path of YT_DLP_PATHS) {
+        if (fs.existsSync(path) || binaryExists(path.split('/').pop())) {
+          YT_DLP_PATH = path;
+          console.log(`✅ yt-dlp found at: ${path}`);
+          break;
+        }
+      }
+      
+      // Final fallback for development environments
+      if (!YT_DLP_PATH && !isProduction) {
+        console.log('⚠️ Development environment: trying Python module fallback...');
         try {
           execFileSync("python3", ["-m", "yt_dlp", "--version"], { stdio: "ignore" });
           YT_DLP_PATH = "python3";
           USE_PYTHON_YT_DLP = true;
           console.log(`✅ yt-dlp found via python3 -m yt_dlp`);
         } catch {
-          console.log(`❌ CRITICAL: yt-dlp NOT found in any location!`);
-          console.log(`❌ Checked locations: ${YT_DLP_PATHS.join(", ")}`);
-          console.log(`❌ Also checked: PATH, python -m yt_dlp, python3 -m yt_dlp`);
-          console.log(`❌ This will severely impact transcript extraction capability!`);
+          try {
+            execFileSync("python", ["-m", "yt_dlp", "--version"], { stdio: "ignore" });
+            YT_DLP_PATH = "python";
+            USE_PYTHON_YT_DLP = true;
+            console.log(`✅ yt-dlp found via python -m yt_dlp`);
+          } catch {
+            console.log(`❌ CRITICAL: yt-dlp NOT found in any location!`);
+            console.log(`❌ Checked locations: ${YT_DLP_PATHS.join(", ")}`);
+            console.log(`❌ Also checked: PATH, python -m yt_dlp, python3 -m yt_dlp`);
+            console.log(`❌ This will severely impact transcript extraction capability!`);
+          }
         }
       }
     }
@@ -705,11 +732,12 @@ if (YT_DLP_PATH) {
   console.log(`❌ Please install yt-dlp for optimal transcript extraction`);
 }
 
-// Check if whisper.cpp exists (multiple possible locations)
+// Check if whisper.cpp exists (Railway/Docker optimized paths)
 const WHISPER_PATHS = [
-  "./bin/whisper",
   "/app/bin/main",
   "/app/bin/whisper",
+  "./bin/whisper",
+  "./bin/main",
   "/app/whisper.cpp/main",
   "/usr/local/bin/whisper",
   "whisper",
@@ -718,24 +746,57 @@ const WHISPER_PATHS = [
 
 let WHISPER_PATH = null;
 try {
+  console.log('🔍 Detecting whisper.cpp installation...');
+  console.log(`🔧 Checking paths: ${WHISPER_PATHS.join(", ")}`);
+  
   for (const path of WHISPER_PATHS) {
     if (fs.existsSync(path)) {
-      WHISPER_PATH = path;
-      console.log(`✅ whisper.cpp found at: ${path}`);
-      break;
+      // Verify the binary is executable
+      try {
+        execFileSync(path, ["--help"], { stdio: "ignore", timeout: 5000 });
+        WHISPER_PATH = path;
+        console.log(`✅ whisper.cpp found and verified at: ${path}`);
+        break;
+      } catch (execErr) {
+        console.log(`⚠️ Found ${path} but execution test failed: ${execErr.message}`);
+      }
     }
   }
+  
   if (!WHISPER_PATH) {
     console.log(`❌ whisper.cpp NOT found in any of these locations: ${WHISPER_PATHS.join(", ")}`);
     // Try to find whisper in PATH
     try {
-      execFileSync("which", ["whisper"], { stdio: "ignore" });
-      WHISPER_PATH = "whisper";
-      console.log(`✅ whisper found in PATH`);
+      const whichCmd = process.platform === 'win32' ? 'where' : 'which';
+      execFileSync(whichCmd, ["whisper"], { stdio: "ignore" });
+      // Test if it's actually whisper.cpp
+      try {
+        execFileSync("whisper", ["--help"], { stdio: "ignore", timeout: 5000 });
+        WHISPER_PATH = "whisper";
+        console.log(`✅ whisper found and verified in PATH`);
+      } catch {
+        console.log(`⚠️ Found 'whisper' in PATH but it's not whisper.cpp`);
+      }
     } catch {
       console.log(`❌ whisper also not found in PATH`);
     }
   }
+  
+  // Additional verification for production environment
+  if (WHISPER_PATH && isProduction) {
+    console.log(`🔧 Production verification for whisper.cpp at: ${WHISPER_PATH}`);
+    try {
+      const result = execFileSync(WHISPER_PATH, ["--help"], { encoding: 'utf8', timeout: 5000 });
+      if (result.includes('whisper.cpp') || result.includes('usage:')) {
+        console.log(`✅ whisper.cpp production verification successful`);
+      } else {
+        console.log(`⚠️ whisper.cpp verification unclear, but proceeding...`);
+      }
+    } catch (verifyErr) {
+      console.log(`⚠️ whisper.cpp verification failed: ${verifyErr.message}`);
+    }
+  }
+  
 } catch (err) {
   console.log(`❌ Error checking whisper.cpp: ${err.message}`);
 }
