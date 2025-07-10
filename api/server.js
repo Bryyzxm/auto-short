@@ -449,23 +449,42 @@ function runYtDlp(args, options = {}) {
       }
     }
     
+    // Rotate user agents to avoid detection
+    const userAgents = [
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0'
+    ];
+    
+    const randomUserAgent = userAgents[Math.floor(Math.random() * userAgents.length)];
+    
     // Add user agent to avoid detection
     const userAgentArgs = [
-      '--user-agent', 
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      '--user-agent', randomUserAgent
     ];
     
     // Add additional anti-detection measures
     const antiDetectionArgs = [
       '--sleep-interval', '1',
       '--max-sleep-interval', '3',
-      '--sleep-subtitles', '1'
+      '--sleep-subtitles', '1',
+      '--extractor-retries', '3',
+      '--fragment-retries', '3',
+      '--retry-sleep', 'linear=1::2',
+      '--no-check-certificate',
+      '--prefer-free-formats',
+      '--youtube-skip-dash-manifest',
+      '--no-warnings',
+      '--ignore-errors',
+      '--no-abort-on-error'
     ];
     
     const finalArgs = [...cookieArgs, ...userAgentArgs, ...antiDetectionArgs, ...args];
     
     console.log(`🔧 Running yt-dlp with enhanced args (${finalArgs.length} total)`);
     console.log(`🔧 Using binary: ${YT_DLP_PATH}`);
+    console.log(`🔧 Using User-Agent: ${randomUserAgent.substring(0, 50)}...`);
     if (cookieArgs.length > 0) {
       console.log(`🍪 Using cookies: ${cookieArgs.join(' ')}`);
     }
@@ -486,7 +505,46 @@ function runYtDlp(args, options = {}) {
           console.error(`❌ yt-dlp error (${errorType}): ${error.message}`);
           console.error(`❌ yt-dlp stderr: ${stderr}`);
           
-          // Enhanced error handling
+          // Enhanced error handling with specific bot detection
+          if (error.message.includes('Sign in to confirm you\'re not a bot') || 
+              error.message.includes('bot') || 
+              stderr.includes('bot')) {
+            console.log('🤖 Bot detection triggered - trying alternative approach');
+            
+            // Try with different approach - use invidious or alternative extractor
+            const alternativeArgs = finalArgs.map(arg => {
+              if (arg.includes('youtube.com/watch?v=')) {
+                // Try with different URL format or extractor
+                return arg.replace('youtube.com/watch?v=', 'youtu.be/');
+              }
+              return arg;
+            });
+            
+            // Add geo-bypass options
+            alternativeArgs.push('--geo-bypass');
+            alternativeArgs.push('--geo-bypass-country', 'US');
+            
+            console.log('🔄 Retrying with alternative URL format and geo-bypass...');
+            
+            execFile(
+              execPath,
+              USE_PYTHON_YT_DLP ? ["-m", "yt_dlp", ...alternativeArgs] : alternativeArgs,
+              { 
+                timeout: options.timeout || 300000,
+                maxBuffer: 1024 * 1024 * 10
+              },
+              (retryError, retryStdout, retryStderr) => {
+                if (retryError) {
+                  console.error(`❌ Alternative approach also failed: ${retryError.message}`);
+                  return reject(Object.assign(error, { errorType, alternativeFailed: true }));
+                }
+                console.log(`✅ Alternative approach succeeded!`);
+                resolve(retryStdout);
+              }
+            );
+            return;
+          }
+          
           if (errorType === ERROR_TYPES.RATE_LIMITED) {
             console.log('🚫 Rate limited - consider using cookies or proxy');
           }
