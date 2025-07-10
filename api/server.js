@@ -448,8 +448,29 @@ function runYtDlp(args, options = {}) {
         cookieArgs.push('--cookies', YOUTUBE_COOKIES);
       }
     } else {
-      // Try to use browser cookies automatically
-      cookieArgs.push('--cookies-from-browser', 'chrome');
+      // Try to use browser cookies automatically, but only if browser is available
+      const possibleChromePaths = [
+        '/root/.config/google-chrome',
+        '/home/user/.config/google-chrome',
+        process.env.HOME + '/.config/google-chrome',
+        '/app/.config/google-chrome'
+      ];
+      
+      const chromeAvailable = possibleChromePaths.some(path => {
+        try {
+          return fs.existsSync(path);
+        } catch (e) {
+          return false;
+        }
+      });
+      
+      if (chromeAvailable) {
+        console.log('🍪 Chrome browser detected, using cookies');
+        cookieArgs.push('--cookies-from-browser', 'chrome');
+      } else {
+        console.log('⚠️ No Chrome browser detected, proceeding without cookies');
+        // Don't add any cookie arguments - proceed without cookies
+      }
     }
     
     // Rotate user agents to avoid detection
@@ -513,6 +534,45 @@ function runYtDlp(args, options = {}) {
           console.error(`❌ yt-dlp stderr: ${stderr}`);
           console.error(`❌ yt-dlp exit code: ${error.code}`);
           console.error(`❌ yt-dlp signal: ${error.signal}`);
+          
+          // Handle cookies database error - retry without cookies
+          if (stderr.includes('could not find chrome cookies database') || 
+              error.message.includes('could not find chrome cookies database')) {
+            console.log('🍪 Chrome cookies database not found - retrying without cookies');
+            
+            // Remove cookie arguments and retry
+            const argsWithoutCookies = finalArgs.filter(arg => 
+              !arg.includes('--cookies-from-browser') && 
+              arg !== 'chrome' && 
+              !arg.includes('--cookies')
+            );
+            
+            const retryExecArgs = USE_PYTHON_YT_DLP ? ["-m", "yt_dlp", ...argsWithoutCookies] : argsWithoutCookies;
+            
+            console.log(`🔄 Retrying without cookies: ${retryExecArgs.join(' ')}`);
+            
+            execFile(
+              execPath,
+              retryExecArgs,
+              { 
+                timeout: options.timeout || 300000,
+                maxBuffer: 1024 * 1024 * 10
+              },
+              (retryError, retryStdout, retryStderr) => {
+                console.log(`📤 Retry stdout: ${retryStdout || '(empty)'}`);
+                console.log(`📤 Retry stderr: ${retryStderr || '(empty)'}`);
+                
+                if (retryError) {
+                  console.error(`❌ Retry without cookies also failed: ${retryError.message}`);
+                  return reject(Object.assign(retryError, { errorType: categorizeError(retryError.message) }));
+                }
+                
+                console.log(`✅ Retry without cookies succeeded!`);
+                resolve(retryStdout);
+              }
+            );
+            return;
+          }
           
           // Enhanced error handling with specific bot detection
           if (error.message.includes('Sign in to confirm you\'re not a bot') || 
