@@ -467,11 +467,10 @@ function runYtDlp(args, options = {}) {
       '--user-agent', randomUserAgent
     ];
     
-    // Add additional anti-detection measures with more aggressive options
+    // Add additional anti-detection measures with compatible options
     const antiDetectionArgs = [
       '--sleep-interval', '2',
       '--max-sleep-interval', '5',
-      '--sleep-subtitles', '2',
       '--extractor-retries', '5',
       '--fragment-retries', '5',
       '--retry-sleep', 'exp=1:120',
@@ -481,9 +480,7 @@ function runYtDlp(args, options = {}) {
       '--no-warnings',
       '--ignore-errors',
       '--no-abort-on-error',
-      '--force-json',
-      '--no-playlist',
-      '--extract-flat', 'false'
+      '--no-playlist'
     ];
     
     const finalArgs = [...cookieArgs, ...userAgentArgs, ...antiDetectionArgs, ...args];
