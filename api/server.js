@@ -124,7 +124,7 @@ async function downloadAudio(videoId) {
     await runYtDlp([
       ytUrl,
       "-f",
-      "bestaudio[ext=m4a]/bestaudio",
+      "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio[ext=mp3]/bestaudio",
       "--max-filesize",
       "20M",
       "-o",
@@ -1308,7 +1308,7 @@ app.post("/api/shorts", async (req, res) => {
     await runYtDlp([
       youtubeUrl,
       "-f",
-      "bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4",
+      "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=webm]/bestvideo+bestaudio/mp4",
       "-o",
       tempFile,
     ]);
