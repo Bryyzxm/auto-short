@@ -150,6 +150,42 @@ async function getTranscriptSegments(videoId, refresh = false) {
   // Update transcript stats
   transcriptStats.totalRequests++;
   
+  // Enhanced transcript caching system
+  const transcriptCacheDir = path.join(process.cwd(), 'transcripts');
+  const transcriptCacheFile = path.join(transcriptCacheDir, `${videoId}.json`);
+  
+  // Ensure transcripts directory exists
+  try {
+    if (!fs.existsSync(transcriptCacheDir)) {
+      fs.mkdirSync(transcriptCacheDir, { recursive: true });
+      console.log(`📁 Created transcripts directory: ${transcriptCacheDir}`);
+    }
+  } catch (error) {
+    console.warn(`⚠️ Failed to create transcripts directory: ${error.message}`);
+  }
+  
+  // Check for cached transcript (unless refresh is requested)
+  if (!refresh && fs.existsSync(transcriptCacheFile)) {
+    try {
+      const cachedData = JSON.parse(fs.readFileSync(transcriptCacheFile, 'utf-8'));
+      const cacheAge = Date.now() - new Date(cachedData.timestamp).getTime();
+      const maxCacheAge = 7 * 24 * 60 * 60 * 1000; // 7 days
+      
+      if (cacheAge < maxCacheAge && cachedData.segments && cachedData.segments.length > 0) {
+        console.log(`✅ Using cached transcript (${Math.round(cacheAge / (60 * 60 * 1000))}h old, ${cachedData.segments.length} segments)`);
+        transcriptStats.successfulRequests++;
+        return cachedData.segments;
+      } else {
+        console.log(`🗑️ Cached transcript expired or empty, fetching new one`);
+      }
+    } catch (error) {
+      console.warn(`⚠️ Failed to read cached transcript: ${error.message}`);
+    }
+  }
+  
+  let finalSegments = [];
+  let transcriptSource = 'failed';
+  
   // Method 1: Try yt-dlp subtitle extraction (PRIMARY METHOD)
   if (YT_DLP_PATH) {
     console.log('🎯 Trying yt-dlp subtitle extraction (PRIMARY METHOD)...');
@@ -162,29 +198,33 @@ async function getTranscriptSegments(videoId, refresh = false) {
       transcriptStats.successfulRequests++;
       transcriptStats.ytdlp.success++;
       console.log(`✅ yt-dlp SUCCESS: ${ytdlpSegments.length} segments`);
-      return cleanSegments(ytdlpSegments);
+      finalSegments = cleanSegments(ytdlpSegments);
+      transcriptSource = 'yt-dlp_subtitles';
+    } else {
+      console.log('⚠️ yt-dlp subtitle extraction failed, trying enhanced options...');
+      
+      // Enhanced yt-dlp attempt with more aggressive options
+      const enhancedYtdlpSegments = await retryWithBackoff(
+        () => fetchYtDlpTranscriptEnhanced(videoId),
+        3,
+        2000
+      );
+      if (enhancedYtdlpSegments && enhancedYtdlpSegments.length > 0) {
+        transcriptStats.successfulRequests++;
+        transcriptStats.ytdlp.success++;
+        console.log(`✅ yt-dlp ENHANCED SUCCESS: ${enhancedYtdlpSegments.length} segments`);
+        finalSegments = cleanSegments(enhancedYtdlpSegments);
+        transcriptSource = 'yt-dlp_enhanced';
+      } else {
+        console.log('⚠️ yt-dlp enhanced method also failed');
+      }
     }
-    console.log('⚠️ yt-dlp subtitle extraction failed, trying enhanced options...');
-    
-    // Enhanced yt-dlp attempt with more aggressive options
-    const enhancedYtdlpSegments = await retryWithBackoff(
-      () => fetchYtDlpTranscriptEnhanced(videoId),
-      3,
-      2000
-    );
-    if (enhancedYtdlpSegments && enhancedYtdlpSegments.length > 0) {
-      transcriptStats.successfulRequests++;
-      transcriptStats.ytdlp.success++;
-      console.log(`✅ yt-dlp ENHANCED SUCCESS: ${enhancedYtdlpSegments.length} segments`);
-      return cleanSegments(enhancedYtdlpSegments);
-    }
-    console.log('⚠️ yt-dlp enhanced method also failed');
   } else {
     console.log('❌ yt-dlp not available!');
   }
   
   // Method 2: Final fallback - yt-dlp + whisper.cpp for audio transcription
-  if (YT_DLP_PATH && WHISPER_PATH) {
+  if (finalSegments.length === 0 && YT_DLP_PATH && WHISPER_PATH) {
     console.log('🔄 Trying yt-dlp + whisper.cpp audio transcription...');
     try {
       transcriptStats.ytdlp.total++;
@@ -198,6 +238,8 @@ async function getTranscriptSegments(videoId, refresh = false) {
           transcriptStats.ytdlp.success++;
           transcriptStats.whisper.success++;
           console.log(`✅ yt-dlp + whisper.cpp success: ${whisperSegments.length} segments`);
+          finalSegments = cleanSegments(whisperSegments);
+          transcriptSource = 'yt-dlp_whisper';
           
           // Clean up audio file
           try {
@@ -205,15 +247,33 @@ async function getTranscriptSegments(videoId, refresh = false) {
           } catch (e) {
             console.warn(`⚠️ Failed to clean up audio file: ${e.message}`);
           }
-          
-          return cleanSegments(whisperSegments);
         }
       }
     } catch (error) {
       console.warn(`⚠️ yt-dlp + whisper.cpp failed: ${error.message}`);
     }
-  } else {
+  } else if (finalSegments.length === 0) {
     console.log('❌ whisper.cpp not available for audio transcription');
+  }
+  
+  // Cache the result if we got segments
+  if (finalSegments.length > 0) {
+    try {
+      const cacheData = {
+        videoId,
+        segments: finalSegments,
+        source: transcriptSource,
+        timestamp: new Date().toISOString(),
+        segmentCount: finalSegments.length
+      };
+      
+      fs.writeFileSync(transcriptCacheFile, JSON.stringify(cacheData, null, 2));
+      console.log(`💾 Cached transcript to: ${transcriptCacheFile} (${finalSegments.length} segments)`);
+    } catch (error) {
+      console.warn(`⚠️ Failed to cache transcript: ${error.message}`);
+    }
+    
+    return finalSegments;
   }
   
   console.log('❌ All transcript methods failed - only yt-dlp and whisper.cpp are available');
@@ -440,59 +500,128 @@ function runYtDlp(args, options = {}) {
       return reject(new Error("yt-dlp not found. Please check installation."));
     }
 
-    // Add cookies support if available
-    const YOUTUBE_COOKIES = process.env.YOUTUBE_COOKIES;
+    // Enhanced cookies support with multiple fallback strategies
     const cookieArgs = [];
+    let cookieStatus = 'none';
     
-    if (YOUTUBE_COOKIES) {
-      if (YOUTUBE_COOKIES.startsWith('http')) {
-        // If it's a URL, use cookies-from-browser
-        cookieArgs.push('--cookies-from-browser', 'chrome');
-      } else if (fs.existsSync(YOUTUBE_COOKIES)) {
-        // If it's a file path
-        cookieArgs.push('--cookies', YOUTUBE_COOKIES);
-      }
-    } else {
-      // Try to use browser cookies automatically, but only if browser is available
-      const possibleChromePaths = [
-        '/root/.config/google-chrome',
-        '/home/user/.config/google-chrome',
-        process.env.HOME + '/.config/google-chrome',
-        '/app/.config/google-chrome'
-      ];
-      
-      const chromeAvailable = possibleChromePaths.some(path => {
-        try {
-          return fs.existsSync(path);
-        } catch (e) {
-          return false;
+    // Strategy 1: Check for cookies.txt file in project root
+    const cookiesPaths = [
+      path.join(process.cwd(), 'cookies.txt'),
+      path.join(__dirname, 'cookies.txt'),
+      path.join(__dirname, '..', 'cookies.txt'),
+      '/app/cookies.txt'
+    ];
+    
+    let cookiesFile = null;
+    for (const cookiePath of cookiesPaths) {
+      try {
+        if (fs.existsSync(cookiePath)) {
+          const stats = fs.statSync(cookiePath);
+          if (stats.size > 0) {
+            cookiesFile = cookiePath;
+            console.log(`🍪 Found valid cookies.txt at: ${cookiePath} (${stats.size} bytes)`);
+            break;
+          } else {
+            console.log(`⚠️ Found empty cookies.txt at: ${cookiePath}`);
+          }
         }
-      });
-      
-      if (chromeAvailable) {
-        console.log('🍪 Chrome browser detected, using cookies');
-        cookieArgs.push('--cookies-from-browser', 'chrome');
-      } else {
-        console.log('⚠️ No Chrome browser detected, proceeding without cookies');
-        // Don't add any cookie arguments - proceed without cookies
+      } catch (error) {
+        console.log(`❌ Error checking cookies at ${cookiePath}: ${error.message}`);
       }
     }
     
-    // Rotate user agents to avoid detection with more realistic options
+    if (cookiesFile) {
+      cookieArgs.push('--cookies', cookiesFile);
+      cookieStatus = 'file';
+      console.log(`✅ Using cookies file: ${cookiesFile}`);
+    } else {
+      console.log('❌ No valid cookies.txt file found in any location');
+      
+      // Strategy 2: Try environment variable
+      const YOUTUBE_COOKIES = process.env.YOUTUBE_COOKIES;
+      if (YOUTUBE_COOKIES) {
+        if (YOUTUBE_COOKIES.startsWith('http')) {
+          cookieArgs.push('--cookies-from-browser', 'chrome');
+          cookieStatus = 'browser_env';
+        } else if (fs.existsSync(YOUTUBE_COOKIES)) {
+          cookieArgs.push('--cookies', YOUTUBE_COOKIES);
+          cookieStatus = 'env_file';
+        }
+      } else {
+        // Strategy 3: Try browser cookies automatically
+        const possibleBrowserPaths = [
+          // Chrome paths
+          '/root/.config/google-chrome',
+          '/home/user/.config/google-chrome',
+          process.env.HOME + '/.config/google-chrome',
+          '/app/.config/google-chrome',
+          // Firefox paths
+          '/root/.mozilla/firefox',
+          '/home/user/.mozilla/firefox',
+          process.env.HOME + '/.mozilla/firefox'
+        ];
+        
+        const chromeAvailable = possibleBrowserPaths.slice(0, 4).some(path => {
+          try {
+            return fs.existsSync(path);
+          } catch (e) {
+            return false;
+          }
+        });
+        
+        const firefoxAvailable = possibleBrowserPaths.slice(4).some(path => {
+          try {
+            return fs.existsSync(path);
+          } catch (e) {
+            return false;
+          }
+        });
+        
+        if (chromeAvailable) {
+          console.log('🍪 Chrome browser detected, attempting to use cookies');
+          cookieArgs.push('--cookies-from-browser', 'chrome');
+          cookieStatus = 'browser_chrome';
+        } else if (firefoxAvailable) {
+          console.log('🍪 Firefox browser detected, attempting to use cookies');
+          cookieArgs.push('--cookies-from-browser', 'firefox');
+          cookieStatus = 'browser_firefox';
+        } else {
+          console.log('⚠️ No browser detected, proceeding without cookies');
+          console.log('💡 Tip: Create a cookies.txt file in the project root for better success rate');
+          cookieStatus = 'none';
+        }
+      }
+    }
+    
+    // Enhanced User-Agent rotation with more realistic browser signatures
     const userAgents = [
+      // Chrome on Windows (most common)
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+      
+      // Chrome on macOS
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      
+      // Edge on Windows
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0',
+      
+      // Safari on macOS
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15',
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0'
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15',
+      
+      // Firefox on Windows
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0'
     ];
     
     const randomUserAgent = userAgents[Math.floor(Math.random() * userAgents.length)];
     
-    // Add user agent and browser simulation headers
+    // Enhanced browser simulation headers with realistic values
     const userAgentArgs = [
       '--user-agent', randomUserAgent,
-      '--add-header', 'Accept:text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+      '--add-header', 'Accept:text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
       '--add-header', 'Accept-Language:en-US,en;q=0.9,id;q=0.8',
       '--add-header', 'Accept-Encoding:gzip, deflate, br',
       '--add-header', 'DNT:1',
@@ -505,24 +634,39 @@ function runYtDlp(args, options = {}) {
       '--add-header', 'Cache-Control:max-age=0',
       '--add-header', 'Sec-Ch-Ua:"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
       '--add-header', 'Sec-Ch-Ua-Mobile:?0',
-      '--add-header', 'Sec-Ch-Ua-Platform:"Windows"'
+      '--add-header', 'Sec-Ch-Ua-Platform:"Windows"',
+      '--add-header', 'Sec-Ch-Ua-Full-Version-List:"Not_A Brand";v="8.0.0.0", "Chromium";v="120.0.6099.109", "Google Chrome";v="120.0.6099.109"'
     ];
     
-    // Add additional anti-detection measures with more natural timing
+    // Enhanced anti-detection with strict rate limiting and natural behavior
     const antiDetectionArgs = [
-      '--sleep-interval', '3',
-      '--max-sleep-interval', '8',
-      '--extractor-retries', '3',
-      '--fragment-retries', '3',
-      '--retry-sleep', 'linear=1:5',
+      // Rate limiting - very conservative to avoid detection
+      '--sleep-interval', '2',           // Sleep 2 seconds between requests
+      '--max-sleep-interval', '5',       // Max 5 seconds sleep
+      '--limit-rate', '500K',            // Limit download speed to 500KB/s
+      
+      // Retry and timeout settings
+      '--extractor-retries', '2',        // Reduced retries to avoid spam
+      '--fragment-retries', '2',
+      '--retry-sleep', 'linear=2:10',    // Linear backoff 2-10 seconds
+      '--socket-timeout', '30',
+      '--read-timeout', '30',
+      
+      // YouTube-specific optimizations
       '--no-check-certificate',
       '--prefer-free-formats',
       '--youtube-skip-dash-manifest',
+      '--youtube-include-dash-manifest',
+      
+      // Error handling
       '--no-warnings',
       '--ignore-errors',
       '--no-abort-on-error',
       '--no-playlist',
-      '--socket-timeout', '30'
+      
+      // Additional stealth options
+      '--geo-bypass',
+      '--geo-bypass-country', 'US'
     ];
     
     const finalArgs = [...cookieArgs, ...userAgentArgs, ...antiDetectionArgs, ...args];
@@ -530,9 +674,21 @@ function runYtDlp(args, options = {}) {
     console.log(`🔧 Running yt-dlp with enhanced args (${finalArgs.length} total)`);
     console.log(`🔧 Using binary: ${YT_DLP_PATH}`);
     console.log(`🔧 Using User-Agent: ${randomUserAgent.substring(0, 50)}...`);
-    console.log(`🔧 Full command args: ${finalArgs.join(' ')}`);
+    console.log(`🍪 Cookie status: ${cookieStatus}`);
     if (cookieArgs.length > 0) {
-      console.log(`🍪 Using cookies: ${cookieArgs.join(' ')}`);
+      console.log(`🍪 Cookie args: ${cookieArgs.join(' ')}`);
+    } else {
+      console.log(`⚠️ No cookies available - this may trigger bot detection`);
+    }
+    console.log(`🔧 Rate limiting: 500KB/s, 2-5s delays between requests`);
+    console.log(`🔧 Full command args: ${finalArgs.join(' ')}`);
+    
+    // Log proxy status if available
+    const proxyEnv = process.env.HTTP_PROXY || process.env.HTTPS_PROXY;
+    if (proxyEnv) {
+      console.log(`🌐 Using proxy: ${proxyEnv.replace(/\/\/.*@/, '//***@')}`); // Hide credentials
+    } else {
+      console.log(`🌐 No proxy configured`);
     }
 
     const execArgs = USE_PYTHON_YT_DLP ? ["-m", "yt_dlp", ...finalArgs] : finalArgs;
