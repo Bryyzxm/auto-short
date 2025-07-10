@@ -485,6 +485,7 @@ function runYtDlp(args, options = {}) {
     console.log(`🔧 Running yt-dlp with enhanced args (${finalArgs.length} total)`);
     console.log(`🔧 Using binary: ${YT_DLP_PATH}`);
     console.log(`🔧 Using User-Agent: ${randomUserAgent.substring(0, 50)}...`);
+    console.log(`🔧 Full command args: ${finalArgs.join(' ')}`);
     if (cookieArgs.length > 0) {
       console.log(`🍪 Using cookies: ${cookieArgs.join(' ')}`);
     }
@@ -500,15 +501,23 @@ function runYtDlp(args, options = {}) {
         maxBuffer: 1024 * 1024 * 10 // 10MB buffer
       },
       (error, stdout, stderr) => {
+        console.log(`📤 yt-dlp stdout: ${stdout || '(empty)'}`);
+        console.log(`📤 yt-dlp stderr: ${stderr || '(empty)'}`);
+        
         if (error) {
           const errorType = categorizeError(error.message);
           console.error(`❌ yt-dlp error (${errorType}): ${error.message}`);
           console.error(`❌ yt-dlp stderr: ${stderr}`);
+          console.error(`❌ yt-dlp exit code: ${error.code}`);
+          console.error(`❌ yt-dlp signal: ${error.signal}`);
           
           // Enhanced error handling with specific bot detection
           if (error.message.includes('Sign in to confirm you\'re not a bot') || 
               error.message.includes('bot') || 
-              stderr.includes('bot')) {
+              stderr.includes('bot') ||
+              stderr.includes('Sign in to confirm') ||
+              stderr.includes('verify') ||
+              stderr.includes('captcha')) {
             console.log('🤖 Bot detection triggered - trying alternative approach');
             
             // Try with different approach - use invidious or alternative extractor
@@ -534,8 +543,12 @@ function runYtDlp(args, options = {}) {
                 maxBuffer: 1024 * 1024 * 10
               },
               (retryError, retryStdout, retryStderr) => {
+                console.log(`📤 Retry stdout: ${retryStdout || '(empty)'}`);
+                console.log(`📤 Retry stderr: ${retryStderr || '(empty)'}`);
+                
                 if (retryError) {
                   console.error(`❌ Alternative approach also failed: ${retryError.message}`);
+                  console.error(`❌ Retry exit code: ${retryError.code}`);
                   return reject(Object.assign(error, { errorType, alternativeFailed: true }));
                 }
                 console.log(`✅ Alternative approach succeeded!`);
