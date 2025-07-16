@@ -17,6 +17,7 @@ dist-ssr
 !.vscode/extensions.json
 .idea
 .DS_Store
+*.vtt
 *.suo
 *.ntvs*
 *.njsproj
@@ -24,6 +25,7 @@ dist-ssr
 *.sw?
 ffmpeg-7.1.1-full_build/
 backend/outputs/
+console
 
 # Ignore BFG Repo-Cleaner jar file
 bfg*.jar

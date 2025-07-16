@@ -3,37 +3,69 @@ import type {ShortVideo} from '../types';
 import {PlayIcon, DownloadIcon, InfoIcon, StopIcon} from './icons';
 import {formatTime} from '../utils/timeUtils';
 
+// Cache untuk transcript video
+const transcriptCache = new Map<string, any[]>();
+
 // Helper: fetch transcript for a segment
 async function fetchTranscript(videoId: string, start: number, end: number): Promise<string> {
- // Fetch transcript via backend yt-dlp proxy
- const url = `http://localhost:5001/api/yt-transcript?videoId=${videoId}`;
- try {
-  const res = await fetch(url);
-  if (!res.ok) {
-   console.error('Gagal fetch transkrip (yt-dlp):', res.status, res.statusText, url);
-   return 'Transkrip tidak tersedia.';
+ // Check cache first
+ let fullTranscript = transcriptCache.get(videoId);
+
+ if (!fullTranscript) {
+  // Fetch transcript via backend yt-dlp proxy dengan prioritas bahasa Indonesia
+  const url = `http://localhost:5001/api/yt-transcript?videoId=${videoId}&lang=id,en`;
+  try {
+   const res = await fetch(url);
+   if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    console.error('Gagal fetch transkrip (yt-dlp):', res.status, res.statusText, url);
+    console.error('Error details:', errorData);
+
+    // Return a more specific error message based on status
+    if (res.status === 404) {
+     return 'Transkrip tidak tersedia untuk video ini.';
+    } else if (res.status === 500) {
+     return 'Sedang memproses transkrip, coba lagi dalam beberapa saat.';
+    }
+    return 'Transkrip tidak tersedia.';
+   }
+   const data = await res.json();
+   if (!data?.segments || !Array.isArray(data.segments)) {
+    console.warn('Format transkrip yt-dlp tidak sesuai atau kosong:', data);
+    return 'Transkrip tidak tersedia.';
+   }
+
+   const segments = data.segments;
+   fullTranscript = segments;
+   // Cache it for future use
+   transcriptCache.set(videoId, segments);
+   console.log(`[TRANSCRIPT] Cached transcript for videoId: ${videoId}, segments: ${segments.length}, language: ${data.language || 'unknown'}`);
+  } catch (err) {
+   console.error('Error fetchTranscript (yt-dlp):', err, url);
+   return 'Gagal memuat transkrip.';
   }
-  const data = await res.json();
-  if (!data || !data.segments || !Array.isArray(data.segments)) {
-   console.warn('Format transkrip yt-dlp tidak sesuai atau kosong:', data);
-   return 'Transkrip tidak tersedia.';
-  }
-  // VTT: start dan end dalam format "00:00:00.000"
-  // Ubah ke detik untuk filter
-  const toSeconds = (vtt: string) => {
-   const [h, m, s] = vtt.split(':');
-   return parseInt(h) * 3600 + parseInt(m) * 60 + parseFloat(s.replace(',', '.'));
-  };
-  const filtered = data.segments.filter((seg: any) => {
-   const segStart = toSeconds(seg.start);
-   const segEnd = toSeconds(seg.end);
-   return segEnd > start && segStart < end;
-  });
-  return filtered.map((seg: any) => seg.text).join(' ');
- } catch (err) {
-  console.error('Error fetchTranscript (yt-dlp):', err, url);
+ }
+
+ // Return early if still no transcript
+ if (!fullTranscript) {
   return 'Transkrip tidak tersedia.';
  }
+
+ // VTT: start dan end dalam format "00:00:00.000"
+ // Ubah ke detik untuk filter
+ const toSeconds = (vtt: string) => {
+  const [h, m, s] = vtt.split(':');
+  return parseInt(h) * 3600 + parseInt(m) * 60 + parseFloat(s.replace(',', '.'));
+ };
+ const filtered = fullTranscript.filter((seg: any) => {
+  const segStart = toSeconds(seg.start);
+  const segEnd = toSeconds(seg.end);
+  return segEnd > start && segStart < end;
+ });
+
+ const transcriptText = filtered.map((seg: any) => seg.text).join(' ');
+ console.log(`[TRANSCRIPT] Retrieved cached transcript for videoId: ${videoId}, filtered segments: ${filtered.length}`);
+ return transcriptText || 'Transkrip tidak tersedia untuk segmen ini.';
 }
 
 interface ShortVideoCardProps {

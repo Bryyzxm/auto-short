@@ -1,34 +1,54 @@
 export function parseTimeStringToSeconds(timeString: string): number {
- if (!timeString || typeof timeString !== 'string') return 0;
+  // Dukungan format lama ("", null, dll)
+  if (!timeString || typeof timeString !== "string") return NaN;
 
- let totalSeconds = 0;
- const timeStringLower = timeString.toLowerCase();
+  const str = timeString.trim().toLowerCase();
 
- const minutesMatch = timeStringLower.match(/(\d+)m/);
- const secondsMatch = timeStringLower.match(/(\d+)s/);
+  // 1) Jika hanya angka -> detik langsung
+  if (/^\d+$/.test(str)) {
+    return parseInt(str, 10);
+  }
 
- if (minutesMatch) {
-  totalSeconds += parseInt(minutesMatch[1], 10) * 60;
- }
- if (secondsMatch) {
-  totalSeconds += parseInt(secondsMatch[1], 10);
- }
+  // 2) Format dengan tanda titik dua (hh:mm:ss atau mm:ss)
+  if (/^\d+:\d{1,2}(?::\d{1,2})?$/.test(str)) {
+    const parts = str.split(":").map((p) => parseInt(p, 10));
+    if (parts.length === 2) {
+      const [m, s] = parts;
+      return m * 60 + s;
+    }
+    if (parts.length === 3) {
+      const [h, m, s] = parts;
+      return h * 3600 + m * 60 + s;
+    }
+  }
 
- // If no 'm' or 's' specifiers, and it's just a number, assume it's seconds.
- if (!minutesMatch && !secondsMatch && /^\d+$/.test(timeStringLower)) {
-  totalSeconds = parseInt(timeStringLower, 10);
- }
+  // 3) Format dengan huruf (1m20s, 1m 20s, 90s, 2m, dll)
+  let totalSeconds = 0;
+  const minutesMatch = str.match(/(\d+)\s*m/) || str.match(/(\d+)m/);
+  const secondsMatch = str.match(/(\d+)\s*s/) || str.match(/(\d+)s/);
+  if (minutesMatch) {
+    totalSeconds += parseInt(minutesMatch[1], 10) * 60;
+  }
+  if (secondsMatch) {
+    totalSeconds += parseInt(secondsMatch[1], 10);
+  }
+  if (totalSeconds > 0) return totalSeconds;
 
- return totalSeconds;
+  // 4) Gagal parse
+  return NaN;
 }
 
 export function formatTime(totalSeconds: number): string {
- const hours = Math.floor(totalSeconds / 3600);
- const minutes = Math.floor((totalSeconds % 3600) / 60);
- const seconds = Math.floor(totalSeconds % 60);
- if (hours > 0) {
-  return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
- } else {
-  return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
- }
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = Math.floor(totalSeconds % 60);
+  if (hours > 0) {
+    return `${hours.toString().padStart(2, "0")}:${minutes
+      .toString()
+      .padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
+  } else {
+    return `${minutes.toString().padStart(2, "0")}:${seconds
+      .toString()
+      .padStart(2, "0")}`;
+  }
 }

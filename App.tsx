@@ -192,27 +192,30 @@ const App: React.FC = () => {
    } catch {}
 
    let videoDuration = 0;
-   // Fallback: fetch durasi video via YouTube Data API (tanpa API key, gunakan yt-dlp atau oEmbed, fallback ke 10 menit)
+   // Fetch durasi video menggunakan backend endpoint untuk menghindari CORS
    try {
-    // Coba fetch dari backend (gunakan yt-dlp jika ada endpoint, atau oEmbed jika tidak)
-    const metaRes = await fetch(`https://www.youtube.com/get_video_info?video_id=${videoId}`);
+    console.log(`Fetching video metadata for: ${videoId}`);
+    const metaRes = await fetch(`http://localhost:5001/api/video-metadata?videoId=${videoId}`);
     if (metaRes.ok) {
-     const text = await metaRes.text();
-     const params = new URLSearchParams(text);
-     const playerResponse = params.get('player_response');
-     if (playerResponse) {
-      const json = JSON.parse(playerResponse);
-      videoDuration = parseInt(json.videoDetails?.lengthSeconds || '0', 10);
-     }
+     const metadata = await metaRes.json();
+     videoDuration = metadata.duration || 0;
+     console.log(`Video duration fetched: ${videoDuration} seconds`);
+    } else {
+     console.warn('Failed to fetch video metadata from backend:', metaRes.status);
     }
-   } catch {}
+   } catch (error) {
+    console.error('Error fetching video metadata:', error);
+   }
+
    if (!videoDuration || isNaN(videoDuration) || videoDuration < 30) {
     // fallback ke 10 menit
+    console.log('Using fallback duration: 600 seconds');
     videoDuration = 600;
    }
 
    try {
-    const ideas = await generateShortsIdeas(url, transcript); // Kirim transcript ke Gemini
+    const ideas = await generateShortsIdeas(url, transcript, videoDuration); // Kirim transcript dan durasi ke Gemini
+    console.log(`[AI SEGMENTS] Generated ${ideas.length} segments for video duration ${videoDuration}s`);
     let subtitleSegments = await fetchSubtitleSegments(videoId);
     // Fallback: jika subtitleSegments kosong, buat dummy segmentasi manual berdasarkan durasi video
     if (!subtitleSegments || subtitleSegments.length === 0) {
@@ -273,10 +276,19 @@ const App: React.FC = () => {
       endTimeSeconds,
      };
     });
-    // Jika hasil AI terlalu sedikit untuk video panjang, fallback ke segmentasi otomatis minimal 10 segmen
-    if (shortsWithVideoId.length < 10 && videoDuration > 600) {
+    // Jika hasil AI terlalu sedikit untuk video panjang, fallback ke segmentasi otomatis
+    let minSegmentsRequired = 5;
+    if (videoDuration > 3600) {
+     minSegmentsRequired = 25;
+    } else if (videoDuration > 1800) {
+     minSegmentsRequired = 15;
+    } else if (videoDuration > 600) {
+     minSegmentsRequired = 8;
+    }
+
+    if (shortsWithVideoId.length < minSegmentsRequired && videoDuration > 600) {
      const fallbackShorts: ShortVideo[] = [];
-     const segLength = Math.max(30, Math.floor(videoDuration / 10));
+     const segLength = Math.max(45, Math.floor(videoDuration / Math.max(15, minSegmentsRequired)));
      let idx = 0;
      for (let start = 0; start < videoDuration; start += segLength) {
       const end = Math.min(start + segLength, videoDuration);
@@ -292,7 +304,7 @@ const App: React.FC = () => {
       idx++;
      }
      setGeneratedShorts(fallbackShorts);
-     setError('AI hanya menghasilkan sedikit segmen. Ditambahkan segmentasi otomatis agar total minimal 10 segmen.');
+     setError(`AI hanya menghasilkan ${shortsWithVideoId.length} segmen (dibutuhkan minimal ${minSegmentsRequired}). Ditambahkan segmentasi otomatis.`);
      return;
     }
     // Jika hasil AI kosong, baru fallback ke segmentasi otomatis
