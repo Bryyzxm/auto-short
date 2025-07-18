@@ -14,7 +14,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Path ke yt-dlp executable
-const YT_DLP_PATH = path.join(__dirname, 'yt-dlp.exe');
+// Cross-platform compatibility: use .exe on Windows, system yt-dlp on Linux
+const YT_DLP_PATH = process.platform === 'win32' 
+  ? path.join(__dirname, 'yt-dlp.exe')
+  : 'yt-dlp'; // Railway Linux will use system yt-dlp
 
 const app = express();
 const PORT = process.env.PORT || 5001;
