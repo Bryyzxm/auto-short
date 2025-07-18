@@ -3,6 +3,9 @@ import type {ShortVideo} from '../types';
 import {PlayIcon, DownloadIcon, InfoIcon, StopIcon} from './icons';
 import {formatTime} from '../utils/timeUtils';
 
+// Backend URL configuration
+const BACKEND_URL = (import.meta as any).env.VITE_BACKEND_URL || 'http://localhost:5001';
+
 // Cache untuk transcript video
 const transcriptCache = new Map<string, any[]>();
 
@@ -13,7 +16,7 @@ async function fetchTranscript(videoId: string, start: number, end: number): Pro
 
  if (!fullTranscript) {
   // Fetch transcript via backend yt-dlp proxy dengan prioritas bahasa Indonesia
-  const url = `http://localhost:5001/api/yt-transcript?videoId=${videoId}&lang=id,en`;
+  const url = `${BACKEND_URL}/api/yt-transcript?videoId=${videoId}&lang=id,en`;
   try {
    const res = await fetch(url);
    if (!res.ok) {
@@ -235,7 +238,7 @@ export const ShortVideoCard: React.FC<ShortVideoCardProps> = ({shortVideo, isAct
   setIsDownloading(true);
   setDownloadError(null);
   try {
-   const response = await fetch('http://localhost:5001/api/shorts', {
+   const response = await fetch(`${BACKEND_URL}/api/shorts`, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({
@@ -251,7 +254,7 @@ export const ShortVideoCard: React.FC<ShortVideoCardProps> = ({shortVideo, isAct
    }
    const data = await response.json();
    if (data.downloadUrl) {
-    window.open(`http://localhost:5001${data.downloadUrl}`, '_blank');
+    window.open(`${BACKEND_URL}${data.downloadUrl}`, '_blank');
    } else {
     throw new Error('Link unduhan tidak ditemukan.');
    }

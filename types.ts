@@ -7,6 +7,7 @@ export interface ShortVideo {
  youtubeVideoId: string;
  thumbnailUrl: string; // URL for a placeholder image
  reasonForVertical?: string; // AI's reasoning for vertical suitability
+ customThumbnailUrl?: string; // Custom thumbnail URL for immediate display
 }
 
 // Structure expected from Gemini after parsing its JSON output

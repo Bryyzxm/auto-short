@@ -29,3 +29,4 @@ console
 
 # Ignore BFG Repo-Cleaner jar file
 bfg*.jar
+.vercel

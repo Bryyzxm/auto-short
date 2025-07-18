@@ -22,6 +22,87 @@ const PORT = process.env.PORT || 5001;
 app.use(cors());
 app.use(express.json());
 
+// Serve static files from current directory (for video outputs)
+app.use(
+ '/outputs',
+ express.static(process.cwd(), {
+  setHeaders: (res, filePath) => {
+   if (filePath.endsWith('.mp4')) {
+    res.set('Content-Type', 'video/mp4');
+    res.set('Content-Disposition', 'attachment');
+
+    // Auto-delete file after serving
+    res.on('finish', () => {
+     setTimeout(() => {
+      fs.unlink(filePath, (err) => {
+       if (!err) {
+        console.log(`[CLEANUP] Auto-deleted file: ${path.basename(filePath)}`);
+       }
+      });
+     }, 1000); // Delete after 1 second
+    });
+   }
+  },
+ })
+);
+
+app.post('/api/video-quality-check', (req, res) => {
+ const {url} = req.body;
+
+ if (!url) {
+  return res.status(400).json({error: 'URL is required'});
+ }
+
+ try {
+  console.log('Checking video quality for:', url);
+
+  // Check available formats with yt-dlp
+  const formatsResult = execSync(`"${YT_DLP_PATH}" --list-formats "${url}"`, {
+   encoding: 'utf8',
+   timeout: 30000, // 30 second timeout
+  });
+  console.log('Available formats:', formatsResult);
+
+  // Get specific format information
+  const formatInfoResult = execSync(`"${YT_DLP_PATH}" -F "${url}" --quiet`, {
+   encoding: 'utf8',
+   timeout: 30000, // 30 second timeout
+  });
+
+  // Parse for quality levels
+  const has720p = formatInfoResult.includes('720p') || formatInfoResult.includes('1280x720');
+  const has480p = formatInfoResult.includes('480p') || formatInfoResult.includes('854x480');
+  const has1080p = formatInfoResult.includes('1080p') || formatInfoResult.includes('1920x1080');
+
+  let maxQuality = '360p';
+  let upscalingNeeded = true;
+
+  if (has1080p) {
+   maxQuality = '1080p';
+   upscalingNeeded = false;
+  } else if (has720p) {
+   maxQuality = '720p';
+   upscalingNeeded = false;
+  } else if (has480p) {
+   maxQuality = '480p';
+   upscalingNeeded = true;
+  }
+
+  res.json({
+   success: true,
+   maxQuality,
+   upscalingNeeded,
+   message: upscalingNeeded ? `Source is ${maxQuality}, will upscale to 720p` : `Source is ${maxQuality}, no upscaling needed`,
+  });
+ } catch (error) {
+  console.error('Error checking video quality:', error.message);
+  res.status(500).json({
+   error: 'Failed to check video quality',
+   details: error.message,
+  });
+ }
+});
+
 // Endpoint: POST /api/shorts
 // Body: { youtubeUrl, start, end }
 app.post('/api/shorts', async (req, res) => {
@@ -34,32 +115,263 @@ app.post('/api/shorts', async (req, res) => {
 
  // Logging waktu
  console.log(`[${id}] Mulai proses download dan cut segmen: ${youtubeUrl} (${start}s - ${end}s, rasio: ${aspectRatio})`);
+
+ // Pre-check: List available formats to ensure 720p+ is available
+ console.log(`[${id}] Checking available formats...`);
+ try {
+  const formatCheck = execSync(`"${YT_DLP_PATH}" --list-formats --no-warnings "${youtubeUrl}"`, {
+   encoding: 'utf8',
+   timeout: 30000,
+  });
+
+  // Check available quality levels for smart processing
+  const has720p = formatCheck.includes('1280x720') || formatCheck.includes('1920x1080') || formatCheck.includes('2560x1440') || formatCheck.includes('3840x2160') || /\b(720|1080|1440|2160)p?\b/.test(formatCheck);
+  const has480p = /\b480p?\b|854x480/i.test(formatCheck);
+  const has360p = /\b360p?\b|640x360/i.test(formatCheck);
+
+  console.log(`[${id}] Quality analysis - 720p+: ${has720p}, 480p: ${has480p}, 360p: ${has360p}`);
+
+  // We'll accept any quality and upscale if needed
+  if (!has720p && !has480p && !has360p) {
+   console.error(`[${id}] No detectable quality formats available for this video`);
+   return res.status(400).json({
+    error: 'No usable formats available',
+    details: 'This video does not have any recognizable quality formats. Please try a different video.',
+    availableFormats: formatCheck.split('\n').slice(0, 10).join('\n'),
+   });
+  }
+
+  const willUpscale = !has720p;
+  console.log(`[${id}] ${willUpscale ? '📈 Will upscale to 720p after download' : '✅ Native 720p+ available'}`);
+ } catch (e) {
+  console.warn(`[${id}] Could not check formats, proceeding with upscaling fallback:`, e.message);
+ }
+
  console.time(`[${id}] yt-dlp download`);
 
- // Compose yt-dlp command (download full video)
- const ytDlpArgs = ['-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4', '-o', tempFile, youtubeUrl];
+ // Smart format selection: prefer high quality but accept lower for upscaling
+ const ytDlpArgs = [
+  '-f',
+  // Priority 1: Native 720p+ (best quality, no upscaling needed)
+  'best[height>=720][ext=mp4][vcodec!*=av01]/' +
+   'bestvideo[height>=720][ext=mp4][vcodec!*=av01]+bestaudio[ext=m4a]/' +
+   'best[height>=720]/' +
+   // Priority 2: 480p for upscaling (good quality)
+   'best[height>=480][ext=mp4]/' +
+   'bestvideo[height>=480][ext=mp4]+bestaudio[ext=m4a]/' +
+   'best[height>=480]/' +
+   // Priority 3: 360p for upscaling (acceptable quality)
+   'best[height>=360][ext=mp4]/' +
+   'bestvideo[height>=360][ext=mp4]+bestaudio[ext=m4a]/' +
+   'best[height>=360]/' +
+   // Priority 4: Any available format (last resort with upscaling)
+   'best[ext=mp4]/' +
+   'best',
+  '--no-playlist',
+  '--no-warnings',
+  '--merge-output-format',
+  'mp4',
+  '--user-agent',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  '--extractor-args',
+  'youtube:player_client=web',
+  // Force remux to ensure MP4 output
+  '--remux-video',
+  'mp4',
+  '-o',
+  tempFile,
+  youtubeUrl,
+ ];
 
- execFile(YT_DLP_PATH, ytDlpArgs, (err) => {
+ console.log(`[${id}] yt-dlp command (720p+ ONLY): ${YT_DLP_PATH} ${ytDlpArgs.join(' ')}`);
+ console.log(`[${id}] NOTE: Will REJECT video if no 720p+ format available`);
+
+ execFile(YT_DLP_PATH, ytDlpArgs, (err, stdout, stderr) => {
   console.timeEnd(`[${id}] yt-dlp download`);
   if (err) {
-   return res.status(500).json({error: 'yt-dlp failed', details: err.message});
+   console.error(`[${id}] yt-dlp error:`, err.message);
+   console.error(`[${id}] yt-dlp stderr:`, stderr);
+   console.error(`[${id}] yt-dlp stdout:`, stdout);
+
+   // Check if error is due to format availability
+   if (stderr && (stderr.includes('Requested format is not available') || stderr.includes('No video formats found'))) {
+    return res.status(400).json({
+     error: 'No 720p+ quality available',
+     details: 'This video does not have the minimum 720p quality required. Please try a different video with higher quality.',
+     stderr: stderr,
+     command: `${YT_DLP_PATH} ${ytDlpArgs.join(' ')}`,
+    });
+   }
+
+   return res.status(500).json({
+    error: 'yt-dlp failed',
+    details: err.message,
+    stderr: stderr,
+    command: `${YT_DLP_PATH} ${ytDlpArgs.join(' ')}`,
+   });
   }
-  // After download, cut segment
+  console.log(`[${id}] yt-dlp success. Downloaded to: ${tempFile}`);
+
+  // Analyze video resolution for upscaling decisions
+  let videoWidth = 0;
+  let videoHeight = 0;
+  let needsUpscaling = false;
+
+  try {
+   const ffprobeResult = execSync(`ffprobe -v quiet -print_format json -show_streams "${tempFile}"`, {encoding: 'utf8'});
+   const videoInfo = JSON.parse(ffprobeResult);
+   const videoStream = videoInfo.streams.find((s) => s.codec_type === 'video');
+   if (videoStream) {
+    videoWidth = parseInt(videoStream.width);
+    videoHeight = parseInt(videoStream.height);
+    needsUpscaling = videoHeight < 720;
+
+    console.log(`[${id}] Video resolution: ${videoWidth}x${videoHeight} (${videoHeight}p)`);
+
+    if (needsUpscaling) {
+     console.log(`[${id}] 📈 UPSCALING REQUIRED: ${videoHeight}p → 720p`);
+    } else {
+     console.log(`[${id}] ✅ Resolution adequate: ${videoHeight}p ≥ 720p`);
+    }
+   } else {
+    console.warn(`[${id}] Could not detect video stream, assuming upscaling needed`);
+    needsUpscaling = true;
+   }
+  } catch (e) {
+   console.warn(`[${id}] Could not determine video resolution, assuming upscaling needed:`, e.message);
+   needsUpscaling = true;
+  }
+
+  // Check if file actually exists
+  if (!fs.existsSync(tempFile)) {
+   console.error(`[${id}] Downloaded file not found: ${tempFile}`);
+   return res.status(500).json({
+    error: 'Downloaded file not found',
+    details: `Expected file: ${tempFile}`,
+   });
+  }
+  // Enhanced FFmpeg processing with smart upscaling and aspect ratio handling
   const cutFile = path.join(process.cwd(), `${id}-short.mp4`);
-  let ffmpegArgs;
-  if (aspectRatio === 'original') {
-   ffmpegArgs = ['-y', '-ss', String(start), '-to', String(end), '-i', tempFile, '-c', 'copy', cutFile];
-  } else {
-   ffmpegArgs = ['-y', '-ss', String(start), '-to', String(end), '-i', tempFile, '-vf', 'crop=in_h*9/16:in_h', '-c:v', 'libx264', '-c:a', 'aac', '-preset', 'fast', cutFile];
+  let ffmpegArgs = ['-y', '-ss', String(start), '-to', String(end), '-i', tempFile];
+
+  // Build video filter chain
+  const videoFilters = [];
+
+  // Step 1: Upscaling if needed (before aspect ratio changes)
+  if (needsUpscaling) {
+   const targetHeight = 720;
+   const targetWidth = Math.round((targetHeight * videoWidth) / videoHeight);
+   // Ensure width is even (required for most codecs)
+   const evenWidth = targetWidth % 2 === 0 ? targetWidth : targetWidth + 1;
+
+   videoFilters.push(`scale=${evenWidth}:${targetHeight}:flags=lanczos`);
+   console.log(`[${id}] 📈 Upscaling: ${videoWidth}x${videoHeight} → ${evenWidth}x${targetHeight}`);
   }
+
+  // Step 2: Aspect ratio cropping
+  if (aspectRatio === '9:16') {
+   // Calculate dimensions for 9:16 aspect ratio
+   const currentHeight = needsUpscaling ? 720 : videoHeight;
+   const currentWidth = needsUpscaling ? Math.round((720 * videoWidth) / videoHeight) : videoWidth;
+   const targetWidth = Math.round(currentHeight * (9 / 16));
+
+   // Ensure even dimensions
+   const evenTargetWidth = targetWidth % 2 === 0 ? targetWidth : targetWidth - 1;
+   const evenCurrentHeight = currentHeight % 2 === 0 ? currentHeight : currentHeight - 1;
+
+   videoFilters.push(`crop=${evenTargetWidth}:${evenCurrentHeight}:(iw-${evenTargetWidth})/2:(ih-${evenCurrentHeight})/2`);
+   console.log(`[${id}] 📱 Cropping to 9:16: ${evenTargetWidth}x${evenCurrentHeight}`);
+  } else if (aspectRatio === '16:9') {
+   // Calculate dimensions for 16:9 aspect ratio
+   const currentHeight = needsUpscaling ? 720 : videoHeight;
+   const currentWidth = needsUpscaling ? Math.round((720 * videoWidth) / videoHeight) : videoWidth;
+   const targetWidth = Math.round(currentHeight * (16 / 9));
+
+   // Ensure even dimensions
+   const evenTargetWidth = targetWidth % 2 === 0 ? targetWidth : targetWidth - 1;
+   const evenCurrentHeight = currentHeight % 2 === 0 ? currentHeight : currentHeight - 1;
+
+   videoFilters.push(`crop=${evenTargetWidth}:${evenCurrentHeight}:(iw-${evenTargetWidth})/2:(ih-${evenCurrentHeight})/2`);
+   console.log(`[${id}] 🖥️ Cropping to 16:9: ${evenTargetWidth}x${evenCurrentHeight}`);
+  }
+
+  // Apply video filters if any
+  if (videoFilters.length > 0) {
+   ffmpegArgs.push('-vf', videoFilters.join(','));
+  }
+
+  // Enhanced encoding settings
+  if (aspectRatio === 'original' && !needsUpscaling) {
+   // Keep original quality with copy streams if no processing needed
+   ffmpegArgs.push('-c', 'copy');
+   console.log(`[${id}] 🚀 Using stream copy (no quality loss)`);
+  } else {
+   // High quality encoding for processed videos
+   const crf = needsUpscaling ? '16' : '18'; // Higher quality for upscaled content
+   ffmpegArgs.push('-c:v', 'libx264', '-crf', crf, '-preset', 'medium', '-profile:v', 'high', '-level:v', '4.0', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-movflags', '+faststart');
+   console.log(`[${id}] 🎬 Using high quality encoding (CRF ${crf})`);
+  }
+
+  ffmpegArgs.push(cutFile);
   console.time(`[${id}] ffmpeg cut`);
-  execFile('ffmpeg', ffmpegArgs, (err2) => {
+  execFile('ffmpeg', ffmpegArgs, (err2, stdout2, stderr2) => {
    console.timeEnd(`[${id}] ffmpeg cut`);
    fs.unlink(tempFile, () => {});
    if (err2) {
-    return res.status(500).json({error: 'ffmpeg failed', details: err2.message});
+    console.error(`[${id}] ffmpeg error:`, err2.message);
+    console.error(`[${id}] ffmpeg stderr:`, stderr2);
+    console.error(`[${id}] ffmpeg stdout:`, stdout2);
+    return res.status(500).json({
+     error: 'ffmpeg failed',
+     details: err2.message,
+     stderr: stderr2,
+     command: `ffmpeg ${ffmpegArgs.join(' ')}`,
+    });
    }
+
+   // Check if output file exists and verify quality
+   if (!fs.existsSync(cutFile)) {
+    console.error(`[${id}] Cut file not found: ${cutFile}`);
+    return res.status(500).json({
+     error: 'Cut file not found',
+     details: `Expected file: ${cutFile}`,
+    });
+   }
+
+   // Verify final output resolution
+   try {
+    const finalProbeResult = execSync(`ffprobe -v quiet -print_format json -show_streams "${cutFile}"`, {encoding: 'utf8'});
+    const finalVideoInfo = JSON.parse(finalProbeResult);
+    const finalVideoStream = finalVideoInfo.streams.find((s) => s.codec_type === 'video');
+
+    if (finalVideoStream) {
+     const finalWidth = parseInt(finalVideoStream.width);
+     const finalHeight = parseInt(finalVideoStream.height);
+     console.log(`[${id}] ✅ Final output resolution: ${finalWidth}x${finalHeight} (${finalHeight}p)`);
+
+     if (finalHeight >= 720) {
+      console.log(`[${id}] 🎉 SUCCESS: Output meets 720p+ requirement!`);
+     } else {
+      console.warn(`[${id}] ⚠️ WARNING: Output resolution ${finalHeight}p is still below 720p`);
+     }
+    }
+   } catch (e) {
+    console.warn(`[${id}] Could not verify final resolution:`, e.message);
+   }
+
    console.log(`[${id}] Selesai proses. Download: /outputs/${path.basename(cutFile)}`);
+
+   // Schedule auto-cleanup after 30 seconds if file is not downloaded
+   setTimeout(() => {
+    if (fs.existsSync(cutFile)) {
+     fs.unlink(cutFile, (err) => {
+      if (!err) {
+       console.log(`[CLEANUP] Auto-deleted undownloaded file: ${path.basename(cutFile)}`);
+      }
+     });
+    }
+   }, 30000); // 30 seconds timeout
+
    res.json({downloadUrl: `/outputs/${path.basename(cutFile)}`});
   });
  });
@@ -100,6 +412,32 @@ function cleanupOldVttFiles() {
   });
  } catch (e) {
   console.warn('Failed to cleanup old VTT files:', e.message);
+ }
+}
+
+// Helper function untuk membersihkan file MP4 lama
+function cleanupOldMp4Files() {
+ try {
+  const files = fs.readdirSync(process.cwd());
+  const mp4Files = files.filter((file) => file.endsWith('.mp4') && file.includes('-'));
+  mp4Files.forEach((file) => {
+   try {
+    const filePath = path.join(process.cwd(), file);
+    const stats = fs.statSync(filePath);
+    const now = new Date();
+    const fileAge = now - stats.mtime;
+
+    // Delete files older than 1 hour
+    if (fileAge > 60 * 60 * 1000) {
+     fs.unlinkSync(filePath);
+     console.log(`Cleaned up old MP4 file: ${file}`);
+    }
+   } catch (e) {
+    console.warn(`Failed to cleanup MP4 file ${file}:`, e.message);
+   }
+  });
+ } catch (e) {
+  console.warn('Failed to cleanup old MP4 files:', e.message);
  }
 }
 
@@ -504,8 +842,9 @@ app.get('/api/video-metadata', async (req, res) => {
  }
 });
 
-// Cleanup old VTT files on server start
+// Cleanup old files on server start
 cleanupOldVttFiles();
+cleanupOldMp4Files();
 
 app.listen(PORT, () => {
  console.log(`Backend server running on http://localhost:${PORT}`);

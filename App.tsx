@@ -2,9 +2,13 @@ import React, {useState, useCallback} from 'react';
 import {YouTubeInputForm} from './components/YouTubeInputForm';
 import {ShortVideoCard} from './components/ShortVideoCard';
 import {LoadingSpinner} from './components/LoadingSpinner';
-import {generateShortsIdeas} from './services/geminiService';
+import {generateShortsIdeas} from './services/groqService';
 import type {ShortVideo} from './types';
 import {InfoIcon} from './components/icons';
+import {generateYouTubeThumbnailUrl} from './utils/thumbnailUtils';
+
+// Backend URL configuration
+const BACKEND_URL = (import.meta as any).env.VITE_BACKEND_URL || 'http://localhost:5001';
 
 // Helper: ekstrak videoId dari berbagai format URL YouTube (termasuk live/replay)
 function extractYouTubeVideoId(url: string): string | null {
@@ -40,9 +44,9 @@ const App: React.FC = () => {
 
  // Check for API key on mount
  React.useEffect(() => {
-  if (!process.env.API_KEY) {
-   setApiKeyError('Gemini API Key is not configured. Please set the API_KEY environment variable.');
-   console.error('Gemini API Key is missing (process.env.API_KEY).');
+  if (!(import.meta as any).env.VITE_GROQ_API_KEY) {
+   setApiKeyError('Groq API Key is not configured. Please set the VITE_GROQ_API_KEY environment variable.');
+   console.error('Groq API Key is missing (import.meta.env.VITE_GROQ_API_KEY).');
   }
  }, []);
 
@@ -87,7 +91,7 @@ const App: React.FC = () => {
  }
 
  const fetchFullTranscript = async (videoId: string): Promise<string> => {
-  const url = `http://localhost:5001/api/yt-transcript?videoId=${videoId}`;
+  const url = `${BACKEND_URL}/api/yt-transcript?videoId=${videoId}`;
   try {
    const res = await fetch(url);
    if (!res.ok) return '';
@@ -102,7 +106,7 @@ const App: React.FC = () => {
 
  // Ambil seluruh segmen subtitle lengkap (dengan timestamp)
  const fetchSubtitleSegments = async (videoId: string): Promise<Array<{start: string; end: string; text: string}>> => {
-  const url = `http://localhost:5001/api/yt-transcript?videoId=${videoId}`;
+  const url = `${BACKEND_URL}/api/yt-transcript?videoId=${videoId}`;
   try {
    const res = await fetch(url);
    if (!res.ok) return [];
@@ -195,7 +199,7 @@ const App: React.FC = () => {
    // Fetch durasi video menggunakan backend endpoint untuk menghindari CORS
    try {
     console.log(`Fetching video metadata for: ${videoId}`);
-    const metaRes = await fetch(`http://localhost:5001/api/video-metadata?videoId=${videoId}`);
+    const metaRes = await fetch(`${BACKEND_URL}/api/video-metadata?videoId=${videoId}`);
     if (metaRes.ok) {
      const metadata = await metaRes.json();
      videoDuration = metadata.duration || 0;
@@ -272,6 +276,7 @@ const App: React.FC = () => {
       ...idea,
       youtubeVideoId: videoId,
       thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
+      customThumbnailUrl: generateYouTubeThumbnailUrl(videoId, startTimeSeconds),
       startTimeSeconds,
       endTimeSeconds,
      };
@@ -279,32 +284,42 @@ const App: React.FC = () => {
     // Jika hasil AI terlalu sedikit untuk video panjang, fallback ke segmentasi otomatis
     let minSegmentsRequired = 5;
     if (videoDuration > 3600) {
-     minSegmentsRequired = 25;
+     minSegmentsRequired = 20; // 1+ jam: minimal 20 segmen
     } else if (videoDuration > 1800) {
-     minSegmentsRequired = 15;
+     minSegmentsRequired = 12; // 30+ menit: minimal 12 segmen
+    } else if (videoDuration > 900) {
+     minSegmentsRequired = 8; // 15+ menit: minimal 8 segmen
     } else if (videoDuration > 600) {
-     minSegmentsRequired = 8;
+     minSegmentsRequired = 6; // 10+ menit: minimal 6 segmen
     }
 
     if (shortsWithVideoId.length < minSegmentsRequired && videoDuration > 600) {
-     const fallbackShorts: ShortVideo[] = [];
+     console.log(`[FALLBACK] AI generated ${shortsWithVideoId.length} segments, adding automatic segments to reach ${minSegmentsRequired}`);
+     const fallbackShorts: ShortVideo[] = [...shortsWithVideoId]; // Keep AI segments
      const segLength = Math.max(45, Math.floor(videoDuration / Math.max(15, minSegmentsRequired)));
-     let idx = 0;
-     for (let start = 0; start < videoDuration; start += segLength) {
+     let idx = shortsWithVideoId.length;
+
+     // Add automatic segments to fill the gap
+     const neededSegments = minSegmentsRequired - shortsWithVideoId.length;
+     const intervalSize = Math.floor(videoDuration / neededSegments);
+
+     for (let i = 0; i < neededSegments; i++) {
+      const start = i * intervalSize;
       const end = Math.min(start + segLength, videoDuration);
       fallbackShorts.push({
-       id: `fallback-${idx}`,
-       title: `Segmen ${idx + 1}`,
-       description: `Highlight otomatis dari detik ${start} hingga ${end}.`,
+       id: `auto-${idx}`,
+       title: `Highlight ${idx + 1}`,
+       description: `Segmen otomatis yang menarik dari menit ${Math.floor(start / 60)} hingga ${Math.floor(end / 60)}.`,
        startTimeSeconds: start,
        endTimeSeconds: end,
        youtubeVideoId: videoId,
        thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
+       customThumbnailUrl: generateYouTubeThumbnailUrl(videoId, start),
       });
       idx++;
      }
      setGeneratedShorts(fallbackShorts);
-     setError(`AI hanya menghasilkan ${shortsWithVideoId.length} segmen (dibutuhkan minimal ${minSegmentsRequired}). Ditambahkan segmentasi otomatis.`);
+     console.log(`[SUCCESS] Combined ${shortsWithVideoId.length} AI segments + ${neededSegments} automatic segments = ${fallbackShorts.length} total`);
      return;
     }
     // Jika hasil AI kosong, baru fallback ke segmentasi otomatis
@@ -322,6 +337,7 @@ const App: React.FC = () => {
        endTimeSeconds: end,
        youtubeVideoId: videoId,
        thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
+       customThumbnailUrl: generateYouTubeThumbnailUrl(videoId, start),
       });
       idx++;
      }
@@ -330,9 +346,12 @@ const App: React.FC = () => {
      return;
     }
     setGeneratedShorts(shortsWithVideoId);
-    // Tampilkan warning jika segmen terlalu sedikit (tapi tidak fallback)
-    if (shortsWithVideoId.length < Math.floor(videoDuration / 180)) {
-     setError('Segmen yang dihasilkan sangat sedikit untuk durasi video ini. Coba ulangi proses, gunakan video lain, atau pastikan video memiliki transkrip yang jelas.');
+
+    // Tampilkan info jika segmen sedikit (tapi tidak error)
+    const expectedSegments = Math.max(3, Math.floor(videoDuration / 300)); // 1 segmen per 5 menit, minimal 3
+    if (shortsWithVideoId.length < expectedSegments) {
+     console.log(`[INFO] Generated ${shortsWithVideoId.length} segments, expected ~${expectedSegments} for ${Math.floor(videoDuration / 60)} minute video`);
+     // Tidak set error, hanya log info
     }
    } catch (e: any) {
     console.error('Error generating short video segments:', e);
@@ -348,7 +367,7 @@ const App: React.FC = () => {
   <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-blue-900 text-gray-100 flex flex-col items-center p-4 sm:p-8 selection:bg-purple-500 selection:text-white">
    <header className="w-full max-w-4xl mb-8 text-center">
     <h1 className="text-4xl sm:text-5xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-pink-400 to-red-400">AI Clipper (ALPHA)</h1>
-    <p className="mt-3 text-lg text-gray-300">Identifikasi segmen kunci dari video YouTube dan lihat konsep klip pendeknya langsung di sini. Ditenagai oleh AI.</p>
+    <p className="mt-3 text-lg text-gray-300">Identifikasi segmen kunci dari video YouTube dengan AI GRATIS tanpa batas. Ditenagai oleh Groq AI.</p>
    </header>
    <main className="w-full max-w-4xl flex-1">
     <YouTubeInputForm
@@ -406,7 +425,7 @@ const App: React.FC = () => {
    </main>
 
    <footer className="w-full max-w-4xl mt-12 text-center text-gray-500">
-    <p>&copy; {new Date().getFullYear()} AI Shorts Segmenter. Demonstrasi Konsep.</p>
+    <p>&copy; {new Date().getFullYear()} AI Shorts Segmenter (Groq + Llama 3.3 70B). Demonstrasi Konsep.</p>
    </footer>
   </div>
  );

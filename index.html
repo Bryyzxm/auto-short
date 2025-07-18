@@ -1,59 +1,76 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>AI YouTube to Shorts Segmenter</title>
-    <link href="/src/input.css" rel="stylesheet" />
-    <style>
-      body {
-        font-family: "Inter", sans-serif; /* A nice modern font, Tailwind will use its defaults if not available */
-      }
-      /* For custom scrollbar styling, optional */
-      ::-webkit-scrollbar {
-        width: 8px;
-      }
-      ::-webkit-scrollbar-track {
-        background: #1f2937; /* dark-gray-800 */
-      }
-      ::-webkit-scrollbar-thumb {
-        background: #4b5563; /* dark-gray-600 */
-        border-radius: 4px;
-      }
-      ::-webkit-scrollbar-thumb:hover {
-        background: #6b7280; /* dark-gray-500 */
-      }
-      .yt-embed-container {
-        position: relative;
-        width: 100%;
-        padding-bottom: 177.77%; /* 9:16 aspect ratio */
-        height: 0;
-        overflow: hidden;
-        background-color: #000;
-      }
-      .yt-embed-container iframe {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        border: 0;
-      }
-    </style>
-    <script type="importmap">
-      {
-        "imports": {
-          "react": "https://esm.sh/react@^19.1.0",
-          "react/": "https://esm.sh/react@^19.1.0/",
-          "react-dom/": "https://esm.sh/react-dom@^19.1.0/",
-          "@google/genai": "https://esm.sh/@google/genai@^1.4.0"
-        }
-      }
-    </script>
-  </head>
-  <body class="bg-gray-900 text-gray-100">
-    <div id="root"></div>
-    <script type="module" src="/index.tsx"></script>
-    <script src="https://www.youtube.com/iframe_api"></script>
-  </body>
+ <head>
+  <meta charset="UTF-8" />
+  <meta
+   name="viewport"
+   content="width=device-width, initial-scale=1.0"
+  />
+  <title>AI YouTube to Shorts Segmenter</title>
+  <link
+   href="/src/input.css"
+   rel="stylesheet"
+  />
+  <style>
+   body {
+    font-family: 'Inter', sans-serif; /* A nice modern font, Tailwind will use its defaults if not available */
+   }
+   /* For custom scrollbar styling, optional */
+   ::-webkit-scrollbar {
+    width: 8px;
+   }
+   ::-webkit-scrollbar-track {
+    background: #1f2937; /* dark-gray-800 */
+   }
+   ::-webkit-scrollbar-thumb {
+    background: #4b5563; /* dark-gray-600 */
+    border-radius: 4px;
+   }
+   ::-webkit-scrollbar-thumb:hover {
+    background: #6b7280; /* dark-gray-500 */
+   }
+   .yt-embed-container {
+    position: relative;
+    width: 100%;
+    padding-bottom: 177.77%; /* 9:16 aspect ratio */
+    height: 0;
+    overflow: hidden;
+    background-color: transparent; /* Changed from #000 to transparent */
+   }
+   .yt-embed-container iframe {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+   }
+   .yt-embed-container img {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+   }
+  </style>
+  <script type="importmap">
+   {
+    "imports": {
+     "react": "https://esm.sh/react@^19.1.0",
+     "react/": "https://esm.sh/react@^19.1.0/",
+     "react-dom/": "https://esm.sh/react-dom@^19.1.0/",
+     "@google/genai": "https://esm.sh/@google/genai@^1.4.0"
+    }
+   }
+  </script>
+ </head>
+ <body class="bg-gray-900 text-gray-100">
+  <div id="root"></div>
+  <script
+   type="module"
+   src="/index.tsx"
+  ></script>
+  <script src="https://www.youtube.com/iframe_api"></script>
+ </body>
 </html>
