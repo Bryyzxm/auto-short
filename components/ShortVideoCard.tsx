@@ -161,7 +161,7 @@ export const ShortVideoCard: React.FC<ShortVideoCardProps> = ({shortVideo, isAct
    }
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
- }, [showPlayer, shortVideo.youtubeVideoId, shortVideo.startTimeSeconds, shortVideo.endTimeSeconds]);
+ }, [showPlayer, shortVideo.youtubeVideoId]); // REMOVED timestamps to prevent infinite loop
 
  useEffect(() => {
   if (isActivePlayer && playerRef.current && isPlayerReady && typeof playerRef.current.playVideo === 'function') {
@@ -170,7 +170,7 @@ export const ShortVideoCard: React.FC<ShortVideoCardProps> = ({shortVideo, isAct
   } else if (!isActivePlayer && playerRef.current && isPlaying && typeof playerRef.current.pauseVideo === 'function') {
    playerRef.current.pauseVideo();
   }
- }, [isActivePlayer, isPlayerReady, shortVideo.startTimeSeconds, isPlaying]);
+ }, [isActivePlayer, isPlayerReady, isPlaying]); // REMOVED startTimeSeconds to prevent infinite loop
 
  const initializePlayer = () => {
   if (playerRef.current || !playerDivRef.current) return;
