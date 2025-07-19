@@ -308,12 +308,76 @@ export const ShortVideoCard: React.FC<ShortVideoCardProps> = ({shortVideo, isAct
  // Memoize transcript key to prevent infinite re-renders
  const transcriptKey = useMemo(() => `${shortVideo.youtubeVideoId}-${shortVideo.startTimeSeconds}-${shortVideo.endTimeSeconds}`, [shortVideo.youtubeVideoId, shortVideo.startTimeSeconds, shortVideo.endTimeSeconds]);
 
- // TEMPORARY FIX: Disable transcript fetching to stop infinite loop
+ // SAFE TRANSCRIPT FETCHING: Single-run with stable dependencies
  useEffect(() => {
-  // Set default transcript message without fetching
-  setTranscript('Transkrip dinonaktifkan sementara (debugging)');
-  setTranscriptLoading(false);
- }, []); // Empty dependency array to run only once
+  let isMounted = true;
+
+  // Only run once per unique video
+  const videoKey = `${shortVideo.youtubeVideoId}`;
+
+  // Check if already cached
+  const cachedTranscript = transcriptCache.get(videoKey);
+  if (cachedTranscript && Array.isArray(cachedTranscript)) {
+   const toSeconds = (vtt: string) => {
+    const [h, m, s] = vtt.split(':');
+    return parseInt(h) * 3600 + parseInt(m) * 60 + parseFloat(s.replace(',', '.'));
+   };
+
+   const filtered = cachedTranscript.filter((seg: any) => {
+    const segStart = toSeconds(seg.start);
+    const segEnd = toSeconds(seg.end);
+    return segEnd > shortVideo.startTimeSeconds && segStart < shortVideo.endTimeSeconds;
+   });
+
+   const transcriptText = filtered.map((seg: any) => seg.text).join(' ');
+   if (isMounted) {
+    setTranscript(transcriptText || 'Transkrip tidak tersedia untuk segmen ini.');
+    setTranscriptLoading(false);
+   }
+   return;
+  }
+
+  // Check failed cache
+  const failedTime = failedRequestsCache.get(videoKey);
+  if (failedTime && Date.now() - failedTime < 300000) {
+   if (isMounted) {
+    setTranscript('Transkrip tidak tersedia untuk video ini.');
+    setTranscriptLoading(false);
+   }
+   return;
+  }
+
+  // Set loading state
+  if (isMounted) {
+   setTranscriptLoading(true);
+   setTranscript('');
+  }
+
+  // Fetch transcript with timeout
+  const timeoutId = setTimeout(async () => {
+   if (!isMounted) return;
+
+   try {
+    const text = await fetchTranscript(videoKey, shortVideo.startTimeSeconds, shortVideo.endTimeSeconds);
+    if (isMounted) {
+     setTranscript(text);
+    }
+   } catch (error) {
+    if (isMounted) {
+     setTranscript('Gagal memuat transkrip.');
+    }
+   } finally {
+    if (isMounted) {
+     setTranscriptLoading(false);
+    }
+   }
+  }, 1000); // 1 second delay
+
+  return () => {
+   isMounted = false;
+   clearTimeout(timeoutId);
+  };
+ }, [shortVideo.youtubeVideoId]); // Only depend on videoId, not timestamps
 
  return (
   <div className="bg-gray-800 shadow-xl rounded-lg overflow-hidden flex flex-col transition-all duration-300 hover:shadow-purple-500/30 hover:ring-2 hover:ring-purple-500">
