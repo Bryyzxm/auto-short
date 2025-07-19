@@ -15,9 +15,7 @@ const __dirname = path.dirname(__filename);
 
 // Path ke yt-dlp executable
 // Cross-platform compatibility: use .exe on Windows, system yt-dlp on Linux
-const YT_DLP_PATH = process.platform === 'win32' 
-  ? path.join(__dirname, 'yt-dlp.exe')
-  : 'yt-dlp'; // Railway Linux will use system yt-dlp
+const YT_DLP_PATH = process.platform === 'win32' ? path.join(__dirname, 'yt-dlp.exe') : 'yt-dlp'; // Railway Linux will use system yt-dlp
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -791,7 +789,8 @@ app.get('/api/video-metadata', async (req, res) => {
 
  try {
   // Cek apakah yt-dlp.exe ada dan dapat diakses
-  if (!fs.existsSync(YT_DLP_PATH)) {
+  // Check if yt-dlp exists (only for Windows file path)
+  if (process.platform === 'win32' && !fs.existsSync(YT_DLP_PATH)) {
    throw new Error(`yt-dlp.exe not found at path: ${YT_DLP_PATH}`);
   }
 
