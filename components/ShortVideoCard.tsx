@@ -1,10 +1,24 @@
-import React, {useEffect, useRef, useState, useMemo} from 'react';
+import React, {useEffect, useRef, useState} from 'react';
 import type {ShortVideo} from '../types';
 import {PlayIcon, DownloadIcon, InfoIcon, StopIcon} from './icons';
 import {formatTime} from '../utils/timeUtils';
 
-// Backend URL configuration
-const BACKEND_URL = (import.meta as any).env.VITE_BACKEND_URL || 'http://localhost:5001';
+// Backend URL configuration with fallback chain for production
+const getBackendUrl = () => {
+ const envUrl = (import.meta as any).env.VITE_BACKEND_URL;
+ 
+ // Production-optimized priority order for backend URLs
+ const backendUrls = [
+  envUrl, // Environment variable (highest priority)
+  'https://auto-short-production.up.railway.app', // Railway production
+  'https://ai-youtube-backend.vercel.app', // Vercel backend (if any)
+  'http://localhost:5001' // Local development
+ ].filter(Boolean);
+ 
+ return backendUrls[0] || 'https://auto-short-production.up.railway.app';
+};
+
+const BACKEND_URL = getBackendUrl();
 
 // Cache untuk transcript video
 const transcriptCache = new Map<string, any[]>();
@@ -15,20 +29,25 @@ const activeRequests = new Map<string, Promise<any>>();
 
 // Helper: fetch transcript for a segment
 async function fetchTranscript(videoId: string, start: number, end: number): Promise<string> {
+ console.log(`[TRANSCRIPT] fetchTranscript called for videoId: ${videoId}, start: ${start}, end: ${end}`);
+
  // Check if there's already an active request for this video
  if (activeRequests.has(videoId)) {
   console.log(`[TRANSCRIPT] Waiting for existing request for videoId: ${videoId}`);
   try {
-   await activeRequests.get(videoId);
+   const existingPromise = activeRequests.get(videoId);
+   if (existingPromise) {
+    await existingPromise;
+   }
   } catch (e) {
-   // Request failed, continue with our own request
+   console.warn(`[TRANSCRIPT] Existing request failed for videoId: ${videoId}, continuing with new request`);
   }
  }
 
  // Check failed cache first - if we recently failed, don't retry for 5 minutes
  const failedTime = failedRequestsCache.get(videoId);
  if (failedTime && Date.now() - failedTime < 300000) {
-  // 5 minutes
+  console.log(`[TRANSCRIPT] Using failed cache for videoId: ${videoId}, failed ${Math.round((Date.now() - failedTime) / 1000)} seconds ago`);
   return 'Transkrip tidak tersedia untuk video ini.';
  }
 
@@ -36,42 +55,88 @@ async function fetchTranscript(videoId: string, start: number, end: number): Pro
  let fullTranscript = transcriptCache.get(videoId);
 
  if (!fullTranscript) {
+  // Prevent too many concurrent requests
+  if (activeRequests.size > 3) {
+   console.warn(`[TRANSCRIPT] Too many concurrent requests (${activeRequests.size}), skipping for videoId: ${videoId}`);
+   failedRequestsCache.set(videoId, Date.now());
+   return 'Terlalu banyak permintaan. Coba lagi nanti.';
+  }
+
   // Create promise for this request and store it
   const requestPromise = (async () => {
-   // Fetch transcript via backend yt-dlp proxy dengan prioritas bahasa Indonesia
-   const url = `${BACKEND_URL}/api/yt-transcript?videoId=${videoId}&lang=id,en`;
-   try {
-    console.log(`[TRANSCRIPT] Making API request for videoId: ${videoId}`);
-    const res = await fetch(url);
-    if (!res.ok) {
-     const errorData = await res.json().catch(() => ({}));
-     console.error('Gagal fetch transkrip (yt-dlp):', res.status, res.statusText, url);
-     console.error('Error details:', errorData);
-
-     // Cache failed request to prevent retries
-     failedRequestsCache.set(videoId, Date.now());
-
-     // Don't return error string, throw instead to avoid caching in transcriptCache
-     throw new Error('Transkrip tidak tersedia untuk video ini.');
-    }
-    const data = await res.json();
-    if (!data?.segments || !Array.isArray(data.segments)) {
-     console.warn('Format transkrip yt-dlp tidak sesuai atau kosong:', data);
-     failedRequestsCache.set(videoId, Date.now());
-     throw new Error('Transkrip tidak tersedia.');
-    }
-
-    const segments = data.segments;
-    fullTranscript = segments;
-    // Cache it for future use
-    transcriptCache.set(videoId, segments);
-    console.log(`[TRANSCRIPT] Cached transcript for videoId: ${videoId}, segments: ${segments.length}, language: ${data.language || 'unknown'}`);
-    return segments;
-   } catch (err) {
-    console.error('Error fetchTranscript (yt-dlp):', err, url);
-    failedRequestsCache.set(videoId, Date.now());
-    throw err;
+   // Add exponential backoff delay
+   const retryDelay = Math.min(1000 * Math.pow(2, failedRequestsCache.get(videoId + '_retries') || 0), 10000);
+   if (retryDelay > 1000) {
+    console.log(`[TRANSCRIPT] Applying backoff delay of ${retryDelay}ms for videoId: ${videoId}`);
+    await new Promise((resolve) => setTimeout(resolve, retryDelay));
    }
+
+   // Fetch transcript via backend yt-dlp proxy dengan prioritas bahasa Indonesia
+   const backendUrls = [
+    (import.meta as any).env.VITE_BACKEND_URL,
+    'https://auto-short-production.up.railway.app',
+    'https://ai-youtube-backend.vercel.app', // Additional Vercel backend
+    'http://localhost:5001'
+   ].filter(Boolean);
+
+   let lastError;
+
+   for (let i = 0; i < backendUrls.length; i++) {
+    const baseUrl = backendUrls[i];
+    const url = `${baseUrl}/api/yt-transcript?videoId=${videoId}&lang=id,en`;
+
+    try {
+     console.log(`[TRANSCRIPT] Trying backend ${i + 1}/${backendUrls.length}: ${baseUrl} for videoId: ${videoId}`);
+     const res = await fetch(url, {
+      method: 'GET',
+      headers: {
+       Accept: 'application/json',
+       'Content-Type': 'application/json',
+      },
+      signal: AbortSignal.timeout(15000), // 15 second timeout per backend
+     });
+
+     if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      console.warn(`[TRANSCRIPT] Backend ${i + 1} failed:`, res.status, res.statusText, url);
+
+      if (res.status === 404) {
+       lastError = new Error('Video tidak memiliki transkrip atau transkrip tidak dapat diakses.');
+      } else if (res.status >= 500) {
+       lastError = new Error('Server sedang bermasalah. Coba lagi nanti.');
+      } else {
+       lastError = new Error(`Error ${res.status}: ${errorData.message || 'Transkrip tidak dapat dimuat.'}`);
+      }
+
+      // Try next backend if this one failed
+      continue;
+     }
+
+     const data = await res.json();
+     if (!data?.segments || !Array.isArray(data.segments)) {
+      console.warn('Format transkrip yt-dlp tidak sesuai atau kosong:', data);
+      continue; // Try next backend
+     }
+
+     const segments = data.segments;
+     fullTranscript = segments;
+     // Cache it for future use
+     transcriptCache.set(videoId, segments);
+     console.log(`[TRANSCRIPT] Success with backend ${i + 1}: Cached transcript for videoId: ${videoId}, segments: ${segments.length}, language: ${data.language || 'unknown'}`);
+     return segments;
+    } catch (err: any) {
+     console.error(`[TRANSCRIPT] Backend ${i + 1} error:`, err.message, url);
+     lastError = err;
+     // Continue to next backend
+    }
+   }
+
+   // All backends failed
+   console.error('Error fetchTranscript: All backends failed', lastError);
+   failedRequestsCache.set(videoId, Date.now());
+   const retryCount = (failedRequestsCache.get(videoId + '_retries') || 0) + 1;
+   failedRequestsCache.set(videoId + '_retries', retryCount);
+   throw lastError || new Error('Semua server tidak tersedia. Coba lagi nanti.');
   })();
 
   // Store the promise to prevent concurrent requests
@@ -156,8 +221,15 @@ export const ShortVideoCard: React.FC<ShortVideoCardProps> = ({shortVideo, isAct
 
   return () => {
    if (playerRef.current) {
-    playerRef.current.destroy();
-    playerRef.current = null;
+    try {
+     if (typeof playerRef.current.destroy === 'function') {
+      playerRef.current.destroy();
+     }
+    } catch (e) {
+     console.warn('Error destroying YouTube player:', e);
+    } finally {
+     playerRef.current = null;
+    }
    }
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -304,9 +376,6 @@ export const ShortVideoCard: React.FC<ShortVideoCardProps> = ({shortVideo, isAct
  };
 
  const duration = shortVideo.endTimeSeconds - shortVideo.startTimeSeconds;
-
- // Memoize transcript key to prevent infinite re-renders
- const transcriptKey = useMemo(() => `${shortVideo.youtubeVideoId}-${shortVideo.startTimeSeconds}-${shortVideo.endTimeSeconds}`, [shortVideo.youtubeVideoId, shortVideo.startTimeSeconds, shortVideo.endTimeSeconds]);
 
  // SAFE TRANSCRIPT FETCHING: Single-run with stable dependencies
  useEffect(() => {

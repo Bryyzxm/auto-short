@@ -7,8 +7,23 @@ import type {ShortVideo} from './types';
 import {InfoIcon} from './components/icons';
 import {generateYouTubeThumbnailUrl} from './utils/thumbnailUtils';
 
-// Backend URL configuration
-const BACKEND_URL = (import.meta as any).env.VITE_BACKEND_URL || 'http://localhost:5001';
+// Backend URL configuration with fallback chain for production
+const getBackendUrl = () => {
+ const envUrl = (import.meta as any).env.VITE_BACKEND_URL;
+
+ // Production-optimized priority order for backend URLs
+ const backendUrls = [
+  envUrl, // Environment variable (highest priority)
+  'https://auto-short-production.up.railway.app', // Railway production
+  'https://ai-youtube-backend.vercel.app', // Vercel backend (if any)
+  'http://localhost:5001', // Local development
+ ].filter(Boolean);
+
+ return backendUrls[0] || 'https://auto-short-production.up.railway.app';
+};
+
+const BACKEND_URL = getBackendUrl();
+console.log(`[CONFIG] Using backend URL: ${BACKEND_URL}`);
 
 // Helper: ekstrak videoId dari berbagai format URL YouTube (termasuk live/replay)
 function extractYouTubeVideoId(url: string): string | null {
@@ -41,9 +56,6 @@ const App: React.FC = () => {
  const [apiKeyError, setApiKeyError] = useState<string | null>(null);
  const [activePlayerId, setActivePlayerId] = useState<string | null>(null);
  const [aspectRatio, setAspectRatio] = useState<string>('9:16');
-
- // Global transcript cache to prevent multiple API calls for same video
- const [transcriptCache, setTranscriptCache] = useState<Map<string, any>>(new Map());
 
  // Check for API key on mount
  React.useEffect(() => {
