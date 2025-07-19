@@ -8,6 +8,7 @@ import fs from 'fs';
 import fetch from 'node-fetch';
 import {execSync} from 'child_process';
 import {fileURLToPath} from 'url';
+import {YoutubeTranscript} from 'youtube-transcript';
 
 // Polyfill __dirname for ES module
 const __filename = fileURLToPath(import.meta.url);
@@ -648,6 +649,56 @@ app.get('/api/yt-transcript', async (req, res) => {
    console.error(`[TRANSCRIPT] stdout:`, stdout);
    console.error(`[TRANSCRIPT] yt-dlp path:`, YT_DLP_PATH);
    console.error(`[TRANSCRIPT] yt-dlp args:`, ytDlpArgs);
+
+   // Try fallback: youtube-transcript library
+   console.log(`[TRANSCRIPT] Trying fallback method for videoId: ${videoId}`);
+   try {
+    const transcript = await YoutubeTranscript.fetchTranscript(videoId, {
+     lang: 'id', // Try Indonesian first
+     country: 'ID',
+    });
+
+    if (transcript && transcript.length > 0) {
+     console.log(`[TRANSCRIPT] Fallback successful: got ${transcript.length} segments`);
+     const segments = transcript.map((item, index) => ({
+      text: item.text,
+      start: item.offset / 1000, // Convert ms to seconds
+      end: (item.offset + item.duration) / 1000,
+     }));
+
+     // Cache the result
+     transcriptCache.set(videoId, {segments});
+
+     return res.json({segments});
+    }
+   } catch (fallbackErr) {
+    console.error(`[TRANSCRIPT] Fallback also failed:`, fallbackErr.message);
+
+    // Try English as last resort
+    try {
+     const transcript = await YoutubeTranscript.fetchTranscript(videoId, {
+      lang: 'en',
+      country: 'US',
+     });
+
+     if (transcript && transcript.length > 0) {
+      console.log(`[TRANSCRIPT] English fallback successful: got ${transcript.length} segments`);
+      const segments = transcript.map((item, index) => ({
+       text: item.text,
+       start: item.offset / 1000,
+       end: (item.offset + item.duration) / 1000,
+      }));
+
+      // Cache the result
+      transcriptCache.set(videoId, {segments});
+
+      return res.json({segments});
+     }
+    } catch (enFallbackErr) {
+     console.error(`[TRANSCRIPT] English fallback also failed:`, enFallbackErr.message);
+    }
+   }
+
    return res.status(500).json({
     error: 'yt-dlp subtitle fetch failed',
     details: err.message,
@@ -831,6 +882,34 @@ app.get('/api/video-metadata', async (req, res) => {
   }
   if (error.stdout) {
    console.error(`[video-metadata] stdout:`, error.stdout);
+  }
+
+  // Try fallback: YouTube oEmbed API (no API key required)
+  console.log(`[video-metadata] Trying fallback method for videoId: ${videoId}`);
+  try {
+   const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`;
+   const oembedResponse = await fetch(oembedUrl);
+
+   if (oembedResponse.ok) {
+    const oembedData = await oembedResponse.json();
+    console.log(`[video-metadata] Fallback successful for ${videoId}: ${oembedData.title}`);
+
+    const fallbackResponse = {
+     videoId: videoId,
+     title: oembedData.title,
+     duration: 600, // Default fallback duration (10 minutes)
+     uploader: oembedData.author_name,
+     upload_date: new Date().toISOString().slice(0, 10).replace(/-/g, ''),
+     view_count: null,
+     description: `Video by ${oembedData.author_name}`,
+     thumbnail_url: oembedData.thumbnail_url,
+     fallback: true,
+    };
+
+    return res.json(fallbackResponse);
+   }
+  } catch (fallbackError) {
+   console.error(`[video-metadata] Fallback also failed:`, fallbackError.message);
   }
 
   res.status(500).json({
