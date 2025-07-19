@@ -51,19 +51,14 @@ async function fetchTranscript(videoId: string, start: number, end: number): Pro
      // Cache failed request to prevent retries
      failedRequestsCache.set(videoId, Date.now());
 
-     // Return a more specific error message based on status
-     if (res.status === 404) {
-      return 'Transkrip tidak tersedia untuk video ini.';
-     } else if (res.status === 500) {
-      return 'Sedang memproses transkrip, coba lagi dalam beberapa saat.';
-     }
-     return 'Transkrip tidak tersedia.';
+     // Don't return error string, throw instead to avoid caching in transcriptCache
+     throw new Error('Transkrip tidak tersedia untuk video ini.');
     }
     const data = await res.json();
     if (!data?.segments || !Array.isArray(data.segments)) {
      console.warn('Format transkrip yt-dlp tidak sesuai atau kosong:', data);
      failedRequestsCache.set(videoId, Date.now());
-     return 'Transkrip tidak tersedia.';
+     throw new Error('Transkrip tidak tersedia.');
     }
 
     const segments = data.segments;
@@ -84,8 +79,8 @@ async function fetchTranscript(videoId: string, start: number, end: number): Pro
 
   try {
    fullTranscript = await requestPromise;
-  } catch (err) {
-   return 'Gagal memuat transkrip.';
+  } catch (err: any) {
+   return err.message || 'Gagal memuat transkrip.';
   } finally {
    // Remove from active requests when done
    activeRequests.delete(videoId);
@@ -316,7 +311,7 @@ export const ShortVideoCard: React.FC<ShortVideoCardProps> = ({shortVideo, isAct
 
   // Check if transcript is already cached globally
   const cachedTranscript = transcriptCache.get(shortVideo.youtubeVideoId);
-  if (cachedTranscript) {
+  if (cachedTranscript && Array.isArray(cachedTranscript)) {
    const toSeconds = (vtt: string) => {
     const [h, m, s] = vtt.split(':');
     return parseInt(h) * 3600 + parseInt(m) * 60 + parseFloat(s.replace(',', '.'));
