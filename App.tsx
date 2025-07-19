@@ -371,6 +371,7 @@ const App: React.FC = () => {
    <header className="w-full max-w-4xl mb-8 text-center">
     <h1 className="text-4xl sm:text-5xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-pink-400 to-red-400">AI Clipper (ALPHA)</h1>
     <p className="mt-3 text-lg text-gray-300">Identifikasi segmen kunci dari video YouTube dengan AI GRATIS tanpa batas. Ditenagai oleh Groq AI.</p>
+    {/* Build: {new Date().toISOString()} */}
    </header>
    <main className="w-full max-w-4xl flex-1">
     <YouTubeInputForm
