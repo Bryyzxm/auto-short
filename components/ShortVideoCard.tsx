@@ -1,4 +1,4 @@
-import React, {useEffect, useRef, useState} from 'react';
+import React, {useEffect, useRef, useState, useMemo} from 'react';
 import type {ShortVideo} from '../types';
 import {PlayIcon, DownloadIcon, InfoIcon, StopIcon} from './icons';
 import {formatTime} from '../utils/timeUtils';
@@ -305,6 +305,9 @@ export const ShortVideoCard: React.FC<ShortVideoCardProps> = ({shortVideo, isAct
 
  const duration = shortVideo.endTimeSeconds - shortVideo.startTimeSeconds;
 
+ // Memoize transcript key to prevent infinite re-renders
+ const transcriptKey = useMemo(() => `${shortVideo.youtubeVideoId}-${shortVideo.startTimeSeconds}-${shortVideo.endTimeSeconds}`, [shortVideo.youtubeVideoId, shortVideo.startTimeSeconds, shortVideo.endTimeSeconds]);
+
  useEffect(() => {
   // Only fetch transcript for YouTube videos - with debounce to prevent multiple calls
   let isCancelled = false;
@@ -351,7 +354,7 @@ export const ShortVideoCard: React.FC<ShortVideoCardProps> = ({shortVideo, isAct
    isCancelled = true;
    clearTimeout(timeoutId);
   };
- }, [shortVideo.youtubeVideoId, shortVideo.startTimeSeconds, shortVideo.endTimeSeconds]);
+ }, [transcriptKey]); // Use stable transcriptKey instead of individual props
 
  return (
   <div className="bg-gray-800 shadow-xl rounded-lg overflow-hidden flex flex-col transition-all duration-300 hover:shadow-purple-500/30 hover:ring-2 hover:ring-purple-500">
