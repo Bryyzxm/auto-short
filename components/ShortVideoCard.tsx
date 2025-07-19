@@ -308,53 +308,12 @@ export const ShortVideoCard: React.FC<ShortVideoCardProps> = ({shortVideo, isAct
  // Memoize transcript key to prevent infinite re-renders
  const transcriptKey = useMemo(() => `${shortVideo.youtubeVideoId}-${shortVideo.startTimeSeconds}-${shortVideo.endTimeSeconds}`, [shortVideo.youtubeVideoId, shortVideo.startTimeSeconds, shortVideo.endTimeSeconds]);
 
+ // TEMPORARY FIX: Disable transcript fetching to stop infinite loop
  useEffect(() => {
-  // Only fetch transcript for YouTube videos - with debounce to prevent multiple calls
-  let isCancelled = false;
-
-  // Check if transcript is already cached globally
-  const cachedTranscript = transcriptCache.get(shortVideo.youtubeVideoId);
-  if (cachedTranscript && Array.isArray(cachedTranscript)) {
-   const toSeconds = (vtt: string) => {
-    const [h, m, s] = vtt.split(':');
-    return parseInt(h) * 3600 + parseInt(m) * 60 + parseFloat(s.replace(',', '.'));
-   };
-   const filtered = cachedTranscript.filter((seg: any) => {
-    const segStart = toSeconds(seg.start);
-    const segEnd = toSeconds(seg.end);
-    return segEnd > shortVideo.startTimeSeconds && segStart < shortVideo.endTimeSeconds;
-   });
-   const transcriptText = filtered.map((seg: any) => seg.text).join(' ');
-   setTranscript(transcriptText || 'Transkrip tidak tersedia untuk segmen ini.');
-   setTranscriptLoading(false);
-   return;
-  }
-
-  setTranscript('');
-  setTranscriptLoading(true);
-
-  // Debounce transcript fetching per video to prevent spam
-  const timeoutId = setTimeout(() => {
-   if (isCancelled) return;
-
-   fetchTranscript(shortVideo.youtubeVideoId, shortVideo.startTimeSeconds, shortVideo.endTimeSeconds)
-    .then((txt) => {
-     if (!isCancelled) {
-      setTranscript(txt);
-     }
-    })
-    .finally(() => {
-     if (!isCancelled) {
-      setTranscriptLoading(false);
-     }
-    });
-  }, 500); // Increased debounce to 500ms
-
-  return () => {
-   isCancelled = true;
-   clearTimeout(timeoutId);
-  };
- }, [transcriptKey]); // Use stable transcriptKey instead of individual props
+  // Set default transcript message without fetching
+  setTranscript('Transkrip dinonaktifkan sementara (debugging)');
+  setTranscriptLoading(false);
+ }, []); // Empty dependency array to run only once
 
  return (
   <div className="bg-gray-800 shadow-xl rounded-lg overflow-hidden flex flex-col transition-all duration-300 hover:shadow-purple-500/30 hover:ring-2 hover:ring-purple-500">
