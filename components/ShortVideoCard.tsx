@@ -10,9 +10,21 @@ const BACKEND_URL = (import.meta as any).env.VITE_BACKEND_URL || 'http://localho
 const transcriptCache = new Map<string, any[]>();
 // Cache untuk failed requests
 const failedRequestsCache = new Map<string, number>();
+// Lock untuk mencegah concurrent requests untuk video yang sama
+const activeRequests = new Map<string, Promise<any>>();
 
 // Helper: fetch transcript for a segment
 async function fetchTranscript(videoId: string, start: number, end: number): Promise<string> {
+ // Check if there's already an active request for this video
+ if (activeRequests.has(videoId)) {
+  console.log(`[TRANSCRIPT] Waiting for existing request for videoId: ${videoId}`);
+  try {
+   await activeRequests.get(videoId);
+  } catch (e) {
+   // Request failed, continue with our own request
+  }
+ }
+
  // Check failed cache first - if we recently failed, don't retry for 5 minutes
  const failedTime = failedRequestsCache.get(videoId);
  if (failedTime && Date.now() - failedTime < 300000) {
@@ -24,42 +36,59 @@ async function fetchTranscript(videoId: string, start: number, end: number): Pro
  let fullTranscript = transcriptCache.get(videoId);
 
  if (!fullTranscript) {
-  // Fetch transcript via backend yt-dlp proxy dengan prioritas bahasa Indonesia
-  const url = `${BACKEND_URL}/api/yt-transcript?videoId=${videoId}&lang=id,en`;
-  try {
-   const res = await fetch(url);
-   if (!res.ok) {
-    const errorData = await res.json().catch(() => ({}));
-    console.error('Gagal fetch transkrip (yt-dlp):', res.status, res.statusText, url);
-    console.error('Error details:', errorData);
+  // Create promise for this request and store it
+  const requestPromise = (async () => {
+   // Fetch transcript via backend yt-dlp proxy dengan prioritas bahasa Indonesia
+   const url = `${BACKEND_URL}/api/yt-transcript?videoId=${videoId}&lang=id,en`;
+   try {
+    console.log(`[TRANSCRIPT] Making API request for videoId: ${videoId}`);
+    const res = await fetch(url);
+    if (!res.ok) {
+     const errorData = await res.json().catch(() => ({}));
+     console.error('Gagal fetch transkrip (yt-dlp):', res.status, res.statusText, url);
+     console.error('Error details:', errorData);
 
-    // Cache failed request to prevent retries
-    failedRequestsCache.set(videoId, Date.now());
+     // Cache failed request to prevent retries
+     failedRequestsCache.set(videoId, Date.now());
 
-    // Return a more specific error message based on status
-    if (res.status === 404) {
-     return 'Transkrip tidak tersedia untuk video ini.';
-    } else if (res.status === 500) {
-     return 'Sedang memproses transkrip, coba lagi dalam beberapa saat.';
+     // Return a more specific error message based on status
+     if (res.status === 404) {
+      return 'Transkrip tidak tersedia untuk video ini.';
+     } else if (res.status === 500) {
+      return 'Sedang memproses transkrip, coba lagi dalam beberapa saat.';
+     }
+     return 'Transkrip tidak tersedia.';
     }
-    return 'Transkrip tidak tersedia.';
-   }
-   const data = await res.json();
-   if (!data?.segments || !Array.isArray(data.segments)) {
-    console.warn('Format transkrip yt-dlp tidak sesuai atau kosong:', data);
-    failedRequestsCache.set(videoId, Date.now());
-    return 'Transkrip tidak tersedia.';
-   }
+    const data = await res.json();
+    if (!data?.segments || !Array.isArray(data.segments)) {
+     console.warn('Format transkrip yt-dlp tidak sesuai atau kosong:', data);
+     failedRequestsCache.set(videoId, Date.now());
+     return 'Transkrip tidak tersedia.';
+    }
 
-   const segments = data.segments;
-   fullTranscript = segments;
-   // Cache it for future use
-   transcriptCache.set(videoId, segments);
-   console.log(`[TRANSCRIPT] Cached transcript for videoId: ${videoId}, segments: ${segments.length}, language: ${data.language || 'unknown'}`);
+    const segments = data.segments;
+    fullTranscript = segments;
+    // Cache it for future use
+    transcriptCache.set(videoId, segments);
+    console.log(`[TRANSCRIPT] Cached transcript for videoId: ${videoId}, segments: ${segments.length}, language: ${data.language || 'unknown'}`);
+    return segments;
+   } catch (err) {
+    console.error('Error fetchTranscript (yt-dlp):', err, url);
+    failedRequestsCache.set(videoId, Date.now());
+    throw err;
+   }
+  })();
+
+  // Store the promise to prevent concurrent requests
+  activeRequests.set(videoId, requestPromise);
+
+  try {
+   fullTranscript = await requestPromise;
   } catch (err) {
-   console.error('Error fetchTranscript (yt-dlp):', err, url);
-   failedRequestsCache.set(videoId, Date.now());
    return 'Gagal memuat transkrip.';
+  } finally {
+   // Remove from active requests when done
+   activeRequests.delete(videoId);
   }
  }
 
