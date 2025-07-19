@@ -7,19 +7,20 @@ import type {ShortVideo} from './types';
 import {InfoIcon} from './components/icons';
 import {generateYouTubeThumbnailUrl} from './utils/thumbnailUtils';
 
-// Backend URL configuration with fallback chain for production
+// Backend URL configuration with smart environment detection
 const getBackendUrl = () => {
  const envUrl = (import.meta as any).env.VITE_BACKEND_URL;
+ const isDev = (import.meta as any).env.DEV;
 
- // Production-optimized priority order for backend URLs
- const backendUrls = [
-  envUrl, // Environment variable (highest priority)
-  'https://auto-short-production.up.railway.app', // Railway production
-  'https://ai-youtube-backend.vercel.app', // Vercel backend (if any)
-  'http://localhost:5001', // Local development
- ].filter(Boolean);
+ console.log(`[CONFIG] Environment: ${isDev ? 'development' : 'production'}`);
+ console.log(`[CONFIG] VITE_BACKEND_URL from env: ${envUrl}`);
 
- return backendUrls[0] || 'https://auto-short-production.up.railway.app';
+ // Smart backend selection:
+ // 1. If environment variable is set, use it (allows override)
+ // 2. If no env var, fallback to Railway production
+ const backendUrl = envUrl || 'https://auto-short-production.up.railway.app';
+
+ return backendUrl;
 };
 
 const BACKEND_URL = getBackendUrl();

@@ -19,12 +19,14 @@ AI-powered tool untuk mengidentifikasi dan membuat segmen pendek dari video YouT
 ## 🚀 Quick Start
 
 ### **Prerequisites**
-- Node.js 18+ 
+
+- Node.js 18+
 - Groq API Key (FREE dari https://console.groq.com/)
 
 ### **Local Development**
 
 1. **Clone & Install**:
+
    ```bash
    git clone https://github.com/Bryyzxm/auto-short.git
    cd auto-short
@@ -32,6 +34,7 @@ AI-powered tool untuk mengidentifikasi dan membuat segmen pendek dari video YouT
    ```
 
 2. **Setup Environment**:
+
    ```bash
    cp .env.example .env.local
    # Edit .env.local dengan API keys Anda
@@ -55,12 +58,14 @@ VITE_BACKEND_URL=https://auto-short-production.up.railway.app
 ## 🏗️ Tech Stack
 
 ### **Frontend (Vercel)**
+
 - React 19 + TypeScript
 - Vite (Build tool)
 - Tailwind CSS
 - Groq SDK
 
 ### **Backend (Railway)**
+
 - Node.js + Express
 - yt-dlp (Video processing)
 - YouTube Transcript API
@@ -69,6 +74,7 @@ VITE_BACKEND_URL=https://auto-short-production.up.railway.app
 ## 📦 Deployment
 
 ### **Vercel (Frontend)**
+
 ```bash
 # Install Vercel CLI
 npm i -g vercel
@@ -78,10 +84,12 @@ vercel --prod
 ```
 
 **Environment Variables untuk Vercel:**
+
 - `VITE_GROQ_API_KEY`
 - `VITE_BACKEND_URL`
 
 ### **Railway (Backend)**
+
 1. Connect GitHub repository
 2. Set environment variables:
    - `PORT=5001`
@@ -91,12 +99,15 @@ vercel --prod
 ## 🔧 Configuration
 
 ### **Backend Fallback System**
+
 Application menggunakan multi-backend fallback:
+
 1. Custom environment URL
 2. Railway production
 3. Local development
 
 ### **API Rate Limiting**
+
 - Max 3 concurrent transcript requests
 - Exponential backoff untuk retry
 - 5-menit cache untuk failed requests
@@ -114,18 +125,21 @@ Application menggunakan multi-backend fallback:
 ### **Common Issues**
 
 **CORS Errors**:
+
 ```bash
 # Set CORS_ORIGINS di Railway
 CORS_ORIGINS=https://your-vercel-domain.vercel.app
 ```
 
 **API Key Missing**:
+
 ```bash
 # Ensure proper VITE_ prefix
 VITE_GROQ_API_KEY=your_actual_key
 ```
 
 **Backend Not Found**:
+
 - Check Railway deployment status
 - Verify `VITE_BACKEND_URL` di Vercel
 

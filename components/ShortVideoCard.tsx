@@ -6,15 +6,15 @@ import {formatTime} from '../utils/timeUtils';
 // Backend URL configuration with fallback chain for production
 const getBackendUrl = () => {
  const envUrl = (import.meta as any).env.VITE_BACKEND_URL;
- 
+
  // Production-optimized priority order for backend URLs
  const backendUrls = [
   envUrl, // Environment variable (highest priority)
   'https://auto-short-production.up.railway.app', // Railway production
   'https://ai-youtube-backend.vercel.app', // Vercel backend (if any)
-  'http://localhost:5001' // Local development
+  'http://localhost:5001', // Local development
  ].filter(Boolean);
- 
+
  return backendUrls[0] || 'https://auto-short-production.up.railway.app';
 };
 
@@ -75,8 +75,7 @@ async function fetchTranscript(videoId: string, start: number, end: number): Pro
    const backendUrls = [
     (import.meta as any).env.VITE_BACKEND_URL,
     'https://auto-short-production.up.railway.app',
-    'https://ai-youtube-backend.vercel.app', // Additional Vercel backend
-    'http://localhost:5001'
+    // Removed non-existent backends to prevent unnecessary requests
    ].filter(Boolean);
 
    let lastError;
@@ -377,9 +376,10 @@ export const ShortVideoCard: React.FC<ShortVideoCardProps> = ({shortVideo, isAct
 
  const duration = shortVideo.endTimeSeconds - shortVideo.startTimeSeconds;
 
- // SAFE TRANSCRIPT FETCHING: Single-run with stable dependencies
+ // SAFE TRANSCRIPT FETCHING: Single-run with stable dependencies and debouncing
  useEffect(() => {
   let isMounted = true;
+  let debounceTimer: NodeJS.Timeout;
 
   // Only run once per unique video
   const videoKey = `${shortVideo.youtubeVideoId}`;
@@ -406,9 +406,10 @@ export const ShortVideoCard: React.FC<ShortVideoCardProps> = ({shortVideo, isAct
    return;
   }
 
-  // Check failed cache
+  // Check failed cache - extend cache time to reduce retries
   const failedTime = failedRequestsCache.get(videoKey);
-  if (failedTime && Date.now() - failedTime < 300000) {
+  if (failedTime && Date.now() - failedTime < 600000) {
+   // Increased to 10 minutes
    if (isMounted) {
     setTranscript('Transkrip tidak tersedia untuk video ini.');
     setTranscriptLoading(false);
@@ -422,8 +423,8 @@ export const ShortVideoCard: React.FC<ShortVideoCardProps> = ({shortVideo, isAct
    setTranscript('');
   }
 
-  // Fetch transcript with timeout
-  const timeoutId = setTimeout(async () => {
+  // Debounced transcript fetch - wait 2 seconds before making request
+  debounceTimer = setTimeout(async () => {
    if (!isMounted) return;
 
    try {
@@ -440,11 +441,13 @@ export const ShortVideoCard: React.FC<ShortVideoCardProps> = ({shortVideo, isAct
      setTranscriptLoading(false);
     }
    }
-  }, 1000); // 1 second delay
+  }, 2000); // 2 second debounce delay
 
   return () => {
    isMounted = false;
-   clearTimeout(timeoutId);
+   if (debounceTimer) {
+    clearTimeout(debounceTimer);
+   }
   };
  }, [shortVideo.youtubeVideoId]); // Only depend on videoId, not timestamps
 
