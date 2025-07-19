@@ -42,6 +42,9 @@ const App: React.FC = () => {
  const [activePlayerId, setActivePlayerId] = useState<string | null>(null);
  const [aspectRatio, setAspectRatio] = useState<string>('9:16');
 
+ // Global transcript cache to prevent multiple API calls for same video
+ const [transcriptCache, setTranscriptCache] = useState<Map<string, any>>(new Map());
+
  // Check for API key on mount
  React.useEffect(() => {
   if (!(import.meta as any).env.VITE_GROQ_API_KEY) {

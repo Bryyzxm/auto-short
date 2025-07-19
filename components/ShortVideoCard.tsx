@@ -268,12 +268,18 @@ export const ShortVideoCard: React.FC<ShortVideoCardProps> = ({shortVideo, isAct
  const duration = shortVideo.endTimeSeconds - shortVideo.startTimeSeconds;
 
  useEffect(() => {
-  // Only fetch transcript for YouTube videos
+  // Only fetch transcript for YouTube videos - with debounce to prevent multiple calls
   setTranscript('');
   setTranscriptLoading(true);
-  fetchTranscript(shortVideo.youtubeVideoId, shortVideo.startTimeSeconds, shortVideo.endTimeSeconds)
-   .then((txt) => setTranscript(txt))
-   .finally(() => setTranscriptLoading(false));
+
+  // Debounce transcript fetching per video to prevent spam
+  const timeoutId = setTimeout(() => {
+   fetchTranscript(shortVideo.youtubeVideoId, shortVideo.startTimeSeconds, shortVideo.endTimeSeconds)
+    .then((txt) => setTranscript(txt))
+    .finally(() => setTranscriptLoading(false));
+  }, 100); // 100ms debounce
+
+  return () => clearTimeout(timeoutId);
  }, [shortVideo.youtubeVideoId, shortVideo.startTimeSeconds, shortVideo.endTimeSeconds]);
 
  return (
