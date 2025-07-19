@@ -24,6 +24,32 @@ const PORT = process.env.PORT || 5001;
 app.use(cors());
 app.use(express.json());
 
+// Root endpoint
+app.get('/', (req, res) => {
+ res.json({
+  message: '🚀 AI YouTube to Shorts Backend is running!',
+  version: '1.0.0',
+  status: 'healthy',
+  endpoints: {
+   transcript: '/api/yt-transcript?videoId=VIDEO_ID',
+   metadata: '/api/video-metadata?videoId=VIDEO_ID',
+   health: '/health',
+  },
+  environment: process.env.NODE_ENV || 'development',
+  timestamp: new Date().toISOString(),
+ });
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+ res.json({
+  status: 'healthy',
+  uptime: process.uptime(),
+  memory: process.memoryUsage(),
+  timestamp: new Date().toISOString(),
+ });
+});
+
 // Serve static files from current directory (for video outputs)
 app.use(
  '/outputs',
@@ -751,12 +777,20 @@ app.get('/api/yt-transcript', async (req, res) => {
     }
    }
 
-   return res.status(500).json({
-    error: 'yt-dlp subtitle fetch failed',
-    details: err.message,
-    stderr: stderr,
+   // All methods failed - provide comprehensive error response
+   const errorResponse = {
+    error: 'All transcript methods failed',
     videoId: videoId,
-   });
+    message: 'This video may not have transcripts available or YouTube is blocking access',
+    suggestions: ['Try a different video with closed captions enabled', 'Check if the video is public and has subtitles', 'Some videos may have transcript disabled by the creator'],
+    attempted_methods: ['YouTube Transcript API (Primary)', 'yt-dlp subtitle extraction (Fallback)', 'YouTube Transcript API (Secondary fallback)'],
+    technical_details: {
+     yt_dlp_error: err.message,
+     stderr: stderr,
+    },
+   };
+
+   return res.status(404).json(errorResponse);
   }
 
   // Cari file subtitle dengan prioritas: .id.vtt (Indonesia) > .en.vtt (English) > auto-generated
