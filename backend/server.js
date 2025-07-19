@@ -797,14 +797,11 @@ app.get('/api/video-metadata', async (req, res) => {
   console.log(`[video-metadata] Using yt-dlp at: ${YT_DLP_PATH}`);
 
   // Gunakan yt-dlp untuk mendapatkan metadata tanpa download
-  const result = execSync(
-   `"${YT_DLP_PATH}" --dump-json --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --extractor-args "youtube:player_client=web" "${videoUrl}"`,
-   {
-    encoding: 'utf8',
-    timeout: 60000, // Increase timeout to 60 seconds
-    maxBuffer: 1024 * 1024 * 10, // 10MB buffer
-   }
-  );
+  const result = execSync(`"${YT_DLP_PATH}" --dump-json --no-check-certificate "${videoUrl}"`, {
+   encoding: 'utf8',
+   timeout: 60000, // Increase timeout to 60 seconds
+   maxBuffer: 1024 * 1024 * 10, // 10MB buffer
+  });
 
   if (!result || result.trim().length === 0) {
    throw new Error('Empty response from yt-dlp');
