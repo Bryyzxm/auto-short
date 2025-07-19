@@ -8,9 +8,18 @@ const BACKEND_URL = (import.meta as any).env.VITE_BACKEND_URL || 'http://localho
 
 // Cache untuk transcript video
 const transcriptCache = new Map<string, any[]>();
+// Cache untuk failed requests
+const failedRequestsCache = new Map<string, number>();
 
 // Helper: fetch transcript for a segment
 async function fetchTranscript(videoId: string, start: number, end: number): Promise<string> {
+ // Check failed cache first - if we recently failed, don't retry for 5 minutes
+ const failedTime = failedRequestsCache.get(videoId);
+ if (failedTime && Date.now() - failedTime < 300000) {
+  // 5 minutes
+  return 'Transkrip tidak tersedia untuk video ini.';
+ }
+
  // Check cache first
  let fullTranscript = transcriptCache.get(videoId);
 
@@ -24,6 +33,9 @@ async function fetchTranscript(videoId: string, start: number, end: number): Pro
     console.error('Gagal fetch transkrip (yt-dlp):', res.status, res.statusText, url);
     console.error('Error details:', errorData);
 
+    // Cache failed request to prevent retries
+    failedRequestsCache.set(videoId, Date.now());
+
     // Return a more specific error message based on status
     if (res.status === 404) {
      return 'Transkrip tidak tersedia untuk video ini.';
@@ -35,6 +47,7 @@ async function fetchTranscript(videoId: string, start: number, end: number): Pro
    const data = await res.json();
    if (!data?.segments || !Array.isArray(data.segments)) {
     console.warn('Format transkrip yt-dlp tidak sesuai atau kosong:', data);
+    failedRequestsCache.set(videoId, Date.now());
     return 'Transkrip tidak tersedia.';
    }
 
@@ -45,6 +58,7 @@ async function fetchTranscript(videoId: string, start: number, end: number): Pro
    console.log(`[TRANSCRIPT] Cached transcript for videoId: ${videoId}, segments: ${segments.length}, language: ${data.language || 'unknown'}`);
   } catch (err) {
    console.error('Error fetchTranscript (yt-dlp):', err, url);
+   failedRequestsCache.set(videoId, Date.now());
    return 'Gagal memuat transkrip.';
   }
  }
@@ -269,17 +283,50 @@ export const ShortVideoCard: React.FC<ShortVideoCardProps> = ({shortVideo, isAct
 
  useEffect(() => {
   // Only fetch transcript for YouTube videos - with debounce to prevent multiple calls
+  let isCancelled = false;
+
+  // Check if transcript is already cached globally
+  const cachedTranscript = transcriptCache.get(shortVideo.youtubeVideoId);
+  if (cachedTranscript) {
+   const toSeconds = (vtt: string) => {
+    const [h, m, s] = vtt.split(':');
+    return parseInt(h) * 3600 + parseInt(m) * 60 + parseFloat(s.replace(',', '.'));
+   };
+   const filtered = cachedTranscript.filter((seg: any) => {
+    const segStart = toSeconds(seg.start);
+    const segEnd = toSeconds(seg.end);
+    return segEnd > shortVideo.startTimeSeconds && segStart < shortVideo.endTimeSeconds;
+   });
+   const transcriptText = filtered.map((seg: any) => seg.text).join(' ');
+   setTranscript(transcriptText || 'Transkrip tidak tersedia untuk segmen ini.');
+   setTranscriptLoading(false);
+   return;
+  }
+
   setTranscript('');
   setTranscriptLoading(true);
 
   // Debounce transcript fetching per video to prevent spam
   const timeoutId = setTimeout(() => {
-   fetchTranscript(shortVideo.youtubeVideoId, shortVideo.startTimeSeconds, shortVideo.endTimeSeconds)
-    .then((txt) => setTranscript(txt))
-    .finally(() => setTranscriptLoading(false));
-  }, 100); // 100ms debounce
+   if (isCancelled) return;
 
-  return () => clearTimeout(timeoutId);
+   fetchTranscript(shortVideo.youtubeVideoId, shortVideo.startTimeSeconds, shortVideo.endTimeSeconds)
+    .then((txt) => {
+     if (!isCancelled) {
+      setTranscript(txt);
+     }
+    })
+    .finally(() => {
+     if (!isCancelled) {
+      setTranscriptLoading(false);
+     }
+    });
+  }, 500); // Increased debounce to 500ms
+
+  return () => {
+   isCancelled = true;
+   clearTimeout(timeoutId);
+  };
  }, [shortVideo.youtubeVideoId, shortVideo.startTimeSeconds, shortVideo.endTimeSeconds]);
 
  return (
