@@ -621,6 +621,58 @@ app.get('/api/yt-transcript', async (req, res) => {
   }
  }
 
+ // TRY PRIMARY: youtube-transcript library (no yt-dlp needed)
+ console.log(`[TRANSCRIPT] Trying PRIMARY method (youtube-transcript) for videoId: ${videoId}`);
+ try {
+  const transcript = await YoutubeTranscript.fetchTranscript(videoId, {
+   lang: 'id', // Try Indonesian first
+   country: 'ID',
+  });
+
+  if (transcript && transcript.length > 0) {
+   console.log(`[TRANSCRIPT] PRIMARY successful: got ${transcript.length} segments`);
+   const segments = transcript.map((item, index) => ({
+    text: item.text,
+    start: item.offset / 1000, // Convert ms to seconds
+    end: (item.offset + item.duration) / 1000,
+   }));
+
+   // Cache the result
+   transcriptCache.set(videoId, {segments});
+
+   return res.json({segments});
+  }
+ } catch (primaryErr) {
+  console.error(`[TRANSCRIPT] PRIMARY (Indonesian) failed:`, primaryErr.message);
+
+  // Try English as secondary
+  try {
+   const transcript = await YoutubeTranscript.fetchTranscript(videoId, {
+    lang: 'en',
+    country: 'US',
+   });
+
+   if (transcript && transcript.length > 0) {
+    console.log(`[TRANSCRIPT] PRIMARY English successful: got ${transcript.length} segments`);
+    const segments = transcript.map((item, index) => ({
+     text: item.text,
+     start: item.offset / 1000,
+     end: (item.offset + item.duration) / 1000,
+    }));
+
+    // Cache the result
+    transcriptCache.set(videoId, {segments});
+
+    return res.json({segments});
+   }
+  } catch (enPrimaryErr) {
+   console.error(`[TRANSCRIPT] PRIMARY English also failed:`, enPrimaryErr.message);
+  }
+ }
+
+ // FALLBACK: yt-dlp method (when youtube-transcript fails)
+ console.log(`[TRANSCRIPT] Trying FALLBACK method (yt-dlp) for videoId: ${videoId}`);
+
  // Download new transcript
  const id = `${videoId}-${uuidv4().slice(0, 8)}`;
  const ytUrl = `https://www.youtube.com/watch?v=${videoId}`;
