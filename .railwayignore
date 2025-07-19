@@ -1,0 +1,12 @@
+node_modules/
+*.exe
+yt-dlp.exe
+yt-dlp-old.exe
+console/
+.git/
+*.log
+*.tmp
+.env.local
+.env.development
+.env.test
+dist/
