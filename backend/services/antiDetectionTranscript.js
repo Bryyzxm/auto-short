@@ -51,19 +51,9 @@ class AntiDetectionTranscriptExtractor {
  }
 
  initializeCookies() {
-  if (!fs.existsSync(this.cookiePath)) {
-   this.generateRealisticCookies();
-  } else {
-   // Check if cookies are expired and refresh if needed
-   const stats = fs.statSync(this.cookiePath);
-   const age = Date.now() - stats.mtime.getTime();
-   const maxAge = 24 * 60 * 60 * 1000; // 24 hours
-
-   if (age > maxAge) {
-    console.log('[ANTI-DETECTION] Refreshing expired cookies');
-    this.generateRealisticCookies();
-   }
-  }
+  // Always regenerate cookies to ensure proper Netscape format
+  console.log('[ANTI-DETECTION] Force regenerating cookies for proper Netscape format');
+  this.generateRealisticCookies();
  }
 
  initializeSessions() {
