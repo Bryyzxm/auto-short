@@ -19,6 +19,7 @@ interface TranscriptStrategy {
  execute: (videoId: string) => Promise<string | null>;
  priority: number;
 }
+
 class SmartTranscriptManager {
  private cache = new Map<string, TranscriptCacheEntry>();
  private pendingRequests = new Map<string, Promise<string | null>>();
@@ -158,7 +159,61 @@ class SmartTranscriptManager {
   return null;
  }
 
- // Strategy 1: Browser Direct - Uses browserTranscriptService direct approach
+ // Strategy 1: Backend with Anti-Detection (Primary method)
+ private async fetchFromBackend(videoId: string): Promise<string | null> {
+  console.log(`[TRANSCRIPT] Trying backend anti-detection for ${videoId}`);
+
+  // Use localhost when in development, Railway in production
+  const backend = window.location.hostname === 'localhost' ? 'http://localhost:5001' : 'https://auto-short-production.up.railway.app';
+
+  try {
+   const params = new URLSearchParams({
+    videoId,
+    lang: 'id,en',
+   });
+
+   console.log(`[TRANSCRIPT] Request URL: ${backend}/api/yt-transcript?${params}`);
+
+   const response = await fetch(`${backend}/api/yt-transcript?${params}`, {
+    method: 'GET',
+    headers: {
+     'Content-Type': 'application/json',
+     'User-Agent': 'AI-YouTube-Shorts-Segmenter/1.0',
+    },
+   });
+
+   console.log(`[TRANSCRIPT] Backend response status: ${response.status} ${response.statusText}`);
+
+   if (response.ok) {
+    const data = await response.json();
+
+    // Handle new backend API response format
+    if (data.segments && Array.isArray(data.segments)) {
+     // Convert segments to transcript text
+     const transcriptText = data.segments.map((segment: any) => segment.text).join(' ');
+     console.log(`[TRANSCRIPT] Backend success: ${transcriptText.length} chars from ${data.segments.length} segments via ${data.method}`);
+     return transcriptText;
+    }
+
+    // Handle legacy format if available
+    if (data.transcript && typeof data.transcript === 'string') {
+     console.log(`[TRANSCRIPT] Backend legacy format: ${data.transcript.length} chars`);
+     return data.transcript;
+    }
+
+    console.log(`[TRANSCRIPT] Backend returned unexpected format:`, data);
+   } else {
+    const errorText = await response.text();
+    console.log(`[TRANSCRIPT] Backend error ${response.status}: ${errorText}`);
+   }
+  } catch (error: any) {
+   console.log(`[TRANSCRIPT] Backend request failed for ${videoId}:`, error.message);
+  }
+
+  return null;
+ }
+
+ // Strategy 2: Browser Direct - Uses browserTranscriptService direct approach
  private async fetchFromBrowserDirect(videoId: string): Promise<string | null> {
   console.log(`[TRANSCRIPT] Using Browser Direct approach for ${videoId}`);
 
@@ -170,7 +225,7 @@ class SmartTranscriptManager {
   }
  }
 
- // Strategy 2: Browser Iframe - Uses hidden iframe method
+ // Strategy 3: Browser Iframe - Uses hidden iframe method
  private async fetchFromBrowserIframe(videoId: string): Promise<string | null> {
   console.log(`[TRANSCRIPT] Using Browser Iframe approach for ${videoId}`);
 
@@ -187,7 +242,7 @@ class SmartTranscriptManager {
   }
  }
 
- // Strategy 3: Browser Proxy - Uses CORS proxy with user agent
+ // Strategy 4: Browser Proxy - Uses CORS proxy with user agent
  private async fetchFromBrowserProxy(videoId: string): Promise<string | null> {
   console.log(`[TRANSCRIPT] Using Browser Proxy approach for ${videoId}`);
 
@@ -202,53 +257,6 @@ class SmartTranscriptManager {
    console.log(`[TRANSCRIPT] Browser Proxy failed for ${videoId}:`, error.message);
    return null;
   }
- }
-
- // Strategy 1: Backend with Anti-Detection (Primary method)
- private async fetchFromBackend(videoId: string): Promise<string | null> {
-  console.log(`[TRANSCRIPT] Trying backend anti-detection for ${videoId}`);
-
-  const backend = 'https://auto-short-production.up.railway.app';
-
-  try {
-   const params = new URLSearchParams({
-    videoId,
-    lang: 'id,en',
-   });
-
-   const response = await fetch(`${backend}/api/yt-transcript?${params}`, {
-    method: 'GET',
-    headers: {
-     'Content-Type': 'application/json',
-     'User-Agent': 'AI-YouTube-Shorts-Segmenter/1.0',
-    },
-   });
-
-   if (response.ok) {
-    const data = await response.json();
-
-    // Handle new backend API response format
-    if (data.segments && Array.isArray(data.segments)) {
-     // Convert segments to transcript text
-     const transcriptText = data.segments.map((segment: any) => segment.text).join(' ');
-     console.log(`[TRANSCRIPT] Backend success: ${transcriptText.length} chars from ${data.segments.length} segments via ${data.method}`);
-     return transcriptText;
-    }
-
-    // Handle legacy format if available
-    if (data.transcript && typeof data.transcript === 'string') {
-     return data.transcript;
-    }
-
-    console.log(`[TRANSCRIPT] Backend returned unexpected format:`, data);
-   } else {
-    console.log(`[TRANSCRIPT] Backend responded with ${response.status}: ${response.statusText}`);
-   }
-  } catch (error: any) {
-   console.log(`[TRANSCRIPT] Backend failed for ${videoId}:`, error.message);
-  }
-
-  return null;
  }
 
  // Strategy 5: AI-generated transcript (ultimate fallback)
@@ -271,8 +279,10 @@ class SmartTranscriptManager {
  // Helper: Get video metadata
  private async getVideoInfo(videoId: string): Promise<{title: string; description: string} | null> {
   try {
-   // You could fetch this from your backend or other APIs
-   const response = await fetch(`https://auto-short-production.up.railway.app/api/video-metadata?videoId=${videoId}`);
+   // Use local backend when in development
+   const backend = window.location.hostname === 'localhost' ? 'http://localhost:5001' : 'https://auto-short-production.up.railway.app';
+
+   const response = await fetch(`${backend}/api/video-metadata?videoId=${videoId}`);
    if (response.ok) {
     const data = await response.json();
     return {

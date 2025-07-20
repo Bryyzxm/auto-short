@@ -1,0 +1,17 @@
+[build]
+builder = "DOCKERFILE"
+
+[deploy]
+dockerfilePath = "backend/Dockerfile"
+
+[[services]]
+[services.source]
+workdir = "backend"
+
+[services.variables]
+NODE_ENV = "production"
+PORT = 8080
+
+[services.build]
+builder = "dockerfile"
+dockerfilePath = "backend/Dockerfile"
