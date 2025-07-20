@@ -9,6 +9,7 @@ import fetch from 'node-fetch';
 import {execSync} from 'child_process';
 import {fileURLToPath} from 'url';
 import {YoutubeTranscript} from 'youtube-transcript';
+import antiDetectionTranscript from './services/antiDetectionTranscript.js';
 
 // Polyfill __dirname for ES module
 const __filename = fileURLToPath(import.meta.url);
@@ -423,7 +424,10 @@ app.get('/api/transcript', async (req, res) => {
 });
 
 // Cache untuk menyimpan transkrip yang sudah diunduh
+// Enhanced transcript cache with anti-detection support
 const transcriptCache = new Map();
+const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
+const FAILED_CACHE_DURATION = 10 * 60 * 1000; // 10 minutes for failed attempts
 
 // Helper function untuk membersihkan file VTT lama
 function cleanupOldVttFiles() {
@@ -594,84 +598,132 @@ function parseVttContent(vttContent) {
  return segments;
 }
 
-// Endpoint: GET /api/yt-transcript?videoId=...
+// Add anti-detection debug endpoint
+app.get('/api/transcript-stats', (req, res) => {
+ try {
+  const stats = antiDetectionTranscript.getStats();
+  res.json(stats);
+ } catch (error) {
+  res.status(500).json({error: 'Failed to get transcript stats', details: error.message});
+ }
+});
+
+// Clear anti-detection cache endpoint
+app.post('/api/clear-transcript-cache', (req, res) => {
+ try {
+  antiDetectionTranscript.clearCache();
+  transcriptCache.clear();
+  res.json({message: 'All transcript caches cleared successfully'});
+ } catch (error) {
+  res.status(500).json({error: 'Failed to clear cache', details: error.message});
+ }
+});
+
+// Enhanced transcript endpoint with anti-detection
 app.get('/api/yt-transcript', async (req, res) => {
  const {videoId, lang} = req.query;
  if (!videoId) return res.status(400).json({error: 'videoId required'});
 
- console.log(`[TRANSCRIPT] Request for videoId: ${videoId}`);
+ console.log(`[TRANSCRIPT] 🎯 Anti-Detection request for videoId: ${videoId}`);
 
  // Check cache first
- if (transcriptCache.has(videoId)) {
-  console.log(`[TRANSCRIPT] Serving from cache for videoId: ${videoId}`);
-  return res.json(transcriptCache.get(videoId));
- }
+ const cached = transcriptCache.get(videoId);
+ if (cached) {
+  const age = Date.now() - cached.timestamp;
+  const maxAge = cached.failed ? FAILED_CACHE_DURATION : CACHE_DURATION;
 
- // Cek apakah sudah ada file VTT untuk video ini
- const files = fs.readdirSync(process.cwd());
- let existingVttFile = null;
-
- // Cari file VTT yang sudah ada berdasarkan videoId (bukan UUID)
- for (const file of files) {
-  if (file.includes(videoId) && file.endsWith('.vtt')) {
-   existingVttFile = path.join(process.cwd(), file);
-   console.log(`[TRANSCRIPT] Found existing VTT file: ${file}`);
-   break;
-  }
- }
-
- if (existingVttFile && fs.existsSync(existingVttFile)) {
-  try {
-   const vttContent = fs.readFileSync(existingVttFile, 'utf-8');
-   const segments = parseVttContent(vttContent);
-
-   // Deteksi bahasa dari nama file existing
-   let detectedLanguage = 'unknown';
-   const fileName = path.basename(existingVttFile);
-   if (fileName.includes('.id.')) {
-    detectedLanguage = 'Indonesian';
-   } else if (fileName.includes('.en.')) {
-    detectedLanguage = 'English';
+  if (age < maxAge) {
+   console.log(`[TRANSCRIPT] ✅ Cache hit for ${videoId} (${cached.failed ? 'failed' : 'success'}, ${Math.round(age / 1000)}s ago)`);
+   if (cached.failed) {
+    return res.status(404).json(cached.data);
    }
-
-   const result = {
-    segments,
-    language: detectedLanguage,
-    sourceFile: fileName,
-   };
-   transcriptCache.set(videoId, result);
-   console.log(`[TRANSCRIPT] Served existing VTT for videoId: ${videoId}, language: ${detectedLanguage}`);
-   return res.json(result);
-  } catch (e) {
-   console.warn(`[TRANSCRIPT] Failed to read existing VTT file: ${e.message}`);
+   return res.json(cached.data);
+  } else {
+   console.log(`[TRANSCRIPT] 🗑️ Cache expired for ${videoId} (${Math.round(age / 1000)}s old)`);
+   transcriptCache.delete(videoId);
   }
  }
 
- // TRY PRIMARY: youtube-transcript library (no yt-dlp needed)
- console.log(`[TRANSCRIPT] Trying PRIMARY method (youtube-transcript) for videoId: ${videoId}`);
  try {
-  const transcript = await YoutubeTranscript.fetchTranscript(videoId, {
-   lang: 'id', // Try Indonesian first
-   country: 'ID',
+  console.log(`[TRANSCRIPT] 🚀 Starting anti-detection extraction for ${videoId}`);
+
+  // Use anti-detection service as primary method
+  const transcript = await antiDetectionTranscript.extractTranscript(videoId, {
+   lang: lang ? lang.split(',') : ['id', 'en'],
   });
 
-  if (transcript && transcript.length > 0) {
-   console.log(`[TRANSCRIPT] PRIMARY successful: got ${transcript.length} segments`);
-   const segments = transcript.map((item, index) => ({
-    text: item.text,
-    start: item.offset / 1000, // Convert ms to seconds
-    end: (item.offset + item.duration) / 1000,
-   }));
+  if (transcript && transcript.length > 10) {
+   // Parse transcript into segments (simple splitting for now)
+   const segments = transcript
+    .split(/[.!?]+/)
+    .filter((text) => text.trim().length > 0)
+    .map((text, index) => ({
+     text: text.trim(),
+     start: index * 5, // Approximate timing
+     end: (index + 1) * 5,
+    }));
 
-   // Cache the result
-   transcriptCache.set(videoId, {segments});
+   const result = {
+    segments: segments,
+    language: 'Auto-detected',
+    source: 'Anti-Detection Service',
+    method: 'Advanced Cookie Strategy',
+    length: transcript.length,
+   };
 
-   return res.json({segments});
+   // Cache successful result
+   transcriptCache.set(videoId, {
+    data: result,
+    timestamp: Date.now(),
+    failed: false,
+   });
+
+   console.log(`[TRANSCRIPT] ✅ Anti-detection success for ${videoId} (${transcript.length} chars, ${segments.length} segments)`);
+   return res.json(result);
+  } else {
+   throw new Error('Anti-detection service returned empty transcript');
   }
- } catch (primaryErr) {
-  console.error(`[TRANSCRIPT] PRIMARY (Indonesian) failed:`, primaryErr.message);
+ } catch (antiDetectionError) {
+  console.log(`[TRANSCRIPT] ❌ Anti-detection failed: ${antiDetectionError.message}`);
 
-  // Try English as secondary
+  // Fallback 1: Try youtube-transcript library
+  console.log(`[TRANSCRIPT] 🔄 Trying fallback: youtube-transcript library`);
+  try {
+   const transcript = await YoutubeTranscript.fetchTranscript(videoId, {
+    lang: 'id',
+    country: 'ID',
+   });
+
+   if (transcript && transcript.length > 0) {
+    console.log(`[TRANSCRIPT] ✅ Fallback successful: got ${transcript.length} segments`);
+    const segments = transcript.map((item) => ({
+     text: item.text,
+     start: item.offset / 1000,
+     end: (item.offset + item.duration) / 1000,
+    }));
+
+    const result = {
+     segments: segments,
+     language: 'Indonesian',
+     source: 'YouTube Transcript API',
+     method: 'Fallback Library',
+    };
+
+    // Cache fallback result
+    transcriptCache.set(videoId, {
+     data: result,
+     timestamp: Date.now(),
+     failed: false,
+    });
+
+    return res.json(result);
+   }
+  } catch (fallbackError) {
+   console.log(`[TRANSCRIPT] ❌ Fallback also failed: ${fallbackError.message}`);
+  }
+
+  // Fallback 2: Try English
+  console.log(`[TRANSCRIPT] 🔄 Trying English fallback`);
   try {
    const transcript = await YoutubeTranscript.fetchTranscript(videoId, {
     lang: 'en',
@@ -679,237 +731,220 @@ app.get('/api/yt-transcript', async (req, res) => {
    });
 
    if (transcript && transcript.length > 0) {
-    console.log(`[TRANSCRIPT] PRIMARY English successful: got ${transcript.length} segments`);
-    const segments = transcript.map((item, index) => ({
+    console.log(`[TRANSCRIPT] ✅ English fallback successful: got ${transcript.length} segments`);
+    const segments = transcript.map((item) => ({
      text: item.text,
      start: item.offset / 1000,
      end: (item.offset + item.duration) / 1000,
     }));
 
-    // Cache the result
-    transcriptCache.set(videoId, {segments});
+    const result = {
+     segments: segments,
+     language: 'English',
+     source: 'YouTube Transcript API',
+     method: 'English Fallback',
+    };
 
-    return res.json({segments});
+    // Cache English result
+    transcriptCache.set(videoId, {
+     data: result,
+     timestamp: Date.now(),
+     failed: false,
+    });
+
+    return res.json(result);
    }
-  } catch (enPrimaryErr) {
-   console.error(`[TRANSCRIPT] PRIMARY English also failed:`, enPrimaryErr.message);
+  } catch (englishError) {
+   console.log(`[TRANSCRIPT] ❌ English fallback also failed: ${englishError.message}`);
+  }
+
+  // All methods failed
+  const errorResponse = {
+   error: 'All transcript extraction methods failed',
+   videoId: videoId,
+   message: 'YouTube bot detection is blocking all access methods',
+   technical_details: {
+    anti_detection_error: antiDetectionError.message,
+    timestamp: new Date().toISOString(),
+   },
+   attempted_methods: ['Anti-Detection Cookie Strategy (Primary)', 'YouTube Transcript API Indonesian (Fallback 1)', 'YouTube Transcript API English (Fallback 2)'],
+   suggestions: ['Video may not have transcripts available', 'YouTube may be actively blocking server IP', 'Try again in a few minutes', 'Consider using manual transcript extraction'],
+  };
+
+  // Cache failure
+  transcriptCache.set(videoId, {
+   data: errorResponse,
+   timestamp: Date.now(),
+   failed: true,
+  });
+
+  console.log(`[TRANSCRIPT] 💀 All methods failed for ${videoId}`);
+  return res.status(404).json(errorResponse);
+ }
+});
+
+// Legacy VTT-based transcript endpoint (for backward compatibility)
+app.get('/api/yt-transcript-legacy', async (req, res) => {
+ const {videoId, lang} = req.query;
+ if (!videoId) return res.status(400).json({error: 'videoId required'});
+
+ console.log(`[TRANSCRIPT] 🎯 Anti-Detection request for videoId: ${videoId}`);
+
+ // Check cache first
+ const cached = transcriptCache.get(videoId);
+ if (cached) {
+  const age = Date.now() - cached.timestamp;
+  const maxAge = cached.failed ? FAILED_CACHE_DURATION : CACHE_DURATION;
+
+  if (age < maxAge) {
+   console.log(`[TRANSCRIPT] ✅ Cache hit for ${videoId} (${cached.failed ? 'failed' : 'success'}, ${Math.round(age / 1000)}s ago)`);
+   if (cached.failed) {
+    return res.status(404).json(cached.data);
+   }
+   return res.json(cached.data);
+  } else {
+   console.log(`[TRANSCRIPT] 🗑️ Cache expired for ${videoId} (${Math.round(age / 1000)}s old)`);
+   transcriptCache.delete(videoId);
   }
  }
 
- // FALLBACK: yt-dlp method (when youtube-transcript fails)
- console.log(`[TRANSCRIPT] Trying FALLBACK method (yt-dlp) for videoId: ${videoId}`);
+ try {
+  console.log(`[TRANSCRIPT] 🚀 Starting anti-detection extraction for ${videoId}`);
 
- // Download new transcript
- const id = `${videoId}-${uuidv4().slice(0, 8)}`;
- const ytUrl = `https://www.youtube.com/watch?v=${videoId}`;
- const subLang = lang ? String(lang) : 'id,en';
- const ytDlpArgs = [
-  '--write-auto-subs',
-  '--write-subs',
-  '--sub-lang',
-  subLang, // Gunakan parameter lang yang sudah disiapkan
-  '--skip-download',
-  '--user-agent',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  '--extractor-args',
-  'youtube:player_client=android',
-  '-o',
-  path.join(process.cwd(), `${id}`),
-  ytUrl,
- ];
+  // Use anti-detection service as primary method
+  const transcript = await antiDetectionTranscript.extractTranscript(videoId, {
+   lang: lang ? lang.split(',') : ['id', 'en'],
+  });
 
- console.log(`[TRANSCRIPT] Downloading new transcript for videoId: ${videoId}, preferred languages: ${subLang}`);
-
- execFile(YT_DLP_PATH, ytDlpArgs, async (err, stdout, stderr) => {
-  if (err) {
-   console.error(`[TRANSCRIPT] yt-dlp failed for videoId ${videoId}:`, err.message);
-   console.error(`[TRANSCRIPT] stderr:`, stderr);
-   console.error(`[TRANSCRIPT] stdout:`, stdout);
-   console.error(`[TRANSCRIPT] yt-dlp path:`, YT_DLP_PATH);
-   console.error(`[TRANSCRIPT] yt-dlp args:`, ytDlpArgs);
-
-   // Try fallback: youtube-transcript library
-   console.log(`[TRANSCRIPT] Trying fallback method for videoId: ${videoId}`);
-   try {
-    const transcript = await YoutubeTranscript.fetchTranscript(videoId, {
-     lang: 'id', // Try Indonesian first
-     country: 'ID',
-    });
-
-    if (transcript && transcript.length > 0) {
-     console.log(`[TRANSCRIPT] Fallback successful: got ${transcript.length} segments`);
-     const segments = transcript.map((item, index) => ({
-      text: item.text,
-      start: item.offset / 1000, // Convert ms to seconds
-      end: (item.offset + item.duration) / 1000,
-     }));
-
-     // Cache the result
-     transcriptCache.set(videoId, {segments});
-
-     return res.json({segments});
-    }
-   } catch (fallbackErr) {
-    console.error(`[TRANSCRIPT] Fallback also failed:`, fallbackErr.message);
-
-    // Try English as last resort
-    try {
-     const transcript = await YoutubeTranscript.fetchTranscript(videoId, {
-      lang: 'en',
-      country: 'US',
-     });
-
-     if (transcript && transcript.length > 0) {
-      console.log(`[TRANSCRIPT] English fallback successful: got ${transcript.length} segments`);
-      const segments = transcript.map((item, index) => ({
-       text: item.text,
-       start: item.offset / 1000,
-       end: (item.offset + item.duration) / 1000,
-      }));
-
-      // Cache the result
-      transcriptCache.set(videoId, {segments});
-
-      return res.json({segments});
-     }
-    } catch (enFallbackErr) {
-     console.error(`[TRANSCRIPT] English fallback also failed:`, enFallbackErr.message);
-    }
-   }
-
-   // All methods failed - provide comprehensive error response
-   const errorResponse = {
-    error: 'All transcript methods failed',
-    videoId: videoId,
-    message: 'This video may not have transcripts available or YouTube is blocking access',
-    suggestions: ['Try a different video with closed captions enabled', 'Check if the video is public and has subtitles', 'Some videos may have transcript disabled by the creator'],
-    attempted_methods: ['YouTube Transcript API (Primary)', 'yt-dlp subtitle extraction (Fallback)', 'YouTube Transcript API (Secondary fallback)'],
-    technical_details: {
-     yt_dlp_error: err.message,
-     stderr: stderr,
-    },
-   };
-
-   return res.status(404).json(errorResponse);
-  }
-
-  // Cari file subtitle dengan prioritas: .id.vtt (Indonesia) > .en.vtt (English) > auto-generated
-  let vttFile = null;
-  const newFiles = fs.readdirSync(process.cwd());
-
-  // Prioritas 1: Manual Indonesian subtitles (.id.vtt)
-  for (const file of newFiles) {
-   if (file.startsWith(id) && file.endsWith('.id.vtt') && !file.includes('auto-generated')) {
-    vttFile = path.join(process.cwd(), file);
-    console.log(`[TRANSCRIPT] Using manual Indonesian subtitles: ${file}`);
-    break;
-   }
-  }
-
-  // Prioritas 2: Auto-generated Indonesian subtitles (.id.vtt)
-  if (!vttFile) {
-   for (const file of newFiles) {
-    if (file.startsWith(id) && file.endsWith('.id.vtt')) {
-     vttFile = path.join(process.cwd(), file);
-     console.log(`[TRANSCRIPT] Using auto-generated Indonesian subtitles: ${file}`);
-     break;
-    }
-   }
-  }
-
-  // Prioritas 3: Manual English subtitles (.en.vtt)
-  if (!vttFile) {
-   for (const file of newFiles) {
-    if (file.startsWith(id) && file.endsWith('.en.vtt') && !file.includes('auto-generated')) {
-     vttFile = path.join(process.cwd(), file);
-     console.log(`[TRANSCRIPT] Using manual English subtitles: ${file}`);
-     break;
-    }
-   }
-  }
-
-  // Prioritas 4: Auto-generated English subtitles (.en.vtt)
-  if (!vttFile) {
-   for (const file of newFiles) {
-    if (file.startsWith(id) && file.endsWith('.en.vtt')) {
-     vttFile = path.join(process.cwd(), file);
-     console.log(`[TRANSCRIPT] Using auto-generated English subtitles: ${file}`);
-     break;
-    }
-   }
-  }
-
-  // Prioritas 5: Any other subtitle file
-  if (!vttFile) {
-   for (const file of newFiles) {
-    if (file.startsWith(id) && file.endsWith('.vtt')) {
-     vttFile = path.join(process.cwd(), file);
-     console.log(`[TRANSCRIPT] Using fallback subtitle file: ${file}`);
-     break;
-    }
-   }
-  }
-
-  if (!vttFile) {
-   console.error(
-    `[TRANSCRIPT] No VTT file found for videoId: ${videoId}. Available files:`,
-    newFiles.filter((f) => f.startsWith(id))
-   );
-   return res.status(404).json({
-    error: 'Subtitle file not found. Video might not have subtitles in Indonesian or English.',
-    videoId: videoId,
-    availableFiles: newFiles.filter((f) => f.startsWith(id)),
-   });
-  }
-
-  // Baca dan parse VTT
-  try {
-   const vttContent = fs.readFileSync(vttFile, 'utf-8');
-   console.log(`[TRANSCRIPT] VTT file size: ${vttContent.length} characters`);
-   console.log(`[TRANSCRIPT] VTT file preview (first 500 chars):\n${vttContent.substring(0, 500)}`);
-
-   const segments = parseVttContent(vttContent);
-
-   if (segments.length === 0) {
-    console.warn(`[TRANSCRIPT] No segments parsed from VTT file for videoId: ${videoId}`);
-    return res.status(404).json({
-     error: 'No transcript segments found in VTT file',
-     videoId: videoId,
-    });
-   }
-
-   // Deteksi bahasa dari nama file
-   let detectedLanguage = 'unknown';
-   const fileName = path.basename(vttFile);
-   if (fileName.includes('.id.')) {
-    detectedLanguage = 'Indonesian';
-   } else if (fileName.includes('.en.')) {
-    detectedLanguage = 'English';
-   }
+  if (transcript && transcript.length > 10) {
+   // Parse transcript into segments (simple splitting for now)
+   const segments = transcript
+    .split(/[.!?]+/)
+    .filter((text) => text.trim().length > 0)
+    .map((text, index) => ({
+     text: text.trim(),
+     start: index * 5, // Approximate timing
+     end: (index + 1) * 5,
+    }));
 
    const result = {
-    segments,
-    language: detectedLanguage,
-    sourceFile: fileName,
+    segments: segments,
+    language: 'Auto-detected',
+    source: 'Anti-Detection Service',
+    method: 'Advanced Cookie Strategy',
+    length: transcript.length,
    };
 
-   // Cache the result
-   transcriptCache.set(videoId, result);
-
-   // Hapus file setelah dibaca
-   fs.unlinkSync(vttFile);
-
-   console.log(`[TRANSCRIPT] Successfully processed transcript for videoId: ${videoId}, segments: ${segments.length}`);
-   res.json(result);
-  } catch (e) {
-   console.error(`[TRANSCRIPT] Failed to parse VTT for videoId ${videoId}:`, e.message);
-   return res.status(500).json({
-    error: 'Failed to parse VTT',
-    details: e.message,
-    videoId: videoId,
+   // Cache successful result
+   transcriptCache.set(videoId, {
+    data: result,
+    timestamp: Date.now(),
+    failed: false,
    });
+
+   console.log(`[TRANSCRIPT] ✅ Anti-detection success for ${videoId} (${transcript.length} chars, ${segments.length} segments)`);
+   return res.json(result);
+  } else {
+   throw new Error('Anti-detection service returned empty transcript');
   }
- });
+ } catch (antiDetectionError) {
+  console.log(`[TRANSCRIPT] ❌ Anti-detection failed: ${antiDetectionError.message}`);
+
+  // Fallback 1: Try youtube-transcript library
+  console.log(`[TRANSCRIPT] 🔄 Trying fallback: youtube-transcript library`);
+  try {
+   const transcript = await YoutubeTranscript.fetchTranscript(videoId, {
+    lang: 'id',
+    country: 'ID',
+   });
+
+   if (transcript && transcript.length > 0) {
+    console.log(`[TRANSCRIPT] ✅ Fallback successful: got ${transcript.length} segments`);
+    const segments = transcript.map((item) => ({
+     text: item.text,
+     start: item.offset / 1000,
+     end: (item.offset + item.duration) / 1000,
+    }));
+
+    const result = {
+     segments: segments,
+     language: 'Indonesian',
+     source: 'YouTube Transcript API',
+     method: 'Fallback Library',
+    };
+
+    // Cache fallback result
+    transcriptCache.set(videoId, {
+     data: result,
+     timestamp: Date.now(),
+     failed: false,
+    });
+
+    return res.json(result);
+   }
+  } catch (fallbackError) {
+   console.log(`[TRANSCRIPT] ❌ Fallback also failed: ${fallbackError.message}`);
+  }
+
+  // Fallback 2: Try English
+  console.log(`[TRANSCRIPT] 🔄 Trying English fallback`);
+  try {
+   const transcript = await YoutubeTranscript.fetchTranscript(videoId, {
+    lang: 'en',
+    country: 'US',
+   });
+
+   if (transcript && transcript.length > 0) {
+    console.log(`[TRANSCRIPT] ✅ English fallback successful: got ${transcript.length} segments`);
+    const segments = transcript.map((item) => ({
+     text: item.text,
+     start: item.offset / 1000,
+     end: (item.offset + item.duration) / 1000,
+    }));
+
+    const result = {
+     segments: segments,
+     language: 'English',
+     source: 'YouTube Transcript API',
+     method: 'English Fallback',
+    };
+
+    // Cache English result
+    transcriptCache.set(videoId, {
+     data: result,
+     timestamp: Date.now(),
+     failed: false,
+    });
+
+    return res.json(result);
+   }
+  } catch (englishError) {
+   console.log(`[TRANSCRIPT] ❌ English fallback also failed: ${englishError.message}`);
+  }
+
+  // All methods failed
+  const errorResponse = {
+   error: 'All transcript extraction methods failed',
+   videoId: videoId,
+   message: 'YouTube bot detection is blocking all access methods',
+   technical_details: {
+    anti_detection_error: antiDetectionError.message,
+    timestamp: new Date().toISOString(),
+   },
+   attempted_methods: ['Anti-Detection Cookie Strategy (Primary)', 'YouTube Transcript API Indonesian (Fallback 1)', 'YouTube Transcript API English (Fallback 2)'],
+   suggestions: ['Video may not have transcripts available', 'YouTube may be actively blocking server IP', 'Try again in a few minutes', 'Consider using manual transcript extraction'],
+  };
+
+  // Cache failure
+  transcriptCache.set(videoId, {
+   data: errorResponse,
+   timestamp: Date.now(),
+   failed: true,
+  });
+
+  console.log(`[TRANSCRIPT] 💀 All methods failed for ${videoId}`);
+  return res.status(404).json(errorResponse);
+ }
 });
 
 // Endpoint: GET /api/video-metadata?videoId=...

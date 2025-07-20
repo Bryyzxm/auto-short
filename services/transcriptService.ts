@@ -3,6 +3,8 @@
  * Handles YouTube bot detection and provides reliable transcript fetching
  */
 
+import {browserTranscriptService} from './browserTranscriptService';
+
 interface TranscriptCacheEntry {
  data: string | null;
  timestamp: number;
@@ -17,7 +19,6 @@ interface TranscriptStrategy {
  execute: (videoId: string) => Promise<string | null>;
  priority: number;
 }
-
 class SmartTranscriptManager {
  private cache = new Map<string, TranscriptCacheEntry>();
  private pendingRequests = new Map<string, Promise<string | null>>();
@@ -32,24 +33,24 @@ class SmartTranscriptManager {
 
  private strategies: TranscriptStrategy[] = [
   {
-   name: 'Browser-Based',
+   name: 'Backend-AntiDetection',
    priority: 1,
-   execute: this.fetchFromBrowser.bind(this),
-  },
-  {
-   name: 'CORS Proxy',
-   priority: 2,
-   execute: this.fetchFromCORSProxy.bind(this),
-  },
-  {
-   name: 'Alternative API',
-   priority: 3,
-   execute: this.fetchFromAlternativeAPI.bind(this),
-  },
-  {
-   name: 'Backend Fallback',
-   priority: 4,
    execute: this.fetchFromBackend.bind(this),
+  },
+  {
+   name: 'Browser-Direct',
+   priority: 2,
+   execute: this.fetchFromBrowserDirect.bind(this),
+  },
+  {
+   name: 'Browser-Iframe',
+   priority: 3,
+   execute: this.fetchFromBrowserIframe.bind(this),
+  },
+  {
+   name: 'Browser-Proxy',
+   priority: 4,
+   execute: this.fetchFromBrowserProxy.bind(this),
   },
   {
    name: 'AI Generated',
@@ -157,71 +158,55 @@ class SmartTranscriptManager {
   return null;
  }
 
- // Strategy 1: Browser-based (uses user's IP and browser context)
- private async fetchFromBrowser(videoId: string): Promise<string | null> {
-  console.log(`[TRANSCRIPT] Trying browser-based approach for ${videoId}`);
+ // Strategy 1: Browser Direct - Uses browserTranscriptService direct approach
+ private async fetchFromBrowserDirect(videoId: string): Promise<string | null> {
+  console.log(`[TRANSCRIPT] Using Browser Direct approach for ${videoId}`);
 
   try {
-   // Method 1: YouTube's internal API (same-origin only)
-   if (window.location.hostname === 'www.youtube.com') {
-    const response = await fetch(`/api/timedtext?v=${videoId}&lang=id&fmt=json3`);
-    if (response.ok) {
-     const data = await response.json();
-     return this.processYouTubeTimedText(data);
-    }
-   }
-
-   // Method 2: Use iframe messaging (if iframe is available)
-   const transcript = await this.fetchFromYouTubeIframe(videoId);
-   if (transcript) return transcript;
+   return await browserTranscriptService.fetchTranscript(videoId);
   } catch (error: any) {
-   console.log(`[TRANSCRIPT] Browser-based failed for ${videoId}:`, error.message);
+   console.log(`[TRANSCRIPT] Browser Direct failed for ${videoId}:`, error.message);
+   return null;
   }
-
-  return null;
  }
 
- // Strategy 2: CORS Proxy approach
- private async fetchFromCORSProxy(videoId: string): Promise<string | null> {
-  console.log(`[TRANSCRIPT] Trying CORS proxy for ${videoId}`);
+ // Strategy 2: Browser Iframe - Uses hidden iframe method
+ private async fetchFromBrowserIframe(videoId: string): Promise<string | null> {
+  console.log(`[TRANSCRIPT] Using Browser Iframe approach for ${videoId}`);
 
-  const proxies = ['https://api.allorigins.win/raw?url=', 'https://corsproxy.io/?', 'https://cors-anywhere.herokuapp.com/'];
-
-  for (const proxy of proxies) {
-   try {
-    const targetUrl = `https://www.youtube.com/api/timedtext?v=${videoId}&lang=id&fmt=json3`;
-    const response = await fetch(`${proxy}${encodeURIComponent(targetUrl)}`, {
-     headers: {
-      'X-Requested-With': 'XMLHttpRequest',
-     },
-    });
-
-    if (response.ok) {
-     const data = await response.json();
-     const transcript = this.processYouTubeTimedText(data);
-     if (transcript) return transcript;
-    }
-   } catch (error: any) {
-    console.log(`[TRANSCRIPT] CORS proxy ${proxy} failed for ${videoId}:`, error.message);
+  try {
+   // Call specific method from browserTranscriptService
+   const service = browserTranscriptService as any;
+   if (service.fetchFromHiddenIframe) {
+    return await service.fetchFromHiddenIframe(videoId);
    }
+   return null;
+  } catch (error: any) {
+   console.log(`[TRANSCRIPT] Browser Iframe failed for ${videoId}:`, error.message);
+   return null;
   }
-
-  return null;
  }
 
- // Strategy 3: Alternative APIs
- private async fetchFromAlternativeAPI(videoId: string): Promise<string | null> {
-  console.log(`[TRANSCRIPT] Trying alternative APIs for ${videoId}`);
+ // Strategy 3: Browser Proxy - Uses CORS proxy with user agent
+ private async fetchFromBrowserProxy(videoId: string): Promise<string | null> {
+  console.log(`[TRANSCRIPT] Using Browser Proxy approach for ${videoId}`);
 
-  // You can add alternative API services here
-  // For example: RapidAPI, other transcript services, etc.
-
-  return null;
+  try {
+   // Call specific method from browserTranscriptService
+   const service = browserTranscriptService as any;
+   if (service.fetchFromProxyWithUserAgent) {
+    return await service.fetchFromProxyWithUserAgent(videoId);
+   }
+   return null;
+  } catch (error: any) {
+   console.log(`[TRANSCRIPT] Browser Proxy failed for ${videoId}:`, error.message);
+   return null;
+  }
  }
 
- // Strategy 4: Backend fallback (current implementation)
+ // Strategy 1: Backend with Anti-Detection (Primary method)
  private async fetchFromBackend(videoId: string): Promise<string | null> {
-  console.log(`[TRANSCRIPT] Trying backend fallback for ${videoId}`);
+  console.log(`[TRANSCRIPT] Trying backend anti-detection for ${videoId}`);
 
   const backend = 'https://auto-short-production.up.railway.app';
 
@@ -241,12 +226,26 @@ class SmartTranscriptManager {
 
    if (response.ok) {
     const data = await response.json();
+
+    // Handle new backend API response format
+    if (data.segments && Array.isArray(data.segments)) {
+     // Convert segments to transcript text
+     const transcriptText = data.segments.map((segment: any) => segment.text).join(' ');
+     console.log(`[TRANSCRIPT] Backend success: ${transcriptText.length} chars from ${data.segments.length} segments via ${data.method}`);
+     return transcriptText;
+    }
+
+    // Handle legacy format if available
     if (data.transcript && typeof data.transcript === 'string') {
      return data.transcript;
     }
+
+    console.log(`[TRANSCRIPT] Backend returned unexpected format:`, data);
+   } else {
+    console.log(`[TRANSCRIPT] Backend responded with ${response.status}: ${response.statusText}`);
    }
   } catch (error: any) {
-   console.log(`[TRANSCRIPT] Backend fallback failed for ${videoId}:`, error.message);
+   console.log(`[TRANSCRIPT] Backend failed for ${videoId}:`, error.message);
   }
 
   return null;
@@ -266,34 +265,6 @@ class SmartTranscriptManager {
    console.log(`[TRANSCRIPT] AI generation failed for ${videoId}:`, error.message);
   }
 
-  return null;
- }
-
- // Helper: Process YouTube's timedtext format
- private processYouTubeTimedText(data: any): string | null {
-  try {
-   if (data.events && Array.isArray(data.events)) {
-    const transcript = data.events
-     .filter((event: any) => event.segs)
-     .map((event: any) => event.segs.map((seg: any) => seg.utf8).join(''))
-     .join(' ')
-     .replace(/\n/g, ' ')
-     .replace(/\s+/g, ' ')
-     .trim();
-
-    return transcript.length > 0 ? transcript : null;
-   }
-  } catch (error) {
-   console.log('[TRANSCRIPT] Error processing YouTube timedtext:', error);
-  }
-
-  return null;
- }
-
- // Helper: Fetch from YouTube iframe
- private async fetchFromYouTubeIframe(videoId: string): Promise<string | null> {
-  // This would require iframe communication
-  // Implementation depends on specific iframe setup
   return null;
  }
 
