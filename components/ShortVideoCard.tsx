@@ -7,7 +7,22 @@ import transcriptManager from '../services/transcriptService';
 // Backend URL for metadata fetching only (transcript handled by transcriptService)
 const getBackendUrl = () => {
  const envUrl = (import.meta as any).env.VITE_BACKEND_URL;
- return envUrl || 'https://auto-short-production.up.railway.app';
+ const isDev = (import.meta as any).env.DEV;
+
+ console.log(`[ShortVideoCard] Environment: ${isDev ? 'development' : 'production'}`);
+ console.log(`[ShortVideoCard] VITE_BACKEND_URL from env: ${envUrl}`);
+
+ // Smart backend selection for consistency with App.tsx
+ if (isDev && !envUrl) {
+  // Development without explicit env var: use localhost
+  const localhostUrl = 'http://localhost:5001';
+  console.log(`[ShortVideoCard] Development mode - using: ${localhostUrl}`);
+  return localhostUrl;
+ }
+
+ const backendUrl = envUrl || 'https://auto-short-production.up.railway.app';
+ console.log(`[ShortVideoCard] Using backend: ${backendUrl}`);
+ return backendUrl;
 };
 
 const BACKEND_URL = getBackendUrl();
@@ -222,6 +237,17 @@ export const ShortVideoCard: React.FC<ShortVideoCardProps> = ({shortVideo, isAct
 
   if (!shortVideo.youtubeVideoId) return;
 
+  // DEBUG: Log transcript excerpt availability
+  console.log(`[TRANSCRIPT] Card "${shortVideo.title}": excerpt=${shortVideo.transcriptExcerpt ? 'YES' : 'NO'} (${shortVideo.transcriptExcerpt?.length || 0} chars)`);
+
+  // Skip transcript fetching if we already have an AI excerpt
+  if (shortVideo.transcriptExcerpt && shortVideo.transcriptExcerpt.length > 10) {
+   console.log(`[TRANSCRIPT] Using full transcript for "${shortVideo.title}" (${shortVideo.transcriptExcerpt.length} chars)`);
+   setTranscript(shortVideo.transcriptExcerpt);
+   setTranscriptLoading(false);
+   return;
+  }
+
   console.log(`[TRANSCRIPT] Component requesting transcript for ${shortVideo.youtubeVideoId}`);
 
   // Set loading state
@@ -263,15 +289,6 @@ export const ShortVideoCard: React.FC<ShortVideoCardProps> = ({shortVideo, isAct
    }
   };
  }, [shortVideo.youtubeVideoId]); // Only depend on videoId
-
- // Debug effect to show cache status
- useEffect(() => {
-  const timer = setTimeout(() => {
-   transcriptManager.getCacheStatus();
-  }, 10000); // Show cache status after 10 seconds
-
-  return () => clearTimeout(timer);
- }, []);
 
  return (
   <div className="bg-gray-800 shadow-xl rounded-lg overflow-hidden flex flex-col transition-all duration-300 hover:shadow-purple-500/30 hover:ring-2 hover:ring-purple-500">
@@ -349,28 +366,36 @@ export const ShortVideoCard: React.FC<ShortVideoCardProps> = ({shortVideo, isAct
        </svg>
        Memuat transkrip dengan multi-strategy...
       </div>
-     ) : transcript && transcript.length > 0 && !transcript.includes('tidak tersedia') ? (
+     ) : shortVideo.transcriptExcerpt || (transcript && transcript.length > 0 && !transcript.includes('tidak tersedia')) ? (
       <div className="text-gray-400">
        <div className="flex items-center mb-1">
         <span className="text-green-400 mr-1">✅</span>
-        <span className="text-xs text-green-400">Transkrip berhasil dimuat</span>
+        <span className="text-xs text-green-400">{shortVideo.transcriptExcerpt ? 'Transkrip lengkap tersedia' : 'Transkrip berhasil dimuat'}</span>
        </div>
-       {showFullTranscript ? (
-        <span>{transcript}</span>
-       ) : (
-        <span>
-         {transcript.slice(0, 120)}
-         {transcript.length > 120 ? '...' : ''}
-        </span>
-       )}
-       {transcript.length > 120 && (
-        <button
-         className="ml-2 text-blue-400 underline hover:text-blue-300 focus:outline-none text-xs"
-         onClick={() => setShowFullTranscript((v) => !v)}
-        >
-         {showFullTranscript ? 'Sembunyikan' : 'Selengkapnya'}
-        </button>
-       )}
+       {(() => {
+        const displayText = shortVideo.transcriptExcerpt || transcript;
+        return showFullTranscript ? (
+         <span>{displayText}</span>
+        ) : (
+         <span>
+          {displayText.slice(0, 120)}
+          {displayText.length > 120 ? '...' : ''}
+         </span>
+        );
+       })()}
+       {(() => {
+        const displayText = shortVideo.transcriptExcerpt || transcript;
+        return (
+         displayText.length > 120 && (
+          <button
+           className="ml-2 text-blue-400 underline hover:text-blue-300 focus:outline-none text-xs"
+           onClick={() => setShowFullTranscript((v) => !v)}
+          >
+           {showFullTranscript ? 'Sembunyikan' : 'Selengkapnya'}
+          </button>
+         )
+        );
+       })()}
       </div>
      ) : (
       <div className="text-yellow-400 flex items-center">

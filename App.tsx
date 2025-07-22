@@ -6,6 +6,7 @@ import {generateShortsIdeas} from './services/groqService';
 import type {ShortVideo} from './types';
 import {InfoIcon} from './components/icons';
 import {generateYouTubeThumbnailUrl} from './utils/thumbnailUtils';
+import transcriptManager from './services/transcriptService';
 
 // Backend URL configuration with smart environment detection
 const getBackendUrl = () => {
@@ -16,8 +17,17 @@ const getBackendUrl = () => {
  console.log(`[CONFIG] VITE_BACKEND_URL from env: ${envUrl}`);
 
  // Smart backend selection:
- // 1. If environment variable is set, use it (allows override)
- // 2. If no env var, fallback to Railway production
+ // 1. Development: use localhost only if no env var is set
+ // 2. If environment variable is set, always use it (for both dev and prod)
+ // 3. If no env var, fallback to Railway production
+
+ if (isDev && !envUrl) {
+  // Development without explicit env var: use localhost
+  const localhostUrl = 'http://localhost:5001';
+  console.log(`[CONFIG] Development mode - using localhost: ${localhostUrl}`);
+  return localhostUrl;
+ }
+
  const backendUrl = envUrl || 'https://auto-short-production.up.railway.app';
 
  return backendUrl;
@@ -106,92 +116,190 @@ const App: React.FC = () => {
   return intersection.size / Math.max(setA.size, setB.size);
  }
 
- const fetchFullTranscript = async (videoId: string): Promise<string> => {
-  const url = `${BACKEND_URL}/api/yt-transcript?videoId=${videoId}`;
+ // const fetchFullTranscript = async (videoId: string): Promise<string> => {
+ //  try {
+ //   console.log(`[APP] Fetching transcript for ${videoId} using smart transcript manager`);
+ //   const transcript = await transcriptManager.fetchTranscript(videoId);
+ //   if (transcript && transcript.length > 0) {
+ //    console.log(`[APP] Successfully fetched transcript: ${transcript.length} characters`);
+ //    return cleanTranscript(transcript);
+ //   }
+ //   console.log(`[APP] No transcript found for ${videoId}`);
+ //   return '';
+ //  } catch (error) {
+ //   console.error(`[APP] Error fetching transcript for ${videoId}:`, error);
+ //   return '';
+ //  }
+ // };
+
+ // Enhanced transcript fetching with timing data for AI segmentation
+ const fetchEnhancedTranscript = async (videoId: string): Promise<{transcript: string; segments: any[]; method: string}> => {
   try {
-   const res = await fetch(url);
-   if (!res.ok) return '';
-   const data = await res.json();
-   if (!data?.segments || !Array.isArray(data.segments)) return '';
-   const raw = data.segments.map((seg: any) => seg.text).join(' ');
-   return cleanTranscript(raw);
-  } catch {
-   return '';
+   console.log(`[APP] Fetching enhanced transcript with timing for ${videoId}`);
+
+   // Try backend with timing first
+   const backendUrl = BACKEND_URL;
+   const enhancedUrl = `${backendUrl}/api/yt-transcript-with-timing?videoId=${videoId}`;
+
+   console.log(`[APP] Trying enhanced backend endpoint: ${enhancedUrl}`);
+   const response = await fetch(enhancedUrl);
+
+   if (response.ok) {
+    const data = await response.json();
+    console.log(`[APP] Enhanced backend success: ${data.transcript?.length || 0} chars, ${data.segments?.length || 0} segments, method: ${data.method}`);
+    return {
+     transcript: data.transcript || '',
+     segments: data.segments || [],
+     method: data.method || 'Enhanced Backend',
+    };
+   } else {
+    console.log(`[APP] Enhanced backend failed with status: ${response.status}`);
+   }
+
+   // Fallback to transcriptManager
+   console.log(`[APP] Falling back to transcript manager...`);
+   const plainTranscript = await transcriptManager.fetchTranscript(videoId);
+   if (plainTranscript && plainTranscript.length > 0) {
+    console.log(`[APP] Transcript manager success: ${plainTranscript.length} characters`);
+    return {
+     transcript: cleanTranscript(plainTranscript),
+     segments: [],
+     method: 'TranscriptManager (No Timing)',
+    };
+   }
+
+   throw new Error('No transcript available from any source');
+  } catch (error) {
+   console.error(`[APP] Error fetching enhanced transcript for ${videoId}:`, error);
+   throw error;
   }
  };
 
- // Ambil seluruh segmen subtitle lengkap (dengan timestamp)
- const fetchSubtitleSegments = async (videoId: string): Promise<Array<{start: string; end: string; text: string}>> => {
-  const url = `${BACKEND_URL}/api/yt-transcript?videoId=${videoId}`;
+ // Fetch intelligent segments with real timing
+ const fetchIntelligentSegments = async (videoId: string, targetCount: number = 8): Promise<ShortVideo[]> => {
+  console.log(`[APP] Fetching intelligent segments for ${videoId}`);
+
   try {
-   const res = await fetch(url);
-   if (!res.ok) return [];
-   const data = await res.json();
-   if (!data?.segments || !Array.isArray(data.segments)) return [];
-   return data.segments;
-  } catch {
-   return [];
+   const response = await fetch(`${BACKEND_URL}/api/intelligent-segments`, {
+    method: 'POST',
+    headers: {
+     'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+     videoId: videoId,
+     targetSegmentCount: targetCount,
+    }),
+   });
+
+   if (!response.ok) {
+    throw new Error(`Intelligent segments API failed: ${response.status}`);
+   }
+
+   const data = await response.json();
+
+   if (data.segments && data.segments.length > 0) {
+    console.log(`[APP] ✅ Got ${data.segments.length} intelligent segments (avg: ${data.averageDuration}s, quality: ${data.transcriptQuality})`);
+
+    return data.segments.map((segment: any, index: number) => ({
+     id: segment.id,
+     title: segment.title || `Segment ${index + 1}`,
+     description: segment.description || `Smart segment with ${segment.duration}s duration`,
+     startTimeSeconds: segment.startTimeSeconds,
+     endTimeSeconds: segment.endTimeSeconds,
+     youtubeVideoId: videoId,
+     thumbnailUrl: segment.thumbnailUrl,
+     transcriptExcerpt: segment.transcriptExcerpt,
+     hasRealTiming: segment.hasRealTiming,
+     duration: segment.duration,
+    }));
+   } else {
+    throw new Error('No intelligent segments returned');
+   }
+  } catch (error) {
+   console.error(`[APP] Intelligent segments failed for ${videoId}:`, error);
+   throw error;
   }
  };
+ // const fetchSubtitleSegments = async (videoId: string): Promise<Array<{start: string; end: string; text: string}>> => {
+ //  try {
+ //   console.log(`[APP] Fetching subtitle segments for ${videoId} from backend`);
+ //   const url = `${BACKEND_URL}/api/yt-transcript?videoId=${videoId}`;
+ //   const res = await fetch(url);
+ //   if (!res.ok) {
+ //    console.log(`[APP] Backend subtitle segments failed: ${res.status}`);
+ //    return [];
+ //   }
+ //   const data = await res.json();
+ //   if (!data?.segments || !Array.isArray(data.segments)) {
+ //    console.log(`[APP] No segments in backend response`);
+ //    return [];
+ //   }
+ //   console.log(`[APP] Successfully fetched ${data.segments.length} subtitle segments`);
+ //   return data.segments;
+ //  } catch (error) {
+ //   console.error(`[APP] Error fetching subtitle segments for ${videoId}:`, error);
+ //   return [];
+ //  }
+ // };
 
  // Fungsi pencocokan subtitle yang memperluas rentang agar durasi wajar dan relevan dengan deskripsi
- function findBestSubtitleRange(subtitles: Array<{start: string; end: string; text: string}>, description: string, minDurationSec = 30, maxDurationSec = 120) {
-  let bestIdx = 0;
-  let bestScore = 0;
-  const desc = description.toLowerCase();
-  const descWords = desc.split(' ').filter((w) => w.length > 2);
-  for (let i = 0; i < subtitles.length; i++) {
-   const sub = subtitles[i].text.toLowerCase();
-   const common = descWords.filter((word) => sub.includes(word)).length;
-   if (common > bestScore) {
-    bestScore = common;
-    bestIdx = i;
-   }
-  }
-  // Perluas rentang ke depan & belakang hingga durasi min tercapai dan kata kunci tercakup
-  let startIdx = bestIdx,
-   endIdx = bestIdx;
-  let coveredWords = new Set(subtitles[bestIdx].text.toLowerCase().split(' '));
-  const toSeconds = (vtt: string) => {
-   const [h, m, s] = vtt.split(':');
-   return parseInt(h) * 3600 + parseInt(m) * 60 + parseFloat(s.replace(',', '.'));
-  };
-  let duration = toSeconds(subtitles[endIdx].end) - toSeconds(subtitles[startIdx].start);
-  // Perluas ke depan
-  while (duration < minDurationSec && endIdx < subtitles.length - 1 && endIdx - startIdx < 20) {
-   endIdx++;
-   subtitles[endIdx].text
-    .toLowerCase()
-    .split(' ')
-    .forEach((w) => coveredWords.add(w));
-   duration = toSeconds(subtitles[endIdx].end) - toSeconds(subtitles[startIdx].start);
-  }
-  // Perluas ke belakang
-  while (duration < minDurationSec && startIdx > 0 && endIdx - startIdx < 20) {
-   startIdx--;
-   subtitles[startIdx].text
-    .toLowerCase()
-    .split(' ')
-    .forEach((w) => coveredWords.add(w));
-   duration = toSeconds(subtitles[endIdx].end) - toSeconds(subtitles[startIdx].start);
-  }
-  // Jika terlalu panjang, potong ke maxDurationSec
-  while (duration > maxDurationSec && endIdx > startIdx) {
-   endIdx--;
-   duration = toSeconds(subtitles[endIdx].end) - toSeconds(subtitles[startIdx].start);
-  }
-  return {
-   start: subtitles[startIdx].start,
-   end: subtitles[endIdx].end,
-   text: subtitles
-    .slice(startIdx, endIdx + 1)
-    .map((s) => s.text)
-    .join(' '),
-  };
- }
+ // function findBestSubtitleRange(subtitles: Array<{start: string; end: string; text: string}>, description: string, minDurationSec = 30, maxDurationSec = 120) {
+ //  let bestIdx = 0;
+ //  let bestScore = 0;
+ //  const desc = description.toLowerCase();
+ //  const descWords = desc.split(' ').filter((w) => w.length > 2);
+ //  for (let i = 0; i < subtitles.length; i++) {
+ //   const sub = subtitles[i].text.toLowerCase();
+ //   const common = descWords.filter((word) => sub.includes(word)).length;
+ //   if (common > bestScore) {
+ //    bestScore = common;
+ //    bestIdx = i;
+ //   }
+ //  }
+ //  // Perluas rentang ke depan & belakang hingga durasi min tercapai dan kata kunci tercakup
+ //  let startIdx = bestIdx,
+ //   endIdx = bestIdx;
+ //  let coveredWords = new Set(subtitles[bestIdx].text.toLowerCase().split(' '));
+ //  const toSeconds = (vtt: string) => {
+ //   const [h, m, s] = vtt.split(':');
+ //   return parseInt(h) * 3600 + parseInt(m) * 60 + parseFloat(s.replace(',', '.'));
+ //  };
+ //  let duration = toSeconds(subtitles[endIdx].end) - toSeconds(subtitles[startIdx].start);
+ //  // Perluas ke depan
+ //  while (duration < minDurationSec && endIdx < subtitles.length - 1 && endIdx - startIdx < 20) {
+ //   endIdx++;
+ //   subtitles[endIdx].text
+ //    .toLowerCase()
+ //    .split(' ')
+ //    .forEach((w) => coveredWords.add(w));
+ //   duration = toSeconds(subtitles[endIdx].end) - toSeconds(subtitles[startIdx].start);
+ //  }
+ //  // Perluas ke belakang
+ //  while (duration < minDurationSec && startIdx > 0 && endIdx - startIdx < 20) {
+ //   startIdx--;
+ //   subtitles[startIdx].text
+ //    .toLowerCase()
+ //    .split(' ')
+ //    .forEach((w) => coveredWords.add(w));
+ //   duration = toSeconds(subtitles[endIdx].end) - toSeconds(subtitles[startIdx].start);
+ //  }
+ //  // Jika terlalu panjang, potong ke maxDurationSec
+ //  while (duration > maxDurationSec && endIdx > startIdx) {
+ //   endIdx--;
+ //   duration = toSeconds(subtitles[endIdx].end) - toSeconds(subtitles[startIdx].start);
+ //  }
+ //  return {
+ //   start: subtitles[startIdx].start,
+ //   end: subtitles[endIdx].end,
+ //   text: subtitles
+ //    .slice(startIdx, endIdx + 1)
+ //    .map((s) => s.text)
+ //    .join(' '),
+ //  };
+ // }
 
  const handleSubmit = useCallback(
-  async (url: string) => {
+  async (url: string, aspectRatio: string) => {
    if (apiKeyError) return;
    setYoutubeUrl(url);
    setIsLoading(true);
@@ -206,10 +314,60 @@ const App: React.FC = () => {
     return;
    }
 
-   let transcript = '';
    try {
-    transcript = await fetchFullTranscript(videoId);
-   } catch {}
+    console.log(`[APP] ✅ NEW APPROACH: Using intelligent segments with real timing for ${videoId}`);
+
+    // Get target segment count based on aspect ratio or default
+    const targetSegmentCount = aspectRatio === '16:9' ? 10 : 8;
+
+    // Use NEW intelligent segmentation API
+    const intelligentSegments = await fetchIntelligentSegments(videoId, targetSegmentCount);
+
+    console.log(`[APP] ✅ Intelligent segmentation complete: ${intelligentSegments.length} segments`);
+    intelligentSegments.forEach((segment, index) => {
+     const duration = segment.endTimeSeconds - segment.startTimeSeconds;
+     const startTime = Math.floor(segment.startTimeSeconds / 60) + ':' + String(Math.floor(segment.startTimeSeconds % 60)).padStart(2, '0');
+     const endTime = Math.floor(segment.endTimeSeconds / 60) + ':' + String(Math.floor(segment.endTimeSeconds % 60)).padStart(2, '0');
+     console.log(`[APP] Segment ${index + 1}: "${segment.title}" (${startTime} - ${endTime}, ${Math.round(duration)}s)`);
+    });
+
+    setGeneratedShorts(intelligentSegments);
+    setIsLoading(false);
+    return; // Success - no need for legacy fallback
+   } catch (intelligentError: any) {
+    console.error(`[APP] ❌ Intelligent segmentation failed:`, intelligentError);
+
+    // Specific error messages for better user experience
+    const errorMessage = intelligentError?.message || String(intelligentError);
+    if (errorMessage.includes('Real timing data required')) {
+     console.log(`[APP] 🔄 Falling back to legacy AI method due to timing issues...`);
+    } else if (errorMessage.includes('No intelligent segments returned')) {
+     console.log(`[APP] 🔄 No intelligent segments found, falling back to legacy method...`);
+    } else {
+     console.log(`[APP] 🔄 Falling back to legacy AI method due to: ${errorMessage}`);
+    }
+   }
+
+   // LEGACY FALLBACK CODE (only runs if intelligent segments fail)
+   let transcriptData: {transcript: string; segments: any[]; method: string} = {transcript: '', segments: [], method: ''};
+   try {
+    console.log(`[APP] Starting enhanced transcript extraction for ${videoId}`);
+    transcriptData = await fetchEnhancedTranscript(videoId);
+    console.log(`[APP] Enhanced transcript loaded: ${transcriptData.transcript.length} chars, ${transcriptData.segments.length} segments, method: ${transcriptData.method}`);
+   } catch (error) {
+    console.error(`[APP] Enhanced transcript extraction failed:`, error);
+    setError('Transkrip tidak tersedia untuk video ini. Silakan coba video lain.');
+    setIsLoading(false);
+    return;
+   }
+
+   // Validate transcript
+   if (!transcriptData.transcript || transcriptData.transcript.length < 100) {
+    console.error(`[APP] Transcript too short or empty: ${transcriptData.transcript.length} chars`);
+    setError('Transkrip video terlalu pendek atau tidak tersedia. Video mungkin tidak memiliki subtitle.');
+    setIsLoading(false);
+    return;
+   }
 
    let videoDuration = 0;
    // Fetch durasi video menggunakan backend endpoint untuk menghindari CORS
@@ -219,7 +377,7 @@ const App: React.FC = () => {
     if (metaRes.ok) {
      const metadata = await metaRes.json();
      videoDuration = metadata.duration || 0;
-     console.log(`Video duration fetched: ${videoDuration} seconds`);
+     console.log(`Video duration from backend: ${videoDuration} seconds`);
     } else {
      console.warn('Failed to fetch video metadata from backend:', metaRes.status);
     }
@@ -227,151 +385,70 @@ const App: React.FC = () => {
     console.error('Error fetching video metadata:', error);
    }
 
-   if (!videoDuration || isNaN(videoDuration) || videoDuration < 30) {
-    // fallback ke 10 menit
-    console.log('Using fallback duration: 600 seconds');
-    videoDuration = 600;
+   // Smart duration fallback using transcript data
+   if (!videoDuration || isNaN(videoDuration) || videoDuration <= 600) {
+    // Changed: treat 600s as suspicious for long content
+    // Try to estimate duration from transcript segments if available
+    if (transcriptData.segments && transcriptData.segments.length > 0) {
+     const lastSegment = transcriptData.segments[transcriptData.segments.length - 1];
+     const estimatedDuration = Math.ceil(lastSegment.end || 600);
+     console.log(`Transcript-based duration estimate: ${estimatedDuration} seconds (from ${transcriptData.segments.length} segments)`);
+     videoDuration = estimatedDuration;
+    } else if (transcriptData.transcript.length > 50000) {
+     // Long transcript = long video
+     // Estimate from transcript length (rough: 130k chars ≈ 52 minutes)
+     const estimatedMinutes = Math.max(10, transcriptData.transcript.length / 2500); // ~2500 chars per minute
+     const estimatedDuration = Math.ceil(estimatedMinutes * 60);
+     console.log(`Length-based duration estimate: ${estimatedDuration} seconds (${estimatedMinutes.toFixed(1)} min from ${transcriptData.transcript.length} chars)`);
+     videoDuration = estimatedDuration;
+    }
    }
 
+   console.log(`[APP] Final video duration: ${videoDuration}s (${Math.floor(videoDuration / 60)}m${videoDuration % 60}s)`);
+
    try {
-    const ideas = await generateShortsIdeas(url, transcript, videoDuration); // Kirim transcript dan durasi ke Gemini
-    console.log(`[AI SEGMENTS] Generated ${ideas.length} segments for video duration ${videoDuration}s`);
-    let subtitleSegments = await fetchSubtitleSegments(videoId);
-    // Fallback: jika subtitleSegments kosong, buat dummy segmentasi manual berdasarkan durasi video
-    if (!subtitleSegments || subtitleSegments.length === 0) {
-     const fallbackSegments = [];
-     const segLength = videoDuration > 600 ? 90 : 60; // 90 detik default untuk video panjang
-     for (let start = 0; start < videoDuration; start += segLength) {
-      const end = Math.min(start + segLength, videoDuration);
-      const toVtt = (sec: number) => {
-       const h = Math.floor(sec / 3600)
-        .toString()
-        .padStart(2, '0');
-       const m = Math.floor((sec % 3600) / 60)
-        .toString()
-        .padStart(2, '0');
-       const s = (sec % 60).toFixed(3).padStart(6, '0');
-       return `${h}:${m}:${s}`;
-      };
-      fallbackSegments.push({start: toVtt(start), end: toVtt(end), text: ''});
-     }
-     subtitleSegments = fallbackSegments;
+    console.log(`[APP] Starting enhanced AI segmentation for ${videoId}`);
+    console.log(`[APP] Video duration: ${videoDuration}s, Transcript: ${transcriptData.transcript.length} chars, Timing segments: ${transcriptData.segments.length}`);
+
+    // Call enhanced generateShortsIdeas with timing segments
+    const ideas = await generateShortsIdeas(
+     url,
+     transcriptData.transcript,
+     videoDuration,
+     transcriptData.segments // Pass timing segments to AI
+    );
+
+    console.log(`[AI SEGMENTS] Enhanced AI generated ${ideas.length} intelligent segments for video duration ${videoDuration}s`);
+
+    if (!ideas || ideas.length === 0) {
+     console.error(`[APP] AI returned no segments`);
+     setError('AI tidak dapat mengidentifikasi segmen menarik dari video ini. Video mungkin tidak cocok untuk format pendek.');
+     setIsLoading(false);
+     return;
     }
-    // Fallback: jika hasil AI terlalu sedikit, generate segmen otomatis
-    let shortsWithVideoId: ShortVideo[] = ideas.map((idea) => {
-     let startTimeSeconds = 0;
-     let endTimeSeconds = 0;
-     if (subtitleSegments.length > 0) {
-      let bestRange = findBestSubtitleRange(subtitleSegments, idea.description);
-      const toSeconds = (vtt: string) => {
-       const [h, m, s] = vtt.split(':');
-       return parseInt(h) * 3600 + parseInt(m) * 60 + parseFloat(s.replace(',', '.'));
-      };
-      let duration = toSeconds(bestRange.end) - toSeconds(bestRange.start);
-      let endIdx = subtitleSegments.findIndex((s) => s.start === bestRange.start);
-      let lastIdx = subtitleSegments.findIndex((s) => s.end === bestRange.end);
-      const targetDuration = Math.max(30, Math.min(idea.endTimeSeconds - idea.startTimeSeconds, 120));
-      while (duration < targetDuration && lastIdx < subtitleSegments.length - 1) {
-       lastIdx++;
-       bestRange.end = subtitleSegments[lastIdx].end;
-       duration = toSeconds(bestRange.end) - toSeconds(bestRange.start);
-      }
-      while (duration > targetDuration && lastIdx > endIdx) {
-       lastIdx--;
-       bestRange.end = subtitleSegments[lastIdx].end;
-       duration = toSeconds(bestRange.end) - toSeconds(bestRange.start);
-      }
-      startTimeSeconds = toSeconds(bestRange.start);
-      endTimeSeconds = toSeconds(bestRange.end);
-     } else {
-      startTimeSeconds = idea.startTimeSeconds ?? 0;
-      endTimeSeconds = idea.endTimeSeconds ?? 120;
-      if (endTimeSeconds - startTimeSeconds < 30) endTimeSeconds = startTimeSeconds + 120;
-     }
-     return {
-      ...idea,
-      youtubeVideoId: videoId,
-      thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
-      customThumbnailUrl: generateYouTubeThumbnailUrl(videoId, startTimeSeconds),
-      startTimeSeconds,
-      endTimeSeconds,
-     };
+
+    // Convert AI results to ShortVideo format with proper metadata
+    const shortsWithVideoId: ShortVideo[] = ideas.map((idea, index) => ({
+     ...idea,
+     id: idea.id || `ai-segment-${index}`,
+     youtubeVideoId: videoId,
+     thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
+     customThumbnailUrl: generateYouTubeThumbnailUrl(videoId, idea.startTimeSeconds),
+    }));
+
+    console.log(`[APP] ✅ Enhanced AI segmentation complete: ${shortsWithVideoId.length} segments`);
+    shortsWithVideoId.forEach((segment, i) => {
+     console.log(
+      `[APP] Segment ${i + 1}: "${segment.title}" (${Math.floor(segment.startTimeSeconds / 60)}:${String(segment.startTimeSeconds % 60).padStart(2, '0')} - ${Math.floor(segment.endTimeSeconds / 60)}:${String(
+       segment.endTimeSeconds % 60
+      ).padStart(2, '0')})`
+     );
     });
-    // Jika hasil AI terlalu sedikit untuk video panjang, fallback ke segmentasi otomatis
-    let minSegmentsRequired = 5;
-    if (videoDuration > 3600) {
-     minSegmentsRequired = 20; // 1+ jam: minimal 20 segmen
-    } else if (videoDuration > 1800) {
-     minSegmentsRequired = 12; // 30+ menit: minimal 12 segmen
-    } else if (videoDuration > 900) {
-     minSegmentsRequired = 8; // 15+ menit: minimal 8 segmen
-    } else if (videoDuration > 600) {
-     minSegmentsRequired = 6; // 10+ menit: minimal 6 segmen
-    }
 
-    if (shortsWithVideoId.length < minSegmentsRequired && videoDuration > 600) {
-     console.log(`[FALLBACK] AI generated ${shortsWithVideoId.length} segments, adding automatic segments to reach ${minSegmentsRequired}`);
-     const fallbackShorts: ShortVideo[] = [...shortsWithVideoId]; // Keep AI segments
-     const segLength = Math.max(45, Math.floor(videoDuration / Math.max(15, minSegmentsRequired)));
-     let idx = shortsWithVideoId.length;
-
-     // Add automatic segments to fill the gap
-     const neededSegments = minSegmentsRequired - shortsWithVideoId.length;
-     const intervalSize = Math.floor(videoDuration / neededSegments);
-
-     for (let i = 0; i < neededSegments; i++) {
-      const start = i * intervalSize;
-      const end = Math.min(start + segLength, videoDuration);
-      fallbackShorts.push({
-       id: `auto-${idx}`,
-       title: `Highlight ${idx + 1}`,
-       description: `Segmen otomatis yang menarik dari menit ${Math.floor(start / 60)} hingga ${Math.floor(end / 60)}.`,
-       startTimeSeconds: start,
-       endTimeSeconds: end,
-       youtubeVideoId: videoId,
-       thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
-       customThumbnailUrl: generateYouTubeThumbnailUrl(videoId, start),
-      });
-      idx++;
-     }
-     setGeneratedShorts(fallbackShorts);
-     console.log(`[SUCCESS] Combined ${shortsWithVideoId.length} AI segments + ${neededSegments} automatic segments = ${fallbackShorts.length} total`);
-     return;
-    }
-    // Jika hasil AI kosong, baru fallback ke segmentasi otomatis
-    if (!shortsWithVideoId || shortsWithVideoId.length === 0) {
-     const fallbackShorts: ShortVideo[] = [];
-     const segLength = videoDuration > 600 ? 90 : 60;
-     let idx = 0;
-     for (let start = 0; start < videoDuration; start += segLength) {
-      const end = Math.min(start + segLength, videoDuration);
-      fallbackShorts.push({
-       id: `fallback-${idx}`,
-       title: `Segmen ${idx + 1}`,
-       description: `Highlight otomatis dari detik ${start} hingga ${end}.`,
-       startTimeSeconds: start,
-       endTimeSeconds: end,
-       youtubeVideoId: videoId,
-       thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
-       customThumbnailUrl: generateYouTubeThumbnailUrl(videoId, start),
-      });
-      idx++;
-     }
-     setGeneratedShorts(fallbackShorts);
-     setError('AI tidak menghasilkan segmen. Ditampilkan segmentasi otomatis.');
-     return;
-    }
     setGeneratedShorts(shortsWithVideoId);
-
-    // Tampilkan info jika segmen sedikit (tapi tidak error)
-    const expectedSegments = Math.max(3, Math.floor(videoDuration / 300)); // 1 segmen per 5 menit, minimal 3
-    if (shortsWithVideoId.length < expectedSegments) {
-     console.log(`[INFO] Generated ${shortsWithVideoId.length} segments, expected ~${expectedSegments} for ${Math.floor(videoDuration / 60)} minute video`);
-     // Tidak set error, hanya log info
-    }
    } catch (e: any) {
-    console.error('Error generating short video segments:', e);
-    setError(e.message ?? 'Failed to identify short video segments. Check console for details.');
+    console.error('Enhanced AI segmentation error:', e);
+    setError(e.message ?? 'Terjadi kesalahan saat menganalisis video dengan AI. Silakan coba lagi.');
    } finally {
     setIsLoading(false);
    }

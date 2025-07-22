@@ -4,17 +4,22 @@
  "main": "server.js",
  "type": "module",
  "scripts": {
-  "start": "node server.js",
-  "dev": "nodemon server.js",
-  "postinstall": "which yt-dlp || pip3 install yt-dlp || npm install -g yt-dlp || echo 'yt-dlp installation attempt completed'"
+  "start": "NODE_ENV=production node server.js",
+  "dev": "NODE_ENV=development nodemon server.js",
+  "postinstall": "echo '🔧 Verifying production environment...' && command -v yt-dlp >/dev/null 2>&1 && echo '✅ yt-dlp found in system PATH' || echo '⚠️  yt-dlp not found - will be installed via Docker'",
+  "verify-ytdlp": "yt-dlp --version && echo '✅ yt-dlp verified' || echo '❌ yt-dlp verification failed'",
+  "health-check": "curl -f http://localhost:${PORT:-5001}/health || exit 1",
+  "prestart": "echo '🚀 Starting AI YouTube to Shorts Backend...'"
  },
  "dependencies": {
   "cors": "^2.8.5",
+  "dotenv": "^17.2.0",
   "express": "^4.18.2",
-  "uuid": "^9.0.0",
+  "groq-sdk": "^0.27.0",
   "node-fetch": "^3.3.2",
-  "youtube-transcript": "^1.0.6",
-  "youtube-dl-exec": "^2.2.6"
+  "uuid": "^9.0.0",
+  "youtube-dl-exec": "^2.2.6",
+  "youtube-transcript": "^1.0.6"
  },
  "devDependencies": {
   "nodemon": "^3.0.0"

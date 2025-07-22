@@ -69,7 +69,10 @@ class SmartTranscriptManager {
    const age = Date.now() - cached.timestamp;
    const maxAge = cached.failed ? this.FAILED_CACHE_DURATION : this.CACHE_DURATION;
 
-   if (age < maxAge) {
+   // If still loading, don't return cached result - let it proceed to pending check
+   if (cached.isLoading) {
+    console.log(`[TRANSCRIPT] Cache shows loading in progress for ${videoId}`);
+   } else if (age < maxAge) {
     console.log(`[TRANSCRIPT] Cache hit for ${videoId} (${cached.strategy}, ${cached.failed ? 'failed' : 'success'}, ${Math.round(age / 1000)}s ago)`);
     return cached.failed ? null : cached.data;
    } else {
@@ -163,8 +166,10 @@ class SmartTranscriptManager {
  private async fetchFromBackend(videoId: string): Promise<string | null> {
   console.log(`[TRANSCRIPT] Trying backend anti-detection for ${videoId}`);
 
-  // Use localhost when in development, Railway in production
-  const backend = window.location.hostname === 'localhost' ? 'http://localhost:5001' : 'https://auto-short-production.up.railway.app';
+  // Use environment-aware backend URL
+  const envUrl = (import.meta as any).env.VITE_BACKEND_URL;
+  const isDev = (import.meta as any).env.DEV;
+  const backend = isDev && !envUrl ? 'http://localhost:5001' : envUrl || 'https://auto-short-production.up.railway.app';
 
   try {
    const params = new URLSearchParams({
@@ -279,8 +284,10 @@ class SmartTranscriptManager {
  // Helper: Get video metadata
  private async getVideoInfo(videoId: string): Promise<{title: string; description: string} | null> {
   try {
-   // Use local backend when in development
-   const backend = window.location.hostname === 'localhost' ? 'http://localhost:5001' : 'https://auto-short-production.up.railway.app';
+   // Use environment-aware backend URL
+   const envUrl = (import.meta as any).env.VITE_BACKEND_URL;
+   const isDev = (import.meta as any).env.DEV;
+   const backend = isDev && !envUrl ? 'http://localhost:5001' : envUrl || 'https://auto-short-production.up.railway.app';
 
    const response = await fetch(`${backend}/api/video-metadata?videoId=${videoId}`);
    if (response.ok) {
@@ -298,7 +305,7 @@ class SmartTranscriptManager {
  }
 
  // Debug methods
- getCacheStatus() {
+ getCacheStatus(verbose = false) {
   const status = Array.from(this.cache.entries()).map(([key, value]) => ({
    videoId: key,
    strategy: value.strategy,
@@ -306,7 +313,9 @@ class SmartTranscriptManager {
    age: Math.round((Date.now() - value.timestamp) / 1000),
    isLoading: value.isLoading,
   }));
-  console.log('[TRANSCRIPT] Cache status:', status);
+  if (verbose) {
+   console.log('[TRANSCRIPT] Cache status:', status);
+  }
   return status;
  }
 

@@ -408,31 +408,313 @@ class AntiDetectionTranscriptExtractor {
      continue;
     }
 
-    // Clean HTML tags and formatting
-    const cleaned = trimmed
-     .replace(/<[^>]*>/g, '') // Remove HTML tags
+    // Enhanced cleaning with more precise patterns
+    let cleaned = trimmed
+     // Clean HTML tags but preserve content structure
+     .replace(/<\/?[^>]+(>|$)/g, '')
+     // HTML entities
      .replace(/&lt;/g, '<')
      .replace(/&gt;/g, '>')
      .replace(/&amp;/g, '&')
      .replace(/&quot;/g, '"')
      .replace(/&#39;/g, "'")
-     .replace(/\[.*?\]/g, '') // Remove [Music], [Applause] etc
-     .replace(/\(.*?\)/g, '') // Remove (Music), (Applause) etc
+     .replace(/&nbsp;/g, ' ')
+     // Only remove common non-speech annotations, preserve actual content
+     .replace(/\[Music\]/gi, '')
+     .replace(/\[Applause\]/gi, '')
+     .replace(/\[Laughter\]/gi, '')
+     .replace(/\[Silence\]/gi, '')
+     .replace(/\[Inaudible\]/gi, '')
+     // Remove speaker identification patterns like "(Speaker 1):" but keep content in parentheses
+     .replace(/^\([^)]*\):/g, '')
+     // Clean multiple whitespace
+     .replace(/\s+/g, ' ')
      .trim();
 
-    if (cleaned && cleaned.length > 1) {
+    // Keep content if it's substantial and appears to be actual speech
+    if (cleaned && cleaned.length > 2 && !cleaned.match(/^[\[\(].*[\]\)]$/)) {
      textLines.push(cleaned);
     }
    }
 
    const transcript = textLines.join(' ').replace(/\s+/g, ' ').trim();
 
-   console.log(`[PARSER] Processed ${textLines.length} text lines into ${transcript.length} chars`);
+   console.log(`[PARSER] Enhanced processing: ${textLines.length} text lines -> ${transcript.length} chars`);
 
    return transcript;
   } catch (error) {
    console.error('[PARSER] Error parsing subtitle content:', error);
    return null;
+  }
+ }
+
+ // Enhanced method: Parse subtitle content with timing information
+ parseSubtitleSegments(content) {
+  try {
+   const lines = content.split('\n');
+   const segments = [];
+   let currentSegment = null;
+
+   for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+
+    // Skip empty lines and metadata
+    if (!line || line.startsWith('WEBVTT') || line.startsWith('NOTE') || line.startsWith('STYLE') || line.startsWith('::cue')) {
+     continue;
+    }
+
+    // Enhanced timing pattern matching (WebVTT format: 00:00:10.500 --> 00:00:13.250)
+    const timeMatch = line.match(/^(\d{2}:\d{2}:\d{2}\.\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}\.\d{3})/);
+    if (timeMatch) {
+     const startTime = this.parseTimeToSeconds(timeMatch[1]);
+     const endTime = this.parseTimeToSeconds(timeMatch[2]);
+
+     // Look ahead for the text content
+     let textContent = '';
+     let j = i + 1;
+     while (j < lines.length && lines[j].trim() && !lines[j].includes('-->')) {
+      const textLine = lines[j].trim();
+      if (textLine) {
+       // Enhanced text cleaning
+       const cleaned = textLine
+        .replace(/<\/?[^>]+(>|$)/g, '') // Remove HTML tags
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&nbsp;/g, ' ')
+        // Only remove common annotations
+        .replace(/\[Music\]/gi, '')
+        .replace(/\[Applause\]/gi, '')
+        .replace(/\[Laughter\]/gi, '')
+        .replace(/\[Silence\]/gi, '')
+        .replace(/\[Inaudible\]/gi, '')
+        // Remove speaker tags but keep content
+        .replace(/^\([^)]*\):/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+       if (cleaned && cleaned.length > 1 && !cleaned.match(/^[\[\(].*[\]\)]$/)) {
+        textContent += (textContent ? ' ' : '') + cleaned;
+       }
+      }
+      j++;
+     }
+
+     // Only add segment if it has substantial content and reasonable duration
+     if (textContent && textContent.length > 5 && endTime - startTime >= 0.5) {
+      segments.push({
+       start: startTime,
+       end: endTime,
+       text: textContent,
+       duration: endTime - startTime,
+      });
+     }
+
+     i = j - 1; // Skip ahead to where we stopped reading text
+    }
+   }
+
+   // Merge very short adjacent segments to create more meaningful chunks
+   const mergedSegments = this.mergeShortSegments(segments);
+
+   console.log(`[PARSER] Enhanced segments extraction: ${segments.length} raw -> ${mergedSegments.length} merged segments`);
+   return mergedSegments;
+  } catch (error) {
+   console.error('[PARSER] Error parsing subtitle segments:', error);
+   return [];
+  }
+ }
+
+ // Helper method: Convert time string to seconds
+ parseTimeToSeconds(timeString) {
+  const [time, milliseconds] = timeString.split('.');
+  const [hours, minutes, seconds] = time.split(':').map(Number);
+  return hours * 3600 + minutes * 60 + seconds + parseInt(milliseconds) / 1000;
+ }
+
+ // Helper method: Merge short segments for better content flow
+ mergeShortSegments(segments) {
+  if (segments.length === 0) return segments;
+
+  const merged = [];
+  let currentSegment = segments[0];
+
+  for (let i = 1; i < segments.length; i++) {
+   const nextSegment = segments[i];
+
+   // Merge if current segment is very short (< 2 seconds) and gap is small (< 1 second)
+   if (currentSegment.duration < 2.0 && nextSegment.start - currentSegment.end < 1.0 && (currentSegment.text + ' ' + nextSegment.text).length < 200) {
+    // Merge segments
+    currentSegment = {
+     start: currentSegment.start,
+     end: nextSegment.end,
+     text: currentSegment.text + ' ' + nextSegment.text,
+     duration: nextSegment.end - currentSegment.start,
+    };
+   } else {
+    merged.push(currentSegment);
+    currentSegment = nextSegment;
+   }
+  }
+
+  // Don't forget the last segment
+  merged.push(currentSegment);
+
+  return merged;
+ }
+
+ // NEW METHOD: Extract transcript with timing segments
+ async extractTranscriptWithSegments(videoId, options = {}) {
+  console.log(`[ANTI-DETECTION] Starting segments extraction for ${videoId}`);
+
+  // Implement rate limiting to avoid detection
+  await this.respectRateLimit();
+
+  // Load sessions
+  const sessions = this.loadSessions();
+  const session = this.selectBestSession(sessions);
+
+  console.log(`[ANTI-DETECTION] Using session ${session.id} for segments (Success: ${session.success}, Failures: ${session.failures})`);
+
+  // Try to extract subtitle files with timing
+  const strategies = [
+   () => this.extractSegmentsWithCookiesAndSession(videoId, session, options),
+   () => this.extractSegmentsWithMobileSession(videoId, session, options),
+   () => this.extractSegmentsWithEmbeddedClient(videoId, session, options),
+  ];
+
+  let lastError = null;
+
+  for (let i = 0; i < strategies.length; i++) {
+   const strategyName = ['Cookies+Session (Segments)', 'Mobile Session (Segments)', 'Embedded Client (Segments)'][i];
+
+   try {
+    console.log(`[ANTI-DETECTION] Trying segments strategy ${i + 1}/${strategies.length}: ${strategyName}`);
+
+    const result = await this.executeWithTimeout(strategies[i](), 45000); // Longer timeout for file processing
+
+    if (result && result.length > 0) {
+     // Update session success stats
+     session.success++;
+     session.lastUsed = Date.now();
+     this.updateSession(session);
+
+     console.log(`[ANTI-DETECTION] ✅ Success with ${strategyName} (${result.length} segments)`);
+     return result;
+    } else {
+     console.log(`[ANTI-DETECTION] ❌ ${strategyName} returned no segments`);
+    }
+   } catch (error) {
+    lastError = error;
+    session.failures++;
+    console.log(`[ANTI-DETECTION] ❌ ${strategyName} failed: ${error.message}`);
+
+    // Progressive delay between strategies
+    const delay = Math.min(Math.pow(2, i) * 3000, 20000);
+    console.log(`[ANTI-DETECTION] Waiting ${delay}ms before next strategy...`);
+    await this.delay(delay);
+   }
+  }
+
+  // All strategies failed - update session and throw error
+  this.updateSession(session);
+  throw new Error(`All anti-detection segment strategies failed. Last error: ${lastError?.message || 'Unknown error'}`);
+ }
+
+ async extractSegmentsWithCookiesAndSession(videoId, session, options) {
+  return this.extractSegmentsWithStrategy(videoId, session, options, 'cookies');
+ }
+
+ async extractSegmentsWithMobileSession(videoId, session, options) {
+  return this.extractSegmentsWithStrategy(videoId, session, options, 'mobile');
+ }
+
+ async extractSegmentsWithEmbeddedClient(videoId, session, options) {
+  return this.extractSegmentsWithStrategy(videoId, session, options, 'embedded');
+ }
+
+ async extractSegmentsWithStrategy(videoId, session, options, strategy) {
+  const tempDir = path.join(__dirname, '../temp');
+  if (!fs.existsSync(tempDir)) {
+   fs.mkdirSync(tempDir, {recursive: true});
+  }
+
+  const timestamp = Date.now();
+
+  let ytdlOptions = {
+   writeAutoSubs: true,
+   writeSubs: true,
+   subLang: options.lang || ['id', 'en', 'auto'],
+   skipDownload: true,
+   userAgent: session.userAgent,
+   addHeader: [
+    `Accept-Language: ${session.acceptLanguage}`,
+    `Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8`,
+    `Accept-Encoding: gzip, deflate, br`,
+    `Cache-Control: no-cache`,
+    `Pragma: no-cache`,
+    `DNT: 1`,
+    `Sec-Fetch-Dest: document`,
+    `Sec-Fetch-Mode: navigate`,
+    `Sec-Fetch-Site: none`,
+    `Upgrade-Insecure-Requests: 1`,
+   ],
+   output: path.join(tempDir, `${videoId}-${timestamp}.%(ext)s`),
+   writeSubVtt: true, // Ensure VTT format
+  };
+
+  if (strategy === 'cookies') {
+   ytdlOptions.cookies = this.cookiePath;
+  }
+
+  if (strategy === 'mobile') {
+   ytdlOptions.userAgent = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15';
+   ytdlOptions.format = 'worst'; // Mobile typically requests lower quality
+  }
+
+  const url = `https://www.youtube.com/watch?v=${videoId}`;
+
+  try {
+   console.log(`[YT-DLP-SEGMENTS] Executing yt-dlp for segments with ${strategy} strategy...`);
+
+   // Execute yt-dlp to get subtitle files
+   const {stdout, stderr} = await youtubedl(url, ytdlOptions);
+
+   console.log(`[YT-DLP-SEGMENTS] Execution complete, looking for subtitle files...`);
+
+   // Look for generated subtitle files
+   const files = fs.readdirSync(tempDir);
+   const subtitleFiles = files.filter((file) => file.includes(videoId) && file.includes(timestamp.toString()) && (file.endsWith('.vtt') || file.endsWith('.srt')));
+
+   console.log(`[YT-DLP-SEGMENTS] Found ${subtitleFiles.length} subtitle files`);
+
+   if (subtitleFiles.length > 0) {
+    // Select the best subtitle file (prefer Indonesian, then English, then auto-generated)
+    const preferredFile = this.selectBestSubtitleFile(subtitleFiles);
+    const subtitlePath = path.join(tempDir, preferredFile);
+
+    console.log(`[YT-DLP-SEGMENTS] Reading subtitle file: ${preferredFile}`);
+
+    const subtitleContent = fs.readFileSync(subtitlePath, 'utf8');
+    const segments = this.parseSubtitleSegments(subtitleContent);
+
+    // Cleanup temp files
+    this.cleanupTempFiles(tempDir, videoId, timestamp);
+
+    if (segments && segments.length > 0) {
+     return segments;
+    } else {
+     throw new Error('No valid segments found in subtitle file');
+    }
+   } else {
+    throw new Error('No subtitle files generated by yt-dlp');
+   }
+  } catch (error) {
+   // Cleanup temp files on error
+   this.cleanupTempFiles(tempDir, videoId, timestamp);
+   throw error;
   }
  }
 

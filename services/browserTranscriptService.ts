@@ -45,7 +45,8 @@ class BrowserTranscriptService {
   for (let i = 0; i < methods.length; i++) {
    const methodName = ['YouTube Direct API', 'Hidden Iframe', 'Proxy with User Agent', 'YouTube Internal API', 'Alternative Endpoint'][i];
 
-   console.log(`[BROWSER-TRANSCRIPT] Trying method ${i + 1}/5: ${methodName} for ${videoId}`);
+   // Only log attempts for successful methods to reduce noise
+   // console.log(`[BROWSER-TRANSCRIPT] Trying method ${i + 1}/5: ${methodName} for ${videoId}`);
 
    try {
     const result = await Promise.race([methods[i](), new Promise<null>((_, reject) => setTimeout(() => reject(new Error('Method timeout')), 15000))]);
@@ -62,7 +63,7 @@ class BrowserTranscriptService {
      console.log(`[BROWSER-TRANSCRIPT] Success with ${methodName} for ${videoId} (${result.length} chars)`);
      return result;
     } else {
-     console.log(`[BROWSER-TRANSCRIPT] Method ${methodName} returned empty result for ${videoId}`);
+     // console.log(`[BROWSER-TRANSCRIPT] Method ${methodName} returned empty result for ${videoId}`);
     }
    } catch (error: any) {
     console.log(`[BROWSER-TRANSCRIPT] Method ${methodName} failed for ${videoId}:`, error.message);
