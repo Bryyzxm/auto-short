@@ -4,11 +4,6 @@
  "framework": "vite",
  "cleanUrls": true,
  "trailingSlash": false,
- "functions": {
-  "app/api/*.js": {
-   "maxDuration": 30
-  }
- },
  "rewrites": [
   {
    "source": "/(.*)",
