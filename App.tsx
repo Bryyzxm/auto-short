@@ -132,7 +132,7 @@ const App: React.FC = () => {
  //  }
  // };
 
- // Enhanced transcript fetching with timing data for AI segmentation
+ // Enhanced transcript fetching with emergency fallback
  const fetchEnhancedTranscript = async (videoId: string): Promise<{transcript: string; segments: any[]; method: string}> => {
   try {
    console.log(`[APP] Fetching enhanced transcript with timing for ${videoId}`);
@@ -154,6 +154,28 @@ const App: React.FC = () => {
     };
    } else {
     console.log(`[APP] Enhanced backend failed with status: ${response.status}`);
+   }
+
+   // Emergency fallback endpoint
+   console.log(`[APP] Trying emergency transcript endpoint...`);
+   const emergencyResponse = await fetch(`${backendUrl}/api/emergency-transcript?videoId=${videoId}`);
+
+   if (emergencyResponse.ok || emergencyResponse.status === 206) {
+    // Accept partial content
+    const emergencyData = await emergencyResponse.json();
+    console.log(`[APP] Emergency endpoint success: ${emergencyData.segments?.length || 0} segments, method: ${emergencyData.method}`);
+
+    if (emergencyData.isFallback) {
+     console.warn(`[APP] ⚠️ Using fallback transcript data for ${videoId}`);
+    }
+
+    return {
+     transcript: emergencyData.segments ? emergencyData.segments.map((s: any) => s.text).join(' ') : '',
+     segments: emergencyData.segments || [],
+     method: emergencyData.method || 'Emergency Fallback',
+    };
+   } else {
+    console.log(`[APP] Emergency endpoint failed with status: ${emergencyResponse.status}`);
    }
 
    // Fallback to transcriptManager

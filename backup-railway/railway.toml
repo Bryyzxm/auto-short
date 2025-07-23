@@ -1,0 +1,27 @@
+[build]
+builder = "DOCKERFILE"
+
+[deploy]
+dockerfilePath = "backend/Dockerfile"
+healthcheckPath = "/health"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
+
+[[services]]
+[services.source]
+workdir = "backend"
+
+[services.variables]
+NODE_ENV = "production"
+PORT = "${{ PORT }}"
+
+# CORS configuration - update dengan domain Vercel Anda
+CORS_ORIGINS = "https://auto-short.vercel.app,https://auto-short-git-main-bryyzxms-projects.vercel.app"
+
+# Optional: Groq API key untuk AI features
+# GROQ_API_KEY = "your_groq_api_key_here"
+
+[services.build]
+builder = "dockerfile"
+dockerfilePath = "backend/Dockerfile"

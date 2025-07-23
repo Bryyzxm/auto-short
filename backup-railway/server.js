@@ -10,9 +10,6 @@ import {fileURLToPath} from 'url';
 import {YoutubeTranscript} from 'youtube-transcript';
 import antiDetectionTranscript from './services/antiDetectionTranscript.js';
 import robustTranscriptService from './services/robustTranscriptService.js';
-import robustTranscriptServiceV2 from './services/robustTranscriptServiceV2.js';
-import alternativeTranscriptService from './services/alternativeTranscriptService.js';
-import emergencyTranscriptService from './services/emergencyTranscriptService.js';
 import intelligentChunker from './services/intelligentChunker.js';
 import aiTitleGenerator from './services/aiTitleGenerator.js';
 import smartExcerptFormatter from './services/smartExcerptFormatter.js';
@@ -82,38 +79,21 @@ const corsOptions = {
       'http://localhost:3000', // React dev server
       'https://auto-short.vercel.app', // Production Vercel
       'https://auto-short-git-main-bryyzxms-projects.vercel.app', // Preview deployments
-      'https://*.vercel.app', // All Vercel domains
-      'http://localhost:*', // All localhost ports
      ];
 
   console.log(`[CORS] Request from origin: ${origin}`);
   console.log(`[CORS] Allowed origins: ${allowedOrigins.join(', ')}`);
 
-  // More permissive origin checking
-  const isAllowed = allowedOrigins.some((allowedOrigin) => {
-   // Exact match
-   if (origin === allowedOrigin) return true;
-   // Wildcard matching for vercel and localhost
-   if (allowedOrigin.includes('*')) {
-    const regex = new RegExp(allowedOrigin.replace(/\*/g, '.*'));
-    return regex.test(origin);
-   }
-   // Contains check for common domains
-   return origin.includes('.vercel.app') || origin.includes('localhost') || origin.includes('127.0.0.1');
-  });
-
-  if (isAllowed) {
+  if (allowedOrigins.some((allowedOrigin) => origin === allowedOrigin || origin.includes('.vercel.app') || origin.includes('localhost'))) {
    callback(null, true);
   } else {
    console.warn(`[CORS] Blocked origin: ${origin}`);
-   // Don't block the request, just log it for now
-   callback(null, true);
+   callback(new Error('Not allowed by CORS'));
   }
  },
  credentials: true,
  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
- allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Origin', 'Accept'],
- optionsSuccessStatus: 200, // some legacy browsers (IE11, various SmartTVs) choke on 204
+ allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
 };
 
 app.use(cors(corsOptions));
@@ -870,12 +850,12 @@ app.post('/api/clear-transcript-cache', (req, res) => {
  }
 });
 
-// Enhanced transcript endpoint with anti-detection V2
+// Enhanced transcript endpoint with anti-detection
 app.get('/api/yt-transcript', async (req, res) => {
  const {videoId, lang} = req.query;
  if (!videoId) return res.status(400).json({error: 'videoId required'});
 
- console.log(`[TRANSCRIPT-V2] 🎯 Enhanced request for videoId: ${videoId}`);
+ console.log(`[TRANSCRIPT] 🎯 Anti-Detection request for videoId: ${videoId}`);
 
  // Check cache first
  const cached = transcriptCache.get(videoId);
@@ -884,36 +864,42 @@ app.get('/api/yt-transcript', async (req, res) => {
   const maxAge = cached.failed ? FAILED_CACHE_DURATION : CACHE_DURATION;
 
   if (age < maxAge) {
-   console.log(`[TRANSCRIPT-V2] ✅ Cache hit for ${videoId} (${cached.failed ? 'failed' : 'success'}, ${Math.round(age / 1000)}s ago)`);
+   console.log(`[TRANSCRIPT] ✅ Cache hit for ${videoId} (${cached.failed ? 'failed' : 'success'}, ${Math.round(age / 1000)}s ago)`);
    if (cached.failed) {
     return res.status(404).json(cached.data);
    }
    return res.json(cached.data);
   } else {
-   console.log(`[TRANSCRIPT-V2] 🗑️ Cache expired for ${videoId} (${Math.round(age / 1000)}s old)`);
+   console.log(`[TRANSCRIPT] 🗑️ Cache expired for ${videoId} (${Math.round(age / 1000)}s old)`);
    transcriptCache.delete(videoId);
   }
  }
 
  try {
-  console.log(`[TRANSCRIPT-V2] 🚀 Starting enhanced extraction V2 for ${videoId}`);
+  console.log(`[TRANSCRIPT] 🚀 Starting anti-detection extraction for ${videoId}`);
 
-  // Use new Robust Transcript Service V2 as primary method
-  const transcriptData = await robustTranscriptServiceV2.extractWithRealTiming(videoId, {
+  // Use anti-detection service as primary method
+  const transcript = await antiDetectionTranscript.extractTranscript(videoId, {
    lang: lang ? lang.split(',') : ['id', 'en'],
   });
 
-  if (transcriptData && transcriptData.transcript && transcriptData.transcript.length > 10) {
-   console.log(`[TRANSCRIPT-V2] ✅ V2 Service success: ${transcriptData.transcript.length} chars, ${transcriptData.segments.length} segments, method: ${transcriptData.method}`);
+  if (transcript && transcript.length > 10) {
+   // Parse transcript into segments (simple splitting for now)
+   const segments = transcript
+    .split(/[.!?]+/)
+    .filter((text) => text.trim().length > 0)
+    .map((text, index) => ({
+     text: text.trim(),
+     start: index * 5, // Approximate timing
+     end: (index + 1) * 5,
+    }));
 
    const result = {
-    segments: transcriptData.segments,
-    language: transcriptData.language,
-    source: 'Robust Transcript Service V2',
-    method: transcriptData.method,
-    length: transcriptData.transcript.length,
-    hasRealTiming: transcriptData.hasRealTiming,
-    sessionId: transcriptData.sessionId,
+    segments: segments,
+    language: 'Auto-detected',
+    source: 'Anti-Detection Service',
+    method: 'Advanced Cookie Strategy',
+    length: transcript.length,
    };
 
    // Cache successful result
@@ -923,34 +909,38 @@ app.get('/api/yt-transcript', async (req, res) => {
     failed: false,
    });
 
+   console.log(`[TRANSCRIPT] ✅ Anti-detection success for ${videoId} (${transcript.length} chars, ${segments.length} segments)`);
    return res.json(result);
   } else {
-   throw new Error('Robust V2 service returned insufficient transcript data');
+   throw new Error('Anti-detection service returned empty transcript');
   }
- } catch (v2Error) {
-  console.log(`[TRANSCRIPT-V2] ❌ V2 Service failed: ${v2Error.message}`);
+ } catch (antiDetectionError) {
+  console.log(`[TRANSCRIPT] ❌ Anti-detection failed: ${antiDetectionError.message}`);
 
-  // Fallback to original robust service
+  // Fallback 1: Try youtube-transcript library
+  console.log(`[TRANSCRIPT] 🔄 Trying fallback: youtube-transcript library`);
   try {
-   console.log(`[TRANSCRIPT-V2] 🔄 Falling back to original robust service...`);
-
-   const fallbackData = await robustTranscriptService.extractWithRealTiming(videoId, {
-    lang: lang ? lang.split(',') : ['id', 'en'],
+   const transcript = await YoutubeTranscript.fetchTranscript(videoId, {
+    lang: 'id',
+    country: 'ID',
    });
 
-   if (fallbackData && fallbackData.transcript && fallbackData.transcript.length > 10) {
-    console.log(`[TRANSCRIPT-V2] ✅ Fallback success: ${fallbackData.transcript.length} chars, ${fallbackData.segments.length} segments`);
+   if (transcript && transcript.length > 0) {
+    console.log(`[TRANSCRIPT] ✅ Fallback successful: got ${transcript.length} segments`);
+    const segments = transcript.map((item) => ({
+     text: item.text,
+     start: item.offset / 1000,
+     end: (item.offset + item.duration) / 1000,
+    }));
 
     const result = {
-     segments: fallbackData.segments,
-     language: fallbackData.language,
-     source: 'Robust Transcript Service (Fallback)',
-     method: fallbackData.method,
-     length: fallbackData.transcript.length,
-     hasRealTiming: fallbackData.hasRealTiming,
+     segments: segments,
+     language: 'Indonesian',
+     source: 'YouTube Transcript API',
+     method: 'Fallback Library',
     };
 
-    // Cache successful result
+    // Cache fallback result
     transcriptCache.set(videoId, {
      data: result,
      timestamp: Date.now(),
@@ -960,67 +950,56 @@ app.get('/api/yt-transcript', async (req, res) => {
     return res.json(result);
    }
   } catch (fallbackError) {
-   console.log(`[TRANSCRIPT-V2] ❌ Fallback also failed: ${fallbackError.message}`);
+   console.log(`[TRANSCRIPT] ❌ Fallback also failed: ${fallbackError.message}`);
   }
 
-  // Final fallback: Try youtube-transcript library directly
-  console.log(`[TRANSCRIPT-V2] 🔄 Final fallback: YouTube Transcript API...`);
+  // Fallback 2: Try English
+  console.log(`[TRANSCRIPT] 🔄 Trying English fallback`);
   try {
-   const languages = ['id', 'en'];
+   const transcript = await YoutubeTranscript.fetchTranscript(videoId, {
+    lang: 'en',
+    country: 'US',
+   });
 
-   for (const langCode of languages) {
-    try {
-     const transcript = await YoutubeTranscript.fetchTranscript(videoId, {
-      lang: langCode,
-      country: langCode === 'id' ? 'ID' : 'US',
-     });
+   if (transcript && transcript.length > 0) {
+    console.log(`[TRANSCRIPT] ✅ English fallback successful: got ${transcript.length} segments`);
+    const segments = transcript.map((item) => ({
+     text: item.text,
+     start: item.offset / 1000,
+     end: (item.offset + item.duration) / 1000,
+    }));
 
-     if (transcript && transcript.length > 0) {
-      console.log(`[TRANSCRIPT-V2] ✅ Direct API success (${langCode}): ${transcript.length} segments`);
+    const result = {
+     segments: segments,
+     language: 'English',
+     source: 'YouTube Transcript API',
+     method: 'English Fallback',
+    };
 
-      const segments = transcript.map((item) => ({
-       text: item.text,
-       start: item.offset / 1000,
-       end: (item.offset + item.duration) / 1000,
-      }));
+    // Cache English result
+    transcriptCache.set(videoId, {
+     data: result,
+     timestamp: Date.now(),
+     failed: false,
+    });
 
-      const result = {
-       segments: segments,
-       language: langCode === 'id' ? 'Indonesian' : 'English',
-       source: 'YouTube Transcript API (Direct)',
-       method: `Direct API (${langCode.toUpperCase()})`,
-       length: segments.map((s) => s.text).join(' ').length,
-       hasRealTiming: true,
-      };
-
-      // Cache successful result
-      transcriptCache.set(videoId, {
-       data: result,
-       timestamp: Date.now(),
-       failed: false,
-      });
-
-      return res.json(result);
-     }
-    } catch (langError) {
-     console.log(`[TRANSCRIPT-V2] Direct API failed for ${langCode}: ${langError.message}`);
-    }
+    return res.json(result);
    }
-  } catch (directError) {
-   console.log(`[TRANSCRIPT-V2] ❌ Direct API also failed: ${directError.message}`);
+  } catch (englishError) {
+   console.log(`[TRANSCRIPT] ❌ English fallback also failed: ${englishError.message}`);
   }
 
   // All methods failed
   const errorResponse = {
    error: 'All transcript extraction methods failed',
    videoId: videoId,
-   message: 'Video may not have transcripts available or YouTube is blocking access',
+   message: 'YouTube bot detection is blocking all access methods',
    technical_details: {
-    v2_error: v2Error.message,
+    anti_detection_error: antiDetectionError.message,
     timestamp: new Date().toISOString(),
    },
-   attempted_methods: ['Robust Transcript Service V2 (Primary)', 'Robust Transcript Service V1 (Fallback 1)', 'YouTube Transcript API Direct (Fallback 2)'],
-   suggestions: ['Video may not have transcripts/captions available', 'Try a different video with verified captions', 'Check if the video is accessible in your region'],
+   attempted_methods: ['Anti-Detection Cookie Strategy (Primary)', 'YouTube Transcript API Indonesian (Fallback 1)', 'YouTube Transcript API English (Fallback 2)'],
+   suggestions: ['Video may not have transcripts available', 'YouTube may be actively blocking server IP', 'Try again in a few minutes', 'Consider using manual transcript extraction'],
   };
 
   // Cache failure
@@ -1030,7 +1009,7 @@ app.get('/api/yt-transcript', async (req, res) => {
    failed: true,
   });
 
-  console.log(`[TRANSCRIPT-V2] 💀 All methods failed for ${videoId}`);
+  console.log(`[TRANSCRIPT] 💀 All methods failed for ${videoId}`);
   return res.status(404).json(errorResponse);
  }
 });
@@ -1532,23 +1511,13 @@ app.post('/api/intelligent-segments', async (req, res) => {
  try {
   console.log(`[INTELLIGENT-SEGMENTS] Starting intelligent segmentation for ${videoId}`);
 
-  // Step 1: Get transcript with real timing using V2 service
-  const transcriptData = await robustTranscriptServiceV2.extractWithRealTiming(videoId, {
+  // Step 1: Get transcript with real timing
+  const transcriptData = await robustTranscriptService.extractWithRealTiming(videoId, {
    lang: ['id', 'en'],
   });
 
   if (!transcriptData.hasRealTiming) {
-   console.log(`[INTELLIGENT-SEGMENTS] V2 failed, trying V1...`);
-   // Fallback to V1
-   const v1Data = await robustTranscriptService.extractWithRealTiming(videoId, {
-    lang: ['id', 'en'],
-   });
-
-   if (!v1Data.hasRealTiming) {
-    throw new Error('Real timing data required for intelligent segmentation');
-   }
-
-   transcriptData = v1Data;
+   throw new Error('Real timing data required for intelligent segmentation');
   }
 
   console.log(`[INTELLIGENT-SEGMENTS] Got transcript: ${transcriptData.segments.length} timed segments, ${Math.floor(transcriptData.totalDuration / 60)}m${Math.floor(transcriptData.totalDuration % 60)}s`);
@@ -1631,132 +1600,6 @@ app.post('/api/intelligent-segments', async (req, res) => {
    videoId: videoId,
   });
  }
-});
-
-// Enhanced transcript endpoint with multi-service fallback
-app.get('/api/enhanced-transcript/:videoId', async (req, res) => {
- const {videoId} = req.params;
- if (!videoId) return res.status(400).json({error: 'videoId required'});
-
- console.log(`[ENHANCED-API] Multi-service transcript request for: ${videoId}`);
-
- // Try services in order of preference
- const services = [
-  {name: 'robust', service: robustTranscriptServiceV2},
-  {name: 'alternative', service: alternativeTranscriptService},
-  {name: 'emergency', service: emergencyTranscriptService},
- ];
-
- for (const {name, service} of services) {
-  try {
-   console.log(`[ENHANCED-API] Trying ${name} service for ${videoId}`);
-   const result = await service.extractTranscript(videoId);
-
-   console.log(`[ENHANCED-API] ✅ Success with ${name} service: ${result.segments.length} segments`);
-
-   // Add service info to result
-   result.serviceUsed = name;
-   result.fallbackLevel = services.findIndex((s) => s.name === name);
-
-   return res.json(result);
-  } catch (error) {
-   console.log(`[ENHANCED-API] ❌ ${name} service failed: ${error.message}`);
-   continue;
-  }
- }
-
- // If all services failed
- console.error(`[ENHANCED-API] ❌ All services failed for ${videoId}`);
- res.status(404).json({
-  error: 'All transcript extraction services failed',
-  videoId: videoId,
-  servicesAttempted: services.map((s) => s.name),
- });
-});
-
-// Emergency transcript endpoint - simple and reliable
-app.get('/api/emergency-transcript/:videoId', async (req, res) => {
- const {videoId} = req.params;
- if (!videoId) return res.status(400).json({error: 'videoId required'});
-
- console.log(`[EMERGENCY-API] Simple transcript request for: ${videoId}`);
-
- try {
-  const result = await emergencyTranscriptService.extractTranscript(videoId);
-
-  if (result.isFallback) {
-   console.log(`[EMERGENCY-API] ⚠️ Returning fallback data for ${videoId}`);
-   return res.status(206).json(result); // 206 Partial Content
-  }
-
-  console.log(`[EMERGENCY-API] ✅ Success for ${videoId}: ${result.segments.length} segments`);
-
-  res.json(result);
- } catch (error) {
-  console.error(`[EMERGENCY-API] ❌ Failed for ${videoId}:`, error.message);
-
-  res.status(404).json({
-   error: 'Transcript extraction failed',
-   videoId: videoId,
-   message: error.message,
-   stats: emergencyTranscriptService.getStats(),
-  });
- }
-});
-
-// Diagnostic endpoint
-app.get('/api/transcript-diagnostics/:videoId', async (req, res) => {
- const {videoId} = req.params;
-
- console.log(`[DIAGNOSTICS-API] Running diagnostics for: ${videoId}`);
-
- const tests = {};
- const successful = [];
-
- // Test Emergency Service
- try {
-  const emergencyResult = await emergencyTranscriptService.extractTranscript(videoId);
-  tests.emergency = {success: true, segments: emergencyResult.segments.length, method: emergencyResult.method};
-  successful.push('emergency');
- } catch (error) {
-  tests.emergency = {success: false, error: error.message};
- }
-
- // Test Alternative Service
- try {
-  const altResult = await alternativeTranscriptService.extractTranscript(videoId);
-  tests.alternative = {success: true, segments: altResult.segments.length, method: altResult.method};
-  successful.push('alternative');
- } catch (error) {
-  tests.alternative = {success: false, error: error.message};
- }
-
- // Test Robust Service
- try {
-  const robustResult = await robustTranscriptServiceV2.extractTranscript(videoId);
-  tests.robust = {success: true, segments: robustResult.segments.length, method: robustResult.method};
-  successful.push('robust');
- } catch (error) {
-  tests.robust = {success: false, error: error.message};
- }
-
- const stats = {
-  emergency: emergencyTranscriptService.getStats(),
-  alternative: alternativeTranscriptService.getStats(),
-  robust: robustTranscriptServiceV2.getStats(),
- };
-
- res.json({
-  videoId,
-  tests,
-  successful,
-  stats,
-  timestamp: new Date().toISOString(),
-  cacheStats: {
-   transcriptCacheSize: transcriptCache.size,
-  },
-  status: 'diagnostic_complete',
- });
 });
 
 // Cleanup old files on server start
