@@ -2,6 +2,7 @@ import React, {useState, useCallback} from 'react';
 import {YouTubeInputForm} from './components/YouTubeInputForm';
 import {ShortVideoCard} from './components/ShortVideoCard';
 import {LoadingSpinner} from './components/LoadingSpinner';
+import {TranscriptErrorHandler} from './components/TranscriptUploadFallback';
 import {generateShortsIdeas} from './services/groqService';
 import type {ShortVideo} from './types';
 import {InfoIcon} from './components/icons';
@@ -67,6 +68,8 @@ const App: React.FC = () => {
  const [apiKeyError, setApiKeyError] = useState<string | null>(null);
  const [activePlayerId, setActivePlayerId] = useState<string | null>(null);
  const [aspectRatio, setAspectRatio] = useState<string>('9:16');
+ const [showTranscriptUpload, setShowTranscriptUpload] = useState<boolean>(false);
+ const [currentVideoId, setCurrentVideoId] = useState<string | null>(null);
 
  // Check for API key on mount
  React.useEffect(() => {
@@ -320,6 +323,43 @@ const App: React.FC = () => {
  //  };
  // }
 
+ // Handler for manual transcript upload
+ const handleManualTranscript = useCallback(
+  async (manualData: {transcript: string; segments: any[]; videoId: string}) => {
+   setIsLoading(true);
+   setError(null);
+   setShowTranscriptUpload(false);
+
+   try {
+    console.log(`[APP] 🎯 Processing manual transcript for ${manualData.videoId}`);
+    console.log(`[APP] Manual transcript length: ${manualData.transcript.length} chars`);
+
+    // Use the manual transcript data with Groq AI to generate shorts
+    const promptIdeas = await generateShortsIdeas(manualData.transcript, aspectRatio);
+
+    // Convert to ShortVideo format
+    const manualShorts: ShortVideo[] = promptIdeas.map((idea, index) => ({
+     id: `manual-${index}`,
+     title: idea.title,
+     description: idea.description,
+     startTimeSeconds: idea.startTimeSeconds || index * 60, // Fallback timing
+     endTimeSeconds: idea.endTimeSeconds || (index + 1) * 60,
+     youtubeVideoId: manualData.videoId,
+     thumbnailUrl: generateYouTubeThumbnailUrl(manualData.videoId, 0),
+    }));
+
+    console.log(`[APP] ✅ Generated ${manualShorts.length} shorts from manual transcript`);
+    setGeneratedShorts(manualShorts);
+   } catch (error) {
+    console.error('[APP] ❌ Manual transcript processing failed:', error);
+    setError('Failed to process manual transcript. Please try again.');
+   } finally {
+    setIsLoading(false);
+   }
+  },
+  [aspectRatio]
+ );
+
  const handleSubmit = useCallback(
   async (url: string, aspectRatio: string) => {
    if (apiKeyError) return;
@@ -376,8 +416,20 @@ const App: React.FC = () => {
     console.log(`[APP] Starting enhanced transcript extraction for ${videoId}`);
     transcriptData = await fetchEnhancedTranscript(videoId);
     console.log(`[APP] Enhanced transcript loaded: ${transcriptData.transcript.length} chars, ${transcriptData.segments.length} segments, method: ${transcriptData.method}`);
-   } catch (error) {
+   } catch (error: any) {
     console.error(`[APP] Enhanced transcript extraction failed:`, error);
+
+    // Check if this is a YouTube blocking issue
+    const errorMessage = error?.message || String(error);
+    if (errorMessage.includes('All transcript extraction services failed') || errorMessage.includes('YouTube is blocking') || errorMessage.includes('bot protection')) {
+     // YouTube blocking detected - show manual upload option
+     console.log(`[APP] 🚨 YouTube blocking detected - showing manual transcript option`);
+     setCurrentVideoId(videoId);
+     setShowTranscriptUpload(true);
+     setIsLoading(false);
+     return;
+    }
+
     setError('Transkrip tidak tersedia untuk video ini. Silakan coba video lain.');
     setIsLoading(false);
     return;
@@ -494,7 +546,18 @@ const App: React.FC = () => {
     />
     {isLoading && <LoadingSpinner />}
 
-    {error && (
+    {/* Show transcript upload interface when YouTube is blocking */}
+    {showTranscriptUpload && currentVideoId && (
+     <div className="mt-6">
+      <TranscriptErrorHandler
+       error="All transcript extraction services failed"
+       videoId={currentVideoId}
+       onRetry={handleManualTranscript}
+      />
+     </div>
+    )}
+
+    {error && !showTranscriptUpload && (
      <div className="mt-6 p-4 bg-red-800 bg-opacity-70 text-red-200 border border-red-600 rounded-lg text-center">
       <p className="font-semibold">Error:</p>
       <p>{error}</p>

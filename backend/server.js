@@ -269,7 +269,7 @@ app.post('/api/video-quality-check', (req, res) => {
   // Enhanced format checking with better reliability
   const qualityCheckArgs = ['--list-formats', '--no-warnings', '--user-agent', getRandomUserAgent(), '--extractor-args', 'youtube:player_client=web,android', '--retries', '2', '--socket-timeout', '20', url];
 
-  console.log(`[quality-check] yt-dlp command: ${YT_DLP_PATH} ${qualityCheckArgs.join(' ')}`);
+  console.log(`[quality-check] yt-dlp command: ${YT_DLP_PATH} ${qualityCheckArgs.map((arg) => (arg.includes(' ') ? `"${arg}"` : arg)).join(' ')}`);
 
   // Check available formats with yt-dlp
   const formatsResult = execSync(`"${YT_DLP_PATH}" ${qualityCheckArgs.join(' ')}`, {
@@ -1244,7 +1244,7 @@ app.get('/api/video-metadata', async (req, res) => {
   // Enhanced yt-dlp command with better reliability
   const ytDlpMetadataArgs = ['--dump-json', '--no-check-certificate', '--no-warnings', '--user-agent', getRandomUserAgent(), '--extractor-args', 'youtube:player_client=web,android', '--retries', '3', '--socket-timeout', '30', videoUrl];
 
-  console.log(`[video-metadata] yt-dlp command: ${YT_DLP_PATH} ${ytDlpMetadataArgs.join(' ')}`);
+  console.log(`[video-metadata] yt-dlp command: ${YT_DLP_PATH} ${ytDlpMetadataArgs.map((arg) => (arg.includes(' ') ? `"${arg}"` : arg)).join(' ')}`);
 
   // Gunakan yt-dlp untuk mendapatkan metadata tanpa download
   const result = execSync(`"${YT_DLP_PATH}" ${ytDlpMetadataArgs.join(' ')}`, {
@@ -1368,7 +1368,7 @@ app.post('/api/intelligent-segments', async (req, res) => {
   // Step 1: Try enhanced transcript endpoint first
   try {
    console.log(`[INTELLIGENT-SEGMENTS] Trying enhanced transcript service...`);
-   transcriptData = await robustTranscriptServiceV2.extractTranscript(videoId);
+   transcriptData = await robustTranscriptServiceV2.extractWithRealTiming(videoId, {lang: ['id', 'en']});
 
    if (transcriptData && transcriptData.segments && transcriptData.segments.length > 0) {
     console.log(`[INTELLIGENT-SEGMENTS] Enhanced service success: ${transcriptData.segments.length} segments`);
@@ -1540,9 +1540,18 @@ app.get('/api/enhanced-transcript/:videoId', async (req, res) => {
  for (const {name, service} of services) {
   try {
    console.log(`[ENHANCED-API] Trying ${name} service for ${videoId}`);
-   const result = await service.extractTranscript(videoId);
 
-   console.log(`[ENHANCED-API] ✅ Success with ${name} service: ${result.segments.length} segments`);
+   // Use correct method based on service type
+   let result;
+   if (name === 'robust') {
+    // robustTranscriptServiceV2 uses extractWithRealTiming method
+    result = await service.extractWithRealTiming(videoId, {lang: ['id', 'en']});
+   } else {
+    // other services use extractTranscript method
+    result = await service.extractTranscript(videoId);
+   }
+
+   console.log(`[ENHANCED-API] ✅ Success with ${name} service: ${result.segments?.length || 0} segments`);
 
    // Add service info to result
    result.serviceUsed = name;
@@ -1551,6 +1560,20 @@ app.get('/api/enhanced-transcript/:videoId', async (req, res) => {
    return res.json(result);
   } catch (error) {
    console.log(`[ENHANCED-API] ❌ ${name} service failed: ${error.message}`);
+
+   // Check if it's a transcript disabled error
+   if (error.message.includes('Transcript is disabled') || error.message.includes('No transcript available') || error.message.includes('No captions available')) {
+    // Don't continue to other services if transcript is explicitly disabled
+    console.log(`[ENHANCED-API] ⚠️ Video ${videoId} has transcript disabled - stopping service attempts`);
+    return res.status(404).json({
+     error: 'Transcript is disabled on this video',
+     videoId: videoId,
+     reason: 'Video owner has disabled transcripts/captions for this video',
+     suggestion: 'Try a different video that has captions enabled',
+     disabledByOwner: true,
+    });
+   }
+
    continue;
   }
  }
@@ -1623,7 +1646,7 @@ app.get('/api/transcript-diagnostics/:videoId', async (req, res) => {
 
  // Test Robust Service
  try {
-  const robustResult = await robustTranscriptServiceV2.extractTranscript(videoId);
+  const robustResult = await robustTranscriptServiceV2.extractWithRealTiming(videoId, {lang: ['id', 'en']});
   tests.robust = {success: true, segments: robustResult.segments.length, method: robustResult.method};
   successful.push('robust');
  } catch (error) {
