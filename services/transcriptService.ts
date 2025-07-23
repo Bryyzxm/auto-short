@@ -172,14 +172,12 @@ class SmartTranscriptManager {
   const backend = isDev && !envUrl ? 'http://localhost:5001' : envUrl || 'https://auto-short-production.up.railway.app';
 
   try {
-   const params = new URLSearchParams({
-    videoId,
-    lang: 'id,en',
-   });
+   // Use new enhanced transcript endpoint with path parameter
+   const enhancedUrl = `${backend}/api/enhanced-transcript/${videoId}`;
 
-   console.log(`[TRANSCRIPT] Request URL: ${backend}/api/yt-transcript?${params}`);
+   console.log(`[TRANSCRIPT] Request URL: ${enhancedUrl}`);
 
-   const response = await fetch(`${backend}/api/yt-transcript?${params}`, {
+   const response = await fetch(enhancedUrl, {
     method: 'GET',
     headers: {
      'Content-Type': 'application/json',

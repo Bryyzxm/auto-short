@@ -139,7 +139,7 @@ const App: React.FC = () => {
 
    // Try backend with timing first
    const backendUrl = BACKEND_URL;
-   const enhancedUrl = `${backendUrl}/api/yt-transcript-with-timing?videoId=${videoId}`;
+   const enhancedUrl = `${backendUrl}/api/enhanced-transcript/${videoId}`;
 
    console.log(`[APP] Trying enhanced backend endpoint: ${enhancedUrl}`);
    const response = await fetch(enhancedUrl);
@@ -148,7 +148,7 @@ const App: React.FC = () => {
     const data = await response.json();
     console.log(`[APP] Enhanced backend success: ${data.transcript?.length || 0} chars, ${data.segments?.length || 0} segments, method: ${data.method}`);
     return {
-     transcript: data.transcript || '',
+     transcript: data.segments ? data.segments.map((s: any) => s.text).join(' ') : data.transcript || '',
      segments: data.segments || [],
      method: data.method || 'Enhanced Backend',
     };
@@ -158,7 +158,7 @@ const App: React.FC = () => {
 
    // Emergency fallback endpoint
    console.log(`[APP] Trying emergency transcript endpoint...`);
-   const emergencyResponse = await fetch(`${backendUrl}/api/emergency-transcript?videoId=${videoId}`);
+   const emergencyResponse = await fetch(`${backendUrl}/api/emergency-transcript/${videoId}`);
 
    if (emergencyResponse.ok || emergencyResponse.status === 206) {
     // Accept partial content

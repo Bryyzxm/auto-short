@@ -112,12 +112,33 @@ const corsOptions = {
  },
  credentials: true,
  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
- allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Origin', 'Accept'],
+ allowedHeaders: [
+  'Content-Type',
+  'Authorization',
+  'X-Requested-With',
+  'Origin',
+  'Accept',
+  'User-Agent',
+  'user-agent',
+  'Cache-Control',
+  'cache-control',
+  'Pragma',
+  'Expires',
+  'Accept-Language',
+  'accept-language',
+  'Accept-Encoding',
+  'accept-encoding',
+  'Connection',
+  'connection',
+  'Referer',
+  'referer',
+ ],
  optionsSuccessStatus: 200, // some legacy browsers (IE11, various SmartTVs) choke on 204
 };
 
 app.use(cors(corsOptions));
 app.use(express.json({limit: '10mb'}));
+
 app.use(express.urlencoded({extended: true, limit: '10mb'}));
 
 // 🔧 STARTUP VALIDATION: Verify yt-dlp is available
@@ -1298,226 +1319,36 @@ app.get('/api/video-metadata', async (req, res) => {
  }
 });
 
-// Enhanced transcript endpoint with timing data for AI segmentation
+// DEPRECATED: Old enhanced transcript endpoint with timing data
+// Use /api/enhanced-transcript/:videoId instead
 app.get('/api/yt-transcript-with-timing', async (req, res) => {
- const {videoId, lang} = req.query;
- if (!videoId) return res.status(400).json({error: 'videoId required'});
-
- console.log(`[TRANSCRIPT-TIMING] 🎯 Enhanced request for videoId: ${videoId}`);
-
- // Check cache first
- const cacheKey = `${videoId}_timing`;
- const cached = transcriptCache.get(cacheKey);
- if (cached) {
-  const age = Date.now() - cached.timestamp;
-  const maxAge = cached.failed ? FAILED_CACHE_DURATION : CACHE_DURATION;
-
-  if (age < maxAge) {
-   console.log(`[TRANSCRIPT-TIMING] ✅ Cache hit for ${videoId} (${cached.failed ? 'failed' : 'success'}, ${Math.round(age / 1000)}s ago)`);
-   if (cached.failed) {
-    return res.status(404).json(cached.data);
-   }
-   return res.json(cached.data);
-  } else {
-   console.log(`[TRANSCRIPT-TIMING] 🗑️ Cache expired for ${videoId} (${Math.round(age / 1000)}s old)`);
-   transcriptCache.delete(cacheKey);
-  }
+ // Redirect to new endpoint
+ const {videoId} = req.query;
+ if (!videoId) {
+  return res.status(400).json({
+   error: 'videoId required. Use /api/enhanced-transcript/:videoId instead',
+   deprecated: true,
+   newEndpoint: '/api/enhanced-transcript/:videoId',
+  });
  }
 
+ console.log(`[DEPRECATED] Old endpoint called for ${videoId}, redirecting to new endpoint`);
+
+ // Instead of redirect, directly call the new endpoint logic
  try {
-  console.log(`[TRANSCRIPT-TIMING] 🚀 Starting ROBUST extraction with real timing for ${videoId}`);
-
-  // NEW APPROACH: Use Robust Transcript Service for real timing
-  let transcriptData = null;
-  let method = 'Unknown';
-
-  try {
-   console.log(`[TRANSCRIPT-TIMING] Using Robust Transcript Service...`);
-
-   transcriptData = await robustTranscriptService.extractWithRealTiming(videoId, {
-    lang: lang ? lang.split(',') : ['id', 'en'],
-   });
-
-   if (transcriptData && transcriptData.hasRealTiming && transcriptData.segments.length > 0) {
-    console.log(`[TRANSCRIPT-TIMING] ✅ ROBUST service success: ${transcriptData.segments.length} timed segments, ${transcriptData.totalDuration}s total`);
-
-    method = transcriptData.method + ' (Real Timing)';
-
-    const result = {
-     transcript: transcriptData.transcript,
-     segments: transcriptData.segments,
-     language: transcriptData.language,
-     source: 'Robust Transcript Service',
-     method: method,
-     length: transcriptData.transcript.length,
-     segmentCount: transcriptData.segments.length,
-     hasRealTiming: true,
-     totalDuration: transcriptData.totalDuration,
-     extractedAt: new Date().toISOString(),
-    };
-
-    // Cache successful result
-    transcriptCache.set(cacheKey, {
-     data: result,
-     timestamp: Date.now(),
-     failed: false,
-    });
-
-    console.log(`[TRANSCRIPT-TIMING] ✅ ROBUST success with REAL timing: ${transcriptData.transcript.length} chars, ${transcriptData.segments.length} segments`);
-    return res.json(result);
-   }
-  } catch (robustError) {
-   console.log(`[TRANSCRIPT-TIMING] ❌ ROBUST service failed: ${robustError.message}`);
-  }
-
-  console.log(`[TRANSCRIPT-TIMING] 🔄 ROBUST failed, trying legacy anti-detection...`);
-
-  // FALLBACK: Try legacy anti-detection method
-  let segments = null;
-  let transcript = '';
-
-  try {
-   console.log(`[TRANSCRIPT-TIMING] Attempting legacy segments with timing...`);
-
-   // Use the enhanced method if available
-   if (typeof antiDetectionTranscript.extractTranscriptWithSegments === 'function') {
-    segments = await antiDetectionTranscript.extractTranscriptWithSegments(videoId, {
-     lang: lang ? lang.split(',') : ['id', 'en'],
-    });
-
-    if (segments && segments.length > 0) {
-     console.log(`[TRANSCRIPT-TIMING] ✅ Got ${segments.length} timed segments from anti-detection service`);
-
-     // Enhanced segment processing with quality validation
-     const validSegments = segments.filter((s) => s.text && s.text.length > 10 && typeof s.start === 'number' && typeof s.end === 'number' && s.end > s.start && s.end - s.start >= 0.5);
-
-     if (validSegments.length > 0) {
-      // Extract full transcript from segments with proper spacing
-      transcript = validSegments.map((s) => s.text.trim()).join(' ');
-      method = 'Anti-Detection Service (Enhanced Timed Segments)';
-
-      // Convert timing format to consistent seconds format
-      const processedSegments = validSegments.map((s) => ({
-       text: s.text,
-       start: parseTimeToSeconds(s.start),
-       end: parseTimeToSeconds(s.end),
-       duration: parseTimeToSeconds(s.end) - parseTimeToSeconds(s.start),
-      }));
-
-      const result = {
-       transcript: transcript,
-       segments: processedSegments,
-       language: 'Auto-detected',
-       source: 'Anti-Detection Service (Enhanced)',
-       method: method,
-       length: transcript.length,
-       segmentCount: processedSegments.length,
-       hasRealTiming: true,
-       extractedAt: new Date().toISOString(),
-      };
-
-      // Cache successful result
-      transcriptCache.set(cacheKey, {
-       data: result,
-       timestamp: Date.now(),
-       failed: false,
-      });
-
-      console.log(`[TRANSCRIPT-TIMING] ✅ Enhanced success with real timing: ${transcript.length} chars, ${processedSegments.length} segments`);
-      return res.json(result);
-     }
-    }
-   }
-  } catch (segmentError) {
-   console.log(`[TRANSCRIPT-TIMING] ⚠️ Timed segments extraction failed: ${segmentError.message}`);
-  }
-
-  // Fallback: Try to get plain transcript and create estimated timing
-  console.log(`[TRANSCRIPT-TIMING] 🔄 Falling back to plain transcript with estimated timing...`);
-
-  transcript = await antiDetectionTranscript.extractTranscript(videoId, {
-   lang: lang ? lang.split(',') : ['id', 'en'],
+  const response = await fetch(`http://localhost:${PORT}/api/enhanced-transcript/${videoId}`);
+  const data = await response.json();
+  res.status(response.status).json({
+   ...data,
+   deprecationWarning: 'This endpoint is deprecated. Use /api/enhanced-transcript/:videoId instead',
   });
-
-  if (transcript && transcript.length > 10) {
-   console.log(`[TRANSCRIPT-TIMING] ✅ Got plain transcript: ${transcript.length} chars`);
-
-   // Create estimated timing segments from plain transcript
-   const sentences = transcript.split(/[.!?]+/).filter((s) => s.trim().length > 0);
-   const estimatedSegments = sentences.map((sentence, index) => {
-    const averageWordsPerMinute = 150; // Average speaking rate
-    const words = sentence.trim().split(' ').length;
-    const durationInSeconds = Math.max(3, (words / averageWordsPerMinute) * 60);
-    const startTime = index > 0 ? sentences.slice(0, index).reduce((acc, s) => acc + Math.max(3, (s.trim().split(' ').length / averageWordsPerMinute) * 60), 0) : 0;
-
-    return {
-     start: parseFloat(startTime.toFixed(3)),
-     end: parseFloat((startTime + durationInSeconds).toFixed(3)),
-     text: sentence.trim(),
-    };
-   });
-
-   method = 'Anti-Detection Service (Estimated Timing)';
-
-   const result = {
-    transcript: transcript,
-    segments: estimatedSegments,
-    language: 'Auto-detected',
-    source: 'Anti-Detection Service (Plain Text + Estimated Timing)',
-    method: method,
-    length: transcript.length,
-    segmentCount: estimatedSegments.length,
-    extractedAt: new Date().toISOString(),
-   };
-
-   // Cache successful result
-   transcriptCache.set(cacheKey, {
-    data: result,
-    timestamp: Date.now(),
-    failed: false,
-   });
-
-   console.log(`[TRANSCRIPT-TIMING] ✅ Success with estimated timing: ${transcript.length} chars, ${estimatedSegments.length} segments`);
-   return res.json(result);
-  } else {
-   throw new Error('Enhanced anti-detection service returned empty transcript');
-  }
- } catch (enhancedError) {
-  console.log(`[TRANSCRIPT-TIMING] ❌ Enhanced extraction failed: ${enhancedError.message}`);
-
-  // Final fallback to original transcript endpoint
-  try {
-   console.log(`[TRANSCRIPT-TIMING] 🔄 Final fallback to original transcript service...`);
-   const response = await fetch(`http://127.0.0.1:${PORT}/api/yt-transcript?videoId=${videoId}`);
-   if (response.ok) {
-    const fallbackData = await response.json();
-    console.log(`[TRANSCRIPT-TIMING] ✅ Fallback success: ${fallbackData.segments?.length || 0} segments`);
-    return res.json({
-     ...fallbackData,
-     method: 'Fallback to Original Service',
-     source: 'Fallback Anti-Detection Service',
-    });
-   }
-  } catch (fallbackError) {
-   console.log(`[TRANSCRIPT-TIMING] ❌ Fallback also failed: ${fallbackError.message}`);
-  }
-
-  // Cache failure
-  const errorResult = {
-   error: 'Enhanced transcript extraction failed',
-   videoId: videoId,
-   details: enhancedError.message,
-   timestamp: new Date().toISOString(),
-  };
-
-  transcriptCache.set(cacheKey, {
-   data: errorResult,
-   timestamp: Date.now(),
-   failed: true,
+ } catch (error) {
+  res.status(500).json({
+   error: 'Failed to process request',
+   deprecated: true,
+   newEndpoint: '/api/enhanced-transcript/:videoId',
+   details: error.message,
   });
-
-  console.log(`[TRANSCRIPT-TIMING] ❌ All methods failed for ${videoId}: ${enhancedError.message}`);
-  return res.status(404).json(errorResult);
  }
 });
 
@@ -1532,26 +1363,85 @@ app.post('/api/intelligent-segments', async (req, res) => {
  try {
   console.log(`[INTELLIGENT-SEGMENTS] Starting intelligent segmentation for ${videoId}`);
 
-  // Step 1: Get transcript with real timing using V2 service
-  const transcriptData = await robustTranscriptServiceV2.extractWithRealTiming(videoId, {
-   lang: ['id', 'en'],
-  });
+  let transcriptData = null;
 
-  if (!transcriptData.hasRealTiming) {
-   console.log(`[INTELLIGENT-SEGMENTS] V2 failed, trying V1...`);
-   // Fallback to V1
-   const v1Data = await robustTranscriptService.extractWithRealTiming(videoId, {
-    lang: ['id', 'en'],
-   });
+  // Step 1: Try enhanced transcript endpoint first
+  try {
+   console.log(`[INTELLIGENT-SEGMENTS] Trying enhanced transcript service...`);
+   transcriptData = await robustTranscriptServiceV2.extractTranscript(videoId);
 
-   if (!v1Data.hasRealTiming) {
-    throw new Error('Real timing data required for intelligent segmentation');
+   if (transcriptData && transcriptData.segments && transcriptData.segments.length > 0) {
+    console.log(`[INTELLIGENT-SEGMENTS] Enhanced service success: ${transcriptData.segments.length} segments`);
+   } else {
+    throw new Error('Enhanced service returned empty transcript');
    }
+  } catch (enhancedError) {
+   console.log(`[INTELLIGENT-SEGMENTS] Enhanced service failed: ${enhancedError.message}`);
 
-   transcriptData = v1Data;
+   // Fallback to alternative service
+   try {
+    console.log(`[INTELLIGENT-SEGMENTS] Trying alternative service...`);
+    transcriptData = await alternativeTranscriptService.extractTranscript(videoId);
+
+    if (transcriptData && transcriptData.segments && transcriptData.segments.length > 0) {
+     console.log(`[INTELLIGENT-SEGMENTS] Alternative service success: ${transcriptData.segments.length} segments`);
+    } else {
+     throw new Error('Alternative service returned empty transcript');
+    }
+   } catch (altError) {
+    console.log(`[INTELLIGENT-SEGMENTS] Alternative service failed: ${altError.message}`);
+
+    // Final fallback to emergency service
+    console.log(`[INTELLIGENT-SEGMENTS] Trying emergency service...`);
+    transcriptData = await emergencyTranscriptService.extractTranscript(videoId);
+
+    if (!transcriptData || !transcriptData.segments || transcriptData.segments.length === 0) {
+     throw new Error('All transcript services failed - no transcript available');
+    }
+
+    console.log(`[INTELLIGENT-SEGMENTS] Emergency service success: ${transcriptData.segments.length} segments`);
+   }
   }
 
-  console.log(`[INTELLIGENT-SEGMENTS] Got transcript: ${transcriptData.segments.length} timed segments, ${Math.floor(transcriptData.totalDuration / 60)}m${Math.floor(transcriptData.totalDuration % 60)}s`);
+  // Ensure we have timing data - if not, create estimated timing
+  if (!transcriptData.hasRealTiming) {
+   console.log(`[INTELLIGENT-SEGMENTS] No real timing available, creating estimated timing...`);
+
+   // Create estimated timing based on text length
+   const totalText = transcriptData.segments.map((s) => s.text).join(' ');
+   const avgWordsPerMinute = 150;
+   const totalWords = totalText.split(' ').length;
+   const estimatedDuration = (totalWords / avgWordsPerMinute) * 60;
+
+   let currentTime = 0;
+   transcriptData.segments = transcriptData.segments.map((segment, index) => {
+    const segmentWords = segment.text.split(' ').length;
+    const segmentDuration = (segmentWords / totalWords) * estimatedDuration;
+
+    const result = {
+     ...segment,
+     start: currentTime,
+     end: currentTime + segmentDuration,
+     duration: segmentDuration,
+    };
+
+    currentTime += segmentDuration;
+    return result;
+   });
+
+   transcriptData.hasRealTiming = true; // Mark as having timing now
+   transcriptData.totalDuration = estimatedDuration;
+  }
+
+  console.log(`[INTELLIGENT-SEGMENTS] Got transcript: ${transcriptData.segments.length} timed segments, ${Math.floor((transcriptData.totalDuration || 600) / 60)}m${Math.floor((transcriptData.totalDuration || 600) % 60)}s`);
+
+  // Step 2: Validate transcript length
+  const fullText = transcriptData.segments.map((s) => s.text).join(' ');
+  if (fullText.length < 200) {
+   throw new Error(`Transcript too short for segmentation: ${fullText.length} characters`);
+  }
+
+  console.log(`[INTELLIGENT-SEGMENTS] Full transcript: ${fullText.length} characters - sufficient for processing`);
 
   // Step 2: Create intelligent segments
   const intelligentSegments = intelligentChunker.createIntelligentSegments(transcriptData, targetSegmentCount);

@@ -2,7 +2,7 @@
 builder = "DOCKERFILE"
 
 [deploy]
-startCommand = "node server.js"
+dockerfilePath = "backend/Dockerfile"
 healthcheckPath = "/health"
 healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"
@@ -10,8 +10,7 @@ restartPolicyMaxRetries = 3
 
 [[services]]
 [services.source]
-repo = "Bryyzxm/auto-short"
-branch = "main"
+workdir = "backend"
 
 [services.variables]
 NODE_ENV = "production"
@@ -22,3 +21,7 @@ CORS_ORIGINS = "https://auto-short.vercel.app,https://auto-short-git-main-bryyzx
 
 # Optional: Groq API key untuk AI features
 # GROQ_API_KEY = "your_groq_api_key_here"
+
+[services.build]
+builder = "dockerfile"
+dockerfilePath = "backend/Dockerfile"

@@ -129,35 +129,8 @@ class EmergencyTranscriptService {
  async createFallbackSegments(videoId) {
   console.log(`[EMERGENCY] Creating fallback segments for ${videoId}`);
 
-  // This creates dummy segments as absolute last resort
-  // In real scenario, this might scrape video description or use other sources
-  const fallbackSegments = [
-   {
-    text: 'Video content is available but transcript extraction failed.',
-    start: 0,
-    end: 30,
-   },
-   {
-    text: 'This is an automatically generated fallback transcript.',
-    start: 30,
-    end: 60,
-   },
-   {
-    text: 'Please try using a different video with available captions.',
-    start: 60,
-    end: 90,
-   },
-  ];
-
-  return {
-   segments: fallbackSegments,
-   language: 'Fallback',
-   source: 'Emergency Fallback',
-   method: 'Dummy Segments',
-   hasRealTiming: false,
-   length: fallbackSegments.map((s) => s.text).join(' ').length,
-   isFallback: true,
-  };
+  // Instead of dummy content, throw an error to prevent 110-char fallback
+  throw new Error('No transcript available - all extraction methods failed. This video may not have captions or may be restricted.');
  }
 
  validateResult(result) {
