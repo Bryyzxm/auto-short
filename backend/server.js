@@ -2,7 +2,6 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import {execFile, execSync, spawn} from 'child_process';
-import {promisify} from 'util';
 import {v4 as uuidv4} from 'uuid';
 import path from 'path';
 import fs from 'fs';
@@ -17,6 +16,8 @@ import emergencyTranscriptService from './services/emergencyTranscriptService.js
 import intelligentChunker from './services/intelligentChunker.js';
 import aiTitleGenerator from './services/aiTitleGenerator.js';
 import smartExcerptFormatter from './services/smartExcerptFormatter.js';
+import enhancedTranscriptOrchestrator from './services/enhancedTranscriptOrchestrator.js';
+import {NoValidTranscriptError, TranscriptTooShortError, TranscriptDisabledError, TranscriptNotFoundError} from './services/transcriptErrors.js';
 
 // Polyfill __dirname for ES module
 const __filename = fileURLToPath(import.meta.url);
@@ -1007,22 +1008,26 @@ app.get('/api/yt-transcript', async (req, res) => {
  try {
   console.log(`[TRANSCRIPT-V2] 🚀 Starting enhanced extraction V2 for ${videoId}`);
 
-  // Use new Robust Transcript Service V2 as primary method
-  const transcriptData = await robustTranscriptServiceV2.extractWithRealTiming(videoId, {
+  // Use Enhanced Transcript Orchestrator as primary method
+  const orchestratorResult = await enhancedTranscriptOrchestrator.extractTranscript(videoId, {
+   minLength: 50, // Lower threshold for basic transcript endpoint
    lang: lang ? lang.split(',') : ['id', 'en'],
   });
 
-  if (transcriptData && transcriptData.transcript && transcriptData.transcript.length > 10) {
-   console.log(`[TRANSCRIPT-V2] ✅ V2 Service success: ${transcriptData.transcript.length} chars, ${transcriptData.segments.length} segments, method: ${transcriptData.method}`);
+  if (orchestratorResult && orchestratorResult.segments && orchestratorResult.segments.length > 0) {
+   console.log(`[TRANSCRIPT-V2] ✅ Orchestrator success: ${orchestratorResult.validation.totalLength} chars, ${orchestratorResult.segments.length} segments, service: ${orchestratorResult.serviceUsed}`);
 
    const result = {
-    segments: transcriptData.segments,
-    language: transcriptData.language,
-    source: 'Robust Transcript Service V2',
-    method: transcriptData.method,
-    length: transcriptData.transcript.length,
-    hasRealTiming: transcriptData.hasRealTiming,
-    sessionId: transcriptData.sessionId,
+    segments: orchestratorResult.segments,
+    language: orchestratorResult.language,
+    source: `Enhanced Orchestrator (${orchestratorResult.serviceUsed})`,
+    method: orchestratorResult.method,
+    length: orchestratorResult.validation.totalLength,
+    hasRealTiming: orchestratorResult.hasRealTiming,
+    serviceUsed: orchestratorResult.serviceUsed,
+    extractionTime: orchestratorResult.extractionTime,
+    sessionId: orchestratorResult.sessionId,
+    validation: orchestratorResult.validation,
    };
 
    // Cache successful result
@@ -1034,10 +1039,39 @@ app.get('/api/yt-transcript', async (req, res) => {
 
    return res.json(result);
   } else {
-   throw new Error('Robust V2 service returned insufficient transcript data');
+   throw new Error('Orchestrator returned insufficient transcript data');
   }
- } catch (v2Error) {
-  console.log(`[TRANSCRIPT-V2] ❌ V2 Service failed: ${v2Error.message}`);
+ } catch (orchestratorError) {
+  console.log(`[TRANSCRIPT-V2] ❌ Orchestrator failed: ${orchestratorError.message}`);
+
+  // Handle specific transcript errors from orchestrator
+  if (orchestratorError instanceof NoValidTranscriptError) {
+   const errorResponse = {
+    error: 'No Valid Transcript Available',
+    videoId: videoId,
+    message: orchestratorError.message,
+    reason: orchestratorError.details.reason || 'unknown',
+    userFriendly: true,
+    technical_details: {
+     errorType: orchestratorError.name,
+     actualLength: orchestratorError.details.actualLength || 0,
+     minRequired: orchestratorError.details.minRequired || 50,
+     servicesAttempted: orchestratorError.details.servicesAttempted || [],
+     timestamp: new Date().toISOString(),
+    },
+    suggestions: ['Video may not have transcripts/captions available', 'Try a different video with verified captions', 'Check if the video is accessible in your region'],
+   };
+
+   // Cache failure
+   transcriptCache.set(videoId, {
+    data: errorResponse,
+    timestamp: Date.now(),
+    failed: true,
+   });
+
+   console.log(`[TRANSCRIPT-V2] 🚫 No valid transcript for ${videoId}: ${orchestratorError.details.reason}`);
+   return res.status(422).json(errorResponse);
+  }
 
   // Fallback to original robust service
   try {
@@ -1125,10 +1159,10 @@ app.get('/api/yt-transcript', async (req, res) => {
    videoId: videoId,
    message: 'Video may not have transcripts available or YouTube is blocking access',
    technical_details: {
-    v2_error: v2Error.message,
+    orchestrator_error: orchestratorError.message,
     timestamp: new Date().toISOString(),
    },
-   attempted_methods: ['Robust Transcript Service V2 (Primary)', 'Robust Transcript Service V1 (Fallback 1)', 'YouTube Transcript API Direct (Fallback 2)'],
+   attempted_methods: ['Enhanced Transcript Orchestrator (Primary)', 'Robust Transcript Service V1 (Fallback)', 'YouTube Transcript API Direct (Final Fallback)'],
    suggestions: ['Video may not have transcripts/captions available', 'Try a different video with verified captions', 'Check if the video is accessible in your region'],
   };
 
@@ -1450,44 +1484,43 @@ app.post('/api/intelligent-segments', async (req, res) => {
  try {
   console.log(`[INTELLIGENT-SEGMENTS] Starting intelligent segmentation for ${videoId}`);
 
-  let transcriptData = null;
-
-  // Step 1: Try enhanced transcript endpoint first
+  // Use the enhanced orchestrator for robust transcript extraction
+  let transcriptData;
   try {
-   console.log(`[INTELLIGENT-SEGMENTS] Trying enhanced transcript service...`);
-   transcriptData = await robustTranscriptServiceV2.extractWithRealTiming(videoId, {lang: ['id', 'en']});
+   console.log(`[INTELLIGENT-SEGMENTS] Using Enhanced Transcript Orchestrator...`);
+   transcriptData = await enhancedTranscriptOrchestrator.extractTranscript(videoId, {
+    minLength: 250, // Require at least 250 characters
+    lang: ['id', 'en'],
+   });
 
-   if (transcriptData && transcriptData.segments && transcriptData.segments.length > 0) {
-    console.log(`[INTELLIGENT-SEGMENTS] Enhanced service success: ${transcriptData.segments.length} segments`);
-   } else {
-    throw new Error('Enhanced service returned empty transcript');
+   console.log(`[INTELLIGENT-SEGMENTS] ✅ Orchestrator success: ${transcriptData.segments.length} segments`);
+   console.log(`[INTELLIGENT-SEGMENTS] Service used: ${transcriptData.serviceUsed}`);
+   console.log(`[INTELLIGENT-SEGMENTS] Validation: ${transcriptData.validation.totalLength} chars`);
+  } catch (orchestratorError) {
+   console.log(`[INTELLIGENT-SEGMENTS] ❌ Orchestrator failed: ${orchestratorError.message}`);
+
+   // Handle specific transcript errors
+   if (orchestratorError instanceof NoValidTranscriptError) {
+    console.log(`[INTELLIGENT-SEGMENTS] 🚫 No valid transcript available for ${videoId}`);
+
+    return res.status(422).json({
+     error: 'No Valid Transcript Available',
+     message: orchestratorError.message,
+     videoId: videoId,
+     reason: orchestratorError.details.reason || 'unknown',
+     userFriendly: true,
+     suggestions: ['This video may not have captions/transcripts available', 'The video owner may have disabled transcripts', 'Try a different video with verified captions', 'Check if the video is accessible and not age-restricted'],
+     details: {
+      errorType: orchestratorError.name,
+      actualLength: orchestratorError.details.actualLength || 0,
+      minRequired: orchestratorError.details.minRequired || 250,
+      servicesAttempted: orchestratorError.details.servicesAttempted || [],
+     },
+    });
    }
-  } catch (enhancedError) {
-   console.log(`[INTELLIGENT-SEGMENTS] Enhanced service failed: ${enhancedError.message}`);
 
-   // Fallback to alternative service
-   try {
-    console.log(`[INTELLIGENT-SEGMENTS] Trying alternative service...`);
-    transcriptData = await alternativeTranscriptService.extractTranscript(videoId);
-
-    if (transcriptData && transcriptData.segments && transcriptData.segments.length > 0) {
-     console.log(`[INTELLIGENT-SEGMENTS] Alternative service success: ${transcriptData.segments.length} segments`);
-    } else {
-     throw new Error('Alternative service returned empty transcript');
-    }
-   } catch (altError) {
-    console.log(`[INTELLIGENT-SEGMENTS] Alternative service failed: ${altError.message}`);
-
-    // Final fallback to emergency service
-    console.log(`[INTELLIGENT-SEGMENTS] Trying emergency service...`);
-    transcriptData = await emergencyTranscriptService.extractTranscript(videoId);
-
-    if (!transcriptData || !transcriptData.segments || transcriptData.segments.length === 0) {
-     throw new Error('All transcript services failed - no transcript available');
-    }
-
-    console.log(`[INTELLIGENT-SEGMENTS] Emergency service success: ${transcriptData.segments.length} segments`);
-   }
+   // Re-throw other errors
+   throw orchestratorError;
   }
 
   // Ensure we have timing data - if not, create estimated timing
@@ -1522,13 +1555,9 @@ app.post('/api/intelligent-segments', async (req, res) => {
 
   console.log(`[INTELLIGENT-SEGMENTS] Got transcript: ${transcriptData.segments.length} timed segments, ${Math.floor((transcriptData.totalDuration || 600) / 60)}m${Math.floor((transcriptData.totalDuration || 600) % 60)}s`);
 
-  // Step 2: Validate transcript length
-  const fullText = transcriptData.segments.map((s) => s.text).join(' ');
-  if (fullText.length < 200) {
-   throw new Error(`Transcript too short for segmentation: ${fullText.length} characters`);
-  }
-
-  console.log(`[INTELLIGENT-SEGMENTS] Full transcript: ${fullText.length} characters - sufficient for processing`);
+  // The validation has already been done by the orchestrator, so we can proceed directly
+  const fullText = transcriptData.validation.fullText;
+  console.log(`[INTELLIGENT-SEGMENTS] Validated transcript: ${fullText.length} characters - proceeding with segmentation`);
 
   // Step 2: Create intelligent segments
   const intelligentSegments = intelligentChunker.createIntelligentSegments(transcriptData, targetSegmentCount);
@@ -1579,12 +1608,15 @@ app.post('/api/intelligent-segments', async (req, res) => {
    videoId: videoId,
    totalSegments: validSegments.length,
    averageDuration: Math.round(validSegments.reduce((sum, s) => sum + s.duration, 0) / validSegments.length),
-   method: 'Intelligent Chunking with AI Titles & Smart Excerpts',
+   method: 'Enhanced Orchestrator with AI Titles & Smart Excerpts',
    hasRealTiming: true,
    transcriptQuality: 'HIGH',
    aiTitlesEnabled: true,
    smartExcerptsEnabled: true,
    extractedAt: new Date().toISOString(),
+   serviceUsed: transcriptData.serviceUsed,
+   extractionTime: transcriptData.extractionTime,
+   validation: transcriptData.validation,
   };
 
   console.log(`[INTELLIGENT-SEGMENTS] ✅ Created ${validSegments.length} intelligent segments with AI titles (avg: ${result.averageDuration}s)`);
@@ -1602,6 +1634,19 @@ app.post('/api/intelligent-segments', async (req, res) => {
   res.json(result);
  } catch (error) {
   console.error(`[INTELLIGENT-SEGMENTS] ❌ Error for ${videoId}:`, error);
+
+  // Handle transcript-specific errors
+  if (error instanceof NoValidTranscriptError) {
+   return res.status(422).json({
+    error: 'No Valid Transcript Available',
+    message: error.message,
+    videoId: videoId,
+    reason: error.details.reason || 'unknown',
+    userFriendly: true,
+   });
+  }
+
+  // Handle other errors
   res.status(500).json({
    error: 'Intelligent segmentation failed',
    message: error.message,
@@ -1613,65 +1658,81 @@ app.post('/api/intelligent-segments', async (req, res) => {
 // Enhanced transcript endpoint with multi-service fallback
 app.get('/api/enhanced-transcript/:videoId', async (req, res) => {
  const {videoId} = req.params;
+ const {lang} = req.query;
+
  if (!videoId) return res.status(400).json({error: 'videoId required'});
 
- console.log(`[ENHANCED-API] Multi-service transcript request for: ${videoId}`);
+ console.log(`[ENHANCED-API] Enhanced transcript request for: ${videoId}`);
 
- // Try services in order of preference
- const services = [
-  {name: 'robust', service: robustTranscriptServiceV2},
-  {name: 'alternative', service: alternativeTranscriptService},
-  {name: 'emergency', service: emergencyTranscriptService},
- ];
+ try {
+  // Use the enhanced orchestrator for robust transcript extraction
+  const result = await enhancedTranscriptOrchestrator.extractTranscript(videoId, {
+   minLength: 50, // Lower threshold for simple transcript endpoint
+   lang: lang ? lang.split(',') : ['id', 'en'],
+  });
 
- for (const {name, service} of services) {
-  try {
-   console.log(`[ENHANCED-API] Trying ${name} service for ${videoId}`);
+  console.log(`[ENHANCED-API] ✅ Success with ${result.serviceUsed} service: ${result.segments?.length || 0} segments`);
 
-   // Use correct method based on service type
-   let result;
-   if (name === 'robust') {
-    // robustTranscriptServiceV2 uses extractWithRealTiming method
-    result = await service.extractWithRealTiming(videoId, {lang: ['id', 'en']});
-   } else {
-    // other services use extractTranscript method
-    result = await service.extractTranscript(videoId);
-   }
+  // Return the result with orchestrator metadata
+  return res.json({
+   segments: result.segments,
+   language: result.language,
+   source: `Enhanced Orchestrator (${result.serviceUsed})`,
+   method: result.method,
+   length: result.validation.totalLength,
+   hasRealTiming: result.hasRealTiming,
+   serviceUsed: result.serviceUsed,
+   extractionTime: result.extractionTime,
+   validation: result.validation,
+   fallbackLevel: result.fallbackLevel || 0,
+  });
+ } catch (error) {
+  console.error(`[ENHANCED-API] ❌ Failed for ${videoId}:`, error.message);
 
-   console.log(`[ENHANCED-API] ✅ Success with ${name} service: ${result.segments?.length || 0} segments`);
-
-   // Add service info to result
-   result.serviceUsed = name;
-   result.fallbackLevel = services.findIndex((s) => s.name === name);
-
-   return res.json(result);
-  } catch (error) {
-   console.log(`[ENHANCED-API] ❌ ${name} service failed: ${error.message}`);
-
-   // Check if it's a transcript disabled error
-   if (error.message.includes('Transcript is disabled') || error.message.includes('No transcript available') || error.message.includes('No captions available')) {
-    // Don't continue to other services if transcript is explicitly disabled
-    console.log(`[ENHANCED-API] ⚠️ Video ${videoId} has transcript disabled - stopping service attempts`);
-    return res.status(404).json({
-     error: 'Transcript is disabled on this video',
-     videoId: videoId,
-     reason: 'Video owner has disabled transcripts/captions for this video',
-     suggestion: 'Try a different video that has captions enabled',
-     disabledByOwner: true,
-    });
-   }
-
-   continue;
+  // Handle specific transcript errors
+  if (error instanceof TranscriptDisabledError) {
+   return res.status(404).json({
+    error: 'Transcript is disabled on this video',
+    videoId: videoId,
+    message: error.message,
+    reason: 'Video owner has disabled transcripts/captions for this video',
+    suggestion: 'Try a different video that has captions enabled',
+    disabledByOwner: true,
+    userFriendly: true,
+   });
   }
- }
 
- // If all services failed
- console.error(`[ENHANCED-API] ❌ All services failed for ${videoId}`);
- res.status(404).json({
-  error: 'All transcript extraction services failed',
-  videoId: videoId,
-  servicesAttempted: services.map((s) => s.name),
- });
+  if (error instanceof TranscriptTooShortError) {
+   return res.status(422).json({
+    error: 'Transcript too short',
+    videoId: videoId,
+    message: error.message,
+    actualLength: error.details.actualLength,
+    minRequired: error.details.minRequired,
+    reason: 'transcript_too_short',
+    userFriendly: true,
+   });
+  }
+
+  if (error instanceof TranscriptNotFoundError) {
+   return res.status(404).json({
+    error: 'No transcript found',
+    videoId: videoId,
+    message: error.message,
+    servicesAttempted: error.details.servicesAttempted,
+    reason: 'transcript_not_found',
+    userFriendly: true,
+   });
+  }
+
+  // Default error response
+  res.status(500).json({
+   error: 'Transcript extraction failed',
+   videoId: videoId,
+   message: error.message,
+   userFriendly: false,
+  });
+ }
 });
 
 // Emergency transcript endpoint - simple and reliable
@@ -1740,10 +1801,32 @@ app.get('/api/transcript-diagnostics/:videoId', async (req, res) => {
   tests.robust = {success: false, error: error.message};
  }
 
+ // Test Enhanced Orchestrator
+ try {
+  const orchestratorResult = await enhancedTranscriptOrchestrator.extractTranscript(videoId, {minLength: 50});
+  tests.orchestrator = {
+   success: true,
+   segments: orchestratorResult.segments.length,
+   method: orchestratorResult.method,
+   serviceUsed: orchestratorResult.serviceUsed,
+   extractionTime: orchestratorResult.extractionTime,
+   validation: orchestratorResult.validation,
+  };
+  successful.push('orchestrator');
+ } catch (error) {
+  tests.orchestrator = {
+   success: false,
+   error: error.message,
+   errorType: error.constructor.name,
+   isTranscriptError: error.isTranscriptError || false,
+  };
+ }
+
  const stats = {
   emergency: emergencyTranscriptService.getStats(),
-  alternative: alternativeTranscriptService.getStats(),
-  robust: robustTranscriptServiceV2.getStats(),
+  // alternative: alternativeTranscriptService.getStats(),
+  // robust: robustTranscriptServiceV2.getStats(),
+  orchestrator: enhancedTranscriptOrchestrator.getHealthStatus(),
  };
 
  res.json({
@@ -1756,6 +1839,19 @@ app.get('/api/transcript-diagnostics/:videoId', async (req, res) => {
    transcriptCacheSize: transcriptCache.size,
   },
   status: 'diagnostic_complete',
+ });
+});
+
+// Health check endpoint for transcript services
+app.get('/api/transcript-health', (req, res) => {
+ const health = enhancedTranscriptOrchestrator.getHealthStatus();
+ const isHealthy = health.overall.successRate > 50; // Consider healthy if >50% success rate
+
+ res.status(isHealthy ? 200 : 503).json({
+  status: isHealthy ? 'healthy' : 'degraded',
+  orchestrator: health,
+  emergency: emergencyTranscriptService.getStats(),
+  timestamp: new Date().toISOString(),
  });
 });
 
