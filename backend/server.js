@@ -28,7 +28,39 @@ const __dirname = path.dirname(__filename);
 const YT_DLP_PATH = process.platform === 'win32' ? path.join(__dirname, 'yt-dlp.exe') : 'yt-dlp'; // Railway Linux will use system yt-dlp
 
 // Configurable cookies path for bypassing YouTube bot detection
-const YTDLP_COOKIES_PATH = process.env.YTDLP_COOKIES_PATH || path.join(__dirname, 'cookies', 'cookies.txt');
+let YTDLP_COOKIES_PATH = process.env.YTDLP_COOKIES_PATH || path.join(__dirname, 'cookies', 'cookies.txt');
+
+// Check for cookies content in environment variable and create file if needed
+const checkAndCreateCookiesFromEnv = () => {
+ const cookiesContent = process.env.YTDLP_COOKIES_CONTENT;
+
+ if (cookiesContent && cookiesContent.trim()) {
+  try {
+   const rootCookiesPath = path.join(process.cwd(), 'cookies.txt');
+
+   // Write the cookies content to cookies.txt in project root
+   fs.writeFileSync(rootCookiesPath, cookiesContent, 'utf8');
+
+   console.log('[COOKIES-ENV] ✅ Successfully created cookies.txt from environment variable');
+   console.log(`[COOKIES-ENV] Created file: ${rootCookiesPath}`);
+
+   // Update the cookies path to use the newly created file
+   process.env.YTDLP_COOKIES_PATH = rootCookiesPath;
+   YTDLP_COOKIES_PATH = rootCookiesPath;
+
+   return true;
+  } catch (error) {
+   console.log(`[COOKIES-ENV] ❌ Error creating cookies.txt from environment: ${error.message}`);
+   return false;
+  }
+ } else {
+  console.log('[COOKIES-ENV] 🔍 Cookies content not found in environment variable, skipping file creation');
+  return false;
+ }
+};
+
+// Initialize cookies from environment variable
+checkAndCreateCookiesFromEnv();
 
 // Enhanced validation for yt-dlp executable availability
 const validateYtDlpPath = () => {
@@ -348,6 +380,8 @@ app.get('/api/debug/environment', async (req, res) => {
    ytdlp_exists_windows: process.platform === 'win32' ? fs.existsSync(YT_DLP_PATH) : 'N/A',
    cookies_path: YTDLP_COOKIES_PATH,
    cookies_exists: validateCookiesFile(YTDLP_COOKIES_PATH),
+   cookies_env_variable: process.env.YTDLP_COOKIES_CONTENT ? 'present' : 'not set',
+   cookies_env_length: process.env.YTDLP_COOKIES_CONTENT ? process.env.YTDLP_COOKIES_CONTENT.length : 0,
    environment: process.env.NODE_ENV || 'development',
    railway_env: process.env.RAILWAY_ENVIRONMENT_NAME || 'none',
    uptime: process.uptime(),
