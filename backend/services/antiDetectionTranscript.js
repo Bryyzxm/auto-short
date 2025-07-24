@@ -14,7 +14,8 @@ const __dirname = path.dirname(__filename);
 
 class AntiDetectionTranscriptExtractor {
  constructor() {
-  this.cookiePath = path.join(__dirname, '../cookies/youtube-cookies.txt');
+  // Use environment variable or default path
+  this.cookiePath = process.env.YTDLP_COOKIES_PATH || path.join(__dirname, '../cookies/cookies.txt');
   this.sessionsPath = path.join(__dirname, '../cookies/sessions.json');
   this.userAgents = [
    // Real browser user agents - frequently updated

@@ -13,6 +13,9 @@ PORT=${PORT}  # Railway akan auto-assign port
 # Ganti dengan domain Vercel Anda yang sebenarnya
 CORS_ORIGINS=https://auto-short.vercel.app,https://auto-short-git-main-bryyzxms-projects.vercel.app
 
+# 🍪 YouTube Cookies (untuk mengatasi bot detection)
+YTDLP_COOKIES_PATH=/app/backend/cookies/youtube-cookies.txt
+
 # 🤖 Optional: AI Services (jika menggunakan AI features)
 GROQ_API_KEY=your_groq_api_key_here
 ```
@@ -54,10 +57,19 @@ Untuk development lokal, buat file `.env.local`:
 VITE_BACKEND_URL=https://your-railway-app.up.railway.app  # Use production backend
 # VITE_BACKEND_URL=http://localhost:5001  # Use local backend
 
+# YouTube Cookies (untuk mengatasi bot detection)
+YTDLP_COOKIES_PATH=./backend/cookies/youtube-cookies.txt
+
 # AI Services
 VITE_GROQ_API_KEY=your_groq_key_here
 VITE_GEMINI_API_KEY=your_gemini_key_here
 ```
+
+**Untuk setup cookies lokal:**
+
+1. Export cookies dari browser (lihat `COOKIES-SETUP-GUIDE.md`)
+2. Simpan sebagai `backend/cookies/youtube-cookies.txt`
+3. Environment variable akan otomatis terdeteksi
 
 ## **Contoh Penggunaan di Frontend**
 

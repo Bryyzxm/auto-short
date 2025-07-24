@@ -27,6 +27,9 @@ const __dirname = path.dirname(__filename);
 // Cross-platform compatibility: use .exe on Windows, system yt-dlp on Linux
 const YT_DLP_PATH = process.platform === 'win32' ? path.join(__dirname, 'yt-dlp.exe') : 'yt-dlp'; // Railway Linux will use system yt-dlp
 
+// Configurable cookies path for bypassing YouTube bot detection
+const YTDLP_COOKIES_PATH = process.env.YTDLP_COOKIES_PATH || path.join(__dirname, 'cookies', 'cookies.txt');
+
 // Enhanced validation for yt-dlp executable availability
 const validateYtDlpPath = () => {
  if (process.platform === 'win32') {
@@ -38,6 +41,31 @@ const validateYtDlpPath = () => {
  }
  // Linux production will rely on system yt-dlp installed via pip
  return true;
+};
+
+// Helper function to check if cookies file exists and is valid
+const validateCookiesFile = (cookiesPath) => {
+ if (!cookiesPath) return false;
+
+ try {
+  if (!fs.existsSync(cookiesPath)) {
+   console.log(`[COOKIES] Cookies file not found at: ${cookiesPath}`);
+   return false;
+  }
+
+  // Check if the file has content (not empty)
+  const stats = fs.statSync(cookiesPath);
+  if (stats.size === 0) {
+   console.log(`[COOKIES] Cookies file is empty: ${cookiesPath}`);
+   return false;
+  }
+
+  console.log(`[COOKIES] ✅ Valid cookies file found: ${cookiesPath} (${stats.size} bytes)`);
+  return true;
+ } catch (error) {
+  console.log(`[COOKIES] Error validating cookies file: ${error.message}`);
+  return false;
+ }
 };
 
 // Enhanced user agent rotation to avoid YouTube bot detection
@@ -58,8 +86,25 @@ async function executeYtDlpSecurely(args, options = {}) {
  return new Promise((resolve, reject) => {
   const ytdlpPath = process.platform === 'win32' ? YT_DLP_PATH : 'yt-dlp';
 
+  // Add cookies support if available and not already in args
+  let finalArgs = [...args];
+
+  // Check if cookies are already specified in the args
+  const hasCookiesArg = args.some((arg) => arg === '--cookies' || arg.startsWith('--cookies='));
+
+  // Add cookies if available and not already specified
+  if (!hasCookiesArg && options.useCookies !== false) {
+   const cookiesPath = options.cookiesPath || YTDLP_COOKIES_PATH;
+   if (validateCookiesFile(cookiesPath)) {
+    console.log(`[SECURE-YTDLP] Adding cookies from: ${cookiesPath}`);
+    finalArgs = ['--cookies', cookiesPath, ...finalArgs];
+   } else {
+    console.log(`[SECURE-YTDLP] No valid cookies file found, proceeding without cookies`);
+   }
+  }
+
   // Ensure all arguments are strings and properly escaped
-  const sanitizedArgs = args.map((arg) => String(arg).trim());
+  const sanitizedArgs = finalArgs.map((arg) => String(arg).trim());
 
   console.log(`[SECURE-YTDLP] Executing: ${ytdlpPath} ${sanitizedArgs.join(' ')}`);
 
@@ -229,6 +274,7 @@ async function validateStartup() {
  console.log('🔧 Performing startup validation...');
  console.log(`Platform: ${process.platform}`);
  console.log(`YT-DLP Path: ${YT_DLP_PATH}`);
+ console.log(`Cookies Path: ${YTDLP_COOKIES_PATH}`);
 
  if (!validateYtDlpPath()) {
   console.error('❌ YT-DLP validation failed at startup');
@@ -236,10 +282,18 @@ async function validateStartup() {
  }
  console.log('✅ YT-DLP path validation passed');
 
+ // Validate cookies file (warning only, not fatal)
+ if (validateCookiesFile(YTDLP_COOKIES_PATH)) {
+  console.log('✅ Cookies file validation passed');
+ } else {
+  console.log('⚠️  No valid cookies file found - YouTube may block requests');
+  console.log('💡 Set YTDLP_COOKIES_PATH environment variable to specify cookies file location');
+ }
+
  // Test yt-dlp execution
  try {
   const versionArgs = ['--version'];
-  const testResult = await executeYtDlpSecurely(versionArgs, {timeout: 10000});
+  const testResult = await executeYtDlpSecurely(versionArgs, {timeout: 10000, useCookies: false});
 
   console.log(`✅ YT-DLP executable test passed: ${testResult.trim()}`);
 
@@ -292,6 +346,8 @@ app.get('/api/debug/environment', async (req, res) => {
    node_version: process.version,
    ytdlp_path: YT_DLP_PATH,
    ytdlp_exists_windows: process.platform === 'win32' ? fs.existsSync(YT_DLP_PATH) : 'N/A',
+   cookies_path: YTDLP_COOKIES_PATH,
+   cookies_exists: validateCookiesFile(YTDLP_COOKIES_PATH),
    environment: process.env.NODE_ENV || 'development',
    railway_env: process.env.RAILWAY_ENVIRONMENT_NAME || 'none',
    uptime: process.uptime(),
@@ -302,7 +358,7 @@ app.get('/api/debug/environment', async (req, res) => {
   // Test yt-dlp availability
   try {
    const versionArgs = ['--version'];
-   const version = await executeYtDlpSecurely(versionArgs, {timeout: 5000});
+   const version = await executeYtDlpSecurely(versionArgs, {timeout: 5000, useCookies: false});
    debugInfo.ytdlp_version = version.trim();
    debugInfo.ytdlp_status = 'available';
   } catch (e) {

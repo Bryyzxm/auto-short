@@ -1,0 +1,17 @@
+# YouTube Cookies Sample File
+# 
+# This is a sample/template file. Replace with actual cookies from your browser.
+# 
+# Format: domain \t subdomain_flag \t path \t secure \t expiration \t name \t value
+# (Fields are tab-separated)
+#
+# To get real cookies:
+# 1. Use browser extension to export cookies from youtube.com
+# 2. Or use: yt-dlp --cookies-from-browser chrome --skip-download "https://youtube.com/watch?v=dQw4w9WgXcQ"
+# 3. Save in Netscape format
+#
+# Example format (replace with real values):
+# .youtube.com	TRUE	/	TRUE	1755331200	VISITOR_INFO1_LIVE	your_visitor_id_here
+# .youtube.com	TRUE	/	FALSE	1755331200	YSC	your_session_token_here
+# .youtube.com	TRUE	/	TRUE	1755331200	PREF	your_preferences_here
+# youtube.com	FALSE	/	FALSE	1640995200	GPS	1

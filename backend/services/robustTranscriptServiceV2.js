@@ -8,6 +8,11 @@ import fetch from 'node-fetch';
 import fs from 'fs';
 import path from 'path';
 import youtubedl from 'youtube-dl-exec';
+import {fileURLToPath} from 'url';
+
+// ES Module compatibility
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 class RobustYouTubeTranscriptV2 {
  constructor() {
@@ -21,7 +26,33 @@ class RobustYouTubeTranscriptV2 {
   this.maxRequestsPerMinute = 15;
   this.requestTimes = [];
 
+  // Configurable cookies path for bypassing YouTube bot detection
+  this.cookiesPath = process.env.YTDLP_COOKIES_PATH || path.join(__dirname, '../cookies/cookies.txt');
+
   console.log(`[ROBUST-V2] Initialized with session: ${this.sessionId}`);
+  console.log(`[ROBUST-V2] Cookies path: ${this.cookiesPath}`);
+ }
+
+ // Helper function to check if cookies file exists and is valid
+ validateCookiesFile() {
+  try {
+   if (!fs.existsSync(this.cookiesPath)) {
+    console.log(`[ROBUST-V2] Cookies file not found at: ${this.cookiesPath}`);
+    return false;
+   }
+
+   const stats = fs.statSync(this.cookiesPath);
+   if (stats.size === 0) {
+    console.log(`[ROBUST-V2] Cookies file is empty: ${this.cookiesPath}`);
+    return false;
+   }
+
+   console.log(`[ROBUST-V2] ✅ Valid cookies file found: ${this.cookiesPath} (${stats.size} bytes)`);
+   return true;
+  } catch (error) {
+   console.log(`[ROBUST-V2] Error validating cookies file: ${error.message}`);
+   return false;
+  }
  }
 
  // Enhanced rate limiting
@@ -182,15 +213,30 @@ class RobustYouTubeTranscriptV2 {
   }
 
   const timestamp = Date.now();
+
+  // Check if cookies are available
+  const hasCookies = this.validateCookiesFile();
+  const baseArgs = {
+   writeAutoSubs: true,
+   writeSubs: true,
+   subLang: ['id', 'en'],
+   skipDownload: true,
+   output: path.join(tempDir, `${videoId}-${timestamp}-%(title)s.%(ext)s`),
+  };
+
+  // Add cookies if available
+  if (hasCookies) {
+   baseArgs.cookies = this.cookiesPath;
+   console.log(`[ROBUST-V2] Using cookies from: ${this.cookiesPath}`);
+  } else {
+   console.log(`[ROBUST-V2] No cookies available, proceeding without cookies`);
+  }
+
   const strategies = [
    {
     name: 'web_embedded',
     args: {
-     writeAutoSubs: true,
-     writeSubs: true,
-     subLang: ['id', 'en'],
-     skipDownload: true,
-     output: path.join(tempDir, `${videoId}-${timestamp}-%(title)s.%(ext)s`),
+     ...baseArgs,
      extractorArgs: 'youtube:player_client=web_embedded',
      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
      addHeader: ['Accept-Language: id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7', 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'],
@@ -199,11 +245,7 @@ class RobustYouTubeTranscriptV2 {
    {
     name: 'android',
     args: {
-     writeAutoSubs: true,
-     writeSubs: true,
-     subLang: ['id', 'en'],
-     skipDownload: true,
-     output: path.join(tempDir, `${videoId}-${timestamp}-%(title)s.%(ext)s`),
+     ...baseArgs,
      extractorArgs: 'youtube:player_client=android',
      userAgent: 'com.google.android.youtube/17.36.4 (Linux; U; Android 11; SM-G973F Build/RP1A.200720.012) gzip',
      addHeader: ['X-YouTube-Client-Name: 3', 'X-YouTube-Client-Version: 17.36.4'],
@@ -212,11 +254,7 @@ class RobustYouTubeTranscriptV2 {
    {
     name: 'ios',
     args: {
-     writeAutoSubs: true,
-     writeSubs: true,
-     subLang: ['id', 'en'],
-     skipDownload: true,
-     output: path.join(tempDir, `${videoId}-${timestamp}-%(title)s.%(ext)s`),
+     ...baseArgs,
      extractorArgs: 'youtube:player_client=ios',
      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
     },

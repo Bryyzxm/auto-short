@@ -98,6 +98,30 @@ vercel --prod
 
 ## 🔧 Configuration
 
+### **YouTube Bot Detection Fix**
+
+YouTube may block yt-dlp requests. To bypass this:
+
+1. **Set up cookies** (recommended):
+
+   ```bash
+   # Set cookies path (optional - defaults to backend/cookies/youtube-cookies.txt)
+   export YTDLP_COOKIES_PATH="/path/to/your/cookies.txt"
+   ```
+
+2. **Get cookies from browser**:
+
+   - Use browser extension to export YouTube cookies
+   - Save in Netscape format as `backend/cookies/youtube-cookies.txt`
+   - See `COOKIES-SETUP-GUIDE.md` for detailed instructions
+
+3. **Alternative**: Use yt-dlp's built-in cookie extraction:
+   ```bash
+   yt-dlp --cookies-from-browser chrome --skip-download "https://youtube.com/watch?v=test"
+   ```
+
+**📖 For detailed setup:** See [COOKIES-SETUP-GUIDE.md](./COOKIES-SETUP-GUIDE.md)
+
 ### **Backend Fallback System**
 
 Application menggunakan multi-backend fallback:

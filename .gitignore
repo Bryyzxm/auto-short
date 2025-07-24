@@ -20,6 +20,12 @@ dist-ssr
 backend/.env
 backend/.env.local
 
+# Cookies (security sensitive)
+*cookies*.txt
+!*cookies*.txt.sample
+backend/cookies/youtube-cookies.txt
+backend/cookies/sessions.json
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
