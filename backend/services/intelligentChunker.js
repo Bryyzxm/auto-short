@@ -14,11 +14,29 @@ class IntelligentTranscriptChunker {
  createIntelligentSegments(transcriptData, targetSegmentCount = 8) {
   console.log(`[CHUNKER] Processing ${transcriptData.segments.length} timed segments into ${targetSegmentCount} chunks`);
 
+  // CRITICAL: Validate transcript data before proceeding
+  if (!transcriptData) {
+   throw new Error('Failed to create segments: Transcript data is null or undefined');
+  }
+
+  if (!transcriptData.segments || !Array.isArray(transcriptData.segments) || transcriptData.segments.length === 0) {
+   throw new Error('Failed to create segments: No valid segments available in transcript data');
+  }
+
   if (!transcriptData.hasRealTiming) {
    throw new Error('Real timing data required for intelligent chunking');
   }
 
   const timedSegments = transcriptData.segments;
+
+  // Validate each segment has required properties
+  for (let i = 0; i < timedSegments.length; i++) {
+   const segment = timedSegments[i];
+   if (!segment || typeof segment.start === 'undefined' || typeof segment.end === 'undefined' || !segment.text) {
+    throw new Error(`Failed to create segments: Invalid segment at index ${i} - missing start, end, or text properties`);
+   }
+  }
+
   const totalDuration = timedSegments[timedSegments.length - 1]?.end || 0;
 
   console.log(`[CHUNKER] Total video duration: ${Math.floor(totalDuration / 60)}m${Math.floor(totalDuration % 60)}s`);

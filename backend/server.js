@@ -1014,33 +1014,42 @@ app.get('/api/yt-transcript', async (req, res) => {
    lang: lang ? lang.split(',') : ['id', 'en'],
   });
 
-  if (orchestratorResult && orchestratorResult.segments && orchestratorResult.segments.length > 0) {
-   console.log(`[TRANSCRIPT-V2] ✅ Orchestrator success: ${orchestratorResult.validation.totalLength} chars, ${orchestratorResult.segments.length} segments, service: ${orchestratorResult.serviceUsed}`);
-
-   const result = {
-    segments: orchestratorResult.segments,
-    language: orchestratorResult.language,
-    source: `Enhanced Orchestrator (${orchestratorResult.serviceUsed})`,
-    method: orchestratorResult.method,
-    length: orchestratorResult.validation.totalLength,
-    hasRealTiming: orchestratorResult.hasRealTiming,
-    serviceUsed: orchestratorResult.serviceUsed,
-    extractionTime: orchestratorResult.extractionTime,
-    sessionId: orchestratorResult.sessionId,
-    validation: orchestratorResult.validation,
-   };
-
-   // Cache successful result
-   transcriptCache.set(videoId, {
-    data: result,
-    timestamp: Date.now(),
-    failed: false,
-   });
-
-   return res.json(result);
-  } else {
-   throw new Error('Orchestrator returned insufficient transcript data');
+  // CRITICAL: Validate orchestrator result before proceeding
+  if (!orchestratorResult) {
+   throw new Error('Failed to retrieve a valid transcript after all attempts. Orchestrator returned null or undefined.');
   }
+
+  if (!orchestratorResult.segments || !Array.isArray(orchestratorResult.segments) || orchestratorResult.segments.length === 0) {
+   throw new Error('Failed to retrieve a valid transcript after all attempts. No valid segments available.');
+  }
+
+  if (!orchestratorResult.validation || orchestratorResult.validation.totalLength < 50) {
+   throw new Error('Failed to retrieve a valid transcript after all attempts. Transcript validation failed.');
+  }
+
+  console.log(`[TRANSCRIPT-V2] ✅ Orchestrator success: ${orchestratorResult.validation.totalLength} chars, ${orchestratorResult.segments.length} segments, service: ${orchestratorResult.serviceUsed}`);
+
+  const result = {
+   segments: orchestratorResult.segments,
+   language: orchestratorResult.language,
+   source: `Enhanced Orchestrator (${orchestratorResult.serviceUsed})`,
+   method: orchestratorResult.method,
+   length: orchestratorResult.validation.totalLength,
+   hasRealTiming: orchestratorResult.hasRealTiming,
+   serviceUsed: orchestratorResult.serviceUsed,
+   extractionTime: orchestratorResult.extractionTime,
+   sessionId: orchestratorResult.sessionId,
+   validation: orchestratorResult.validation,
+  };
+
+  // Cache successful result
+  transcriptCache.set(videoId, {
+   data: result,
+   timestamp: Date.now(),
+   failed: false,
+  });
+
+  return res.json(result);
  } catch (orchestratorError) {
   console.log(`[TRANSCRIPT-V2] ❌ Orchestrator failed: ${orchestratorError.message}`);
 
@@ -1081,27 +1090,38 @@ app.get('/api/yt-transcript', async (req, res) => {
     lang: lang ? lang.split(',') : ['id', 'en'],
    });
 
-   if (fallbackData && fallbackData.transcript && fallbackData.transcript.length > 10) {
-    console.log(`[TRANSCRIPT-V2] ✅ Fallback success: ${fallbackData.transcript.length} chars, ${fallbackData.segments.length} segments`);
-
-    const result = {
-     segments: fallbackData.segments,
-     language: fallbackData.language,
-     source: 'Robust Transcript Service (Fallback)',
-     method: fallbackData.method,
-     length: fallbackData.transcript.length,
-     hasRealTiming: fallbackData.hasRealTiming,
-    };
-
-    // Cache successful result
-    transcriptCache.set(videoId, {
-     data: result,
-     timestamp: Date.now(),
-     failed: false,
-    });
-
-    return res.json(result);
+   // CRITICAL: Validate fallback data before proceeding
+   if (!fallbackData) {
+    throw new Error('Fallback service returned null or undefined result');
    }
+
+   if (!fallbackData.transcript || fallbackData.transcript.length < 10) {
+    throw new Error('Fallback service returned insufficient transcript data');
+   }
+
+   if (!fallbackData.segments || !Array.isArray(fallbackData.segments) || fallbackData.segments.length === 0) {
+    throw new Error('Fallback service returned no valid segments');
+   }
+
+   console.log(`[TRANSCRIPT-V2] ✅ Fallback success: ${fallbackData.transcript.length} chars, ${fallbackData.segments.length} segments`);
+
+   const result = {
+    segments: fallbackData.segments,
+    language: fallbackData.language,
+    source: 'Robust Transcript Service (Fallback)',
+    method: fallbackData.method,
+    length: fallbackData.transcript.length,
+    hasRealTiming: fallbackData.hasRealTiming,
+   };
+
+   // Cache successful result
+   transcriptCache.set(videoId, {
+    data: result,
+    timestamp: Date.now(),
+    failed: false,
+   });
+
+   return res.json(result);
   } catch (fallbackError) {
    console.log(`[TRANSCRIPT-V2] ❌ Fallback also failed: ${fallbackError.message}`);
   }
@@ -1118,33 +1138,49 @@ app.get('/api/yt-transcript', async (req, res) => {
       country: langCode === 'id' ? 'ID' : 'US',
      });
 
-     if (transcript && transcript.length > 0) {
-      console.log(`[TRANSCRIPT-V2] ✅ Direct API success (${langCode}): ${transcript.length} segments`);
-
-      const segments = transcript.map((item) => ({
-       text: item.text,
-       start: item.offset / 1000,
-       end: (item.offset + item.duration) / 1000,
-      }));
-
-      const result = {
-       segments: segments,
-       language: langCode === 'id' ? 'Indonesian' : 'English',
-       source: 'YouTube Transcript API (Direct)',
-       method: `Direct API (${langCode.toUpperCase()})`,
-       length: segments.map((s) => s.text).join(' ').length,
-       hasRealTiming: true,
-      };
-
-      // Cache successful result
-      transcriptCache.set(videoId, {
-       data: result,
-       timestamp: Date.now(),
-       failed: false,
-      });
-
-      return res.json(result);
+     // CRITICAL: Validate direct API result before proceeding
+     if (!transcript || !Array.isArray(transcript) || transcript.length === 0) {
+      console.log(`[TRANSCRIPT-V2] Direct API returned no data for ${langCode}`);
+      continue;
      }
+
+     console.log(`[TRANSCRIPT-V2] ✅ Direct API success (${langCode}): ${transcript.length} segments`);
+
+     const segments = transcript.map((item) => ({
+      text: item.text,
+      start: item.offset / 1000,
+      end: (item.offset + item.duration) / 1000,
+     }));
+
+     // Validate processed segments
+     if (!segments || segments.length === 0) {
+      console.log(`[TRANSCRIPT-V2] No valid segments after processing for ${langCode}`);
+      continue;
+     }
+
+     const transcriptText = segments.map((s) => s.text).join(' ');
+     if (transcriptText.length < 10) {
+      console.log(`[TRANSCRIPT-V2] Transcript too short after processing for ${langCode}`);
+      continue;
+     }
+
+     const result = {
+      segments: segments,
+      language: langCode === 'id' ? 'Indonesian' : 'English',
+      source: 'YouTube Transcript API (Direct)',
+      method: `Direct API (${langCode.toUpperCase()})`,
+      length: transcriptText.length,
+      hasRealTiming: true,
+     };
+
+     // Cache successful result
+     transcriptCache.set(videoId, {
+      data: result,
+      timestamp: Date.now(),
+      failed: false,
+     });
+
+     return res.json(result);
     } catch (langError) {
      console.log(`[TRANSCRIPT-V2] Direct API failed for ${langCode}: ${langError.message}`);
     }
@@ -1153,17 +1189,18 @@ app.get('/api/yt-transcript', async (req, res) => {
    console.log(`[TRANSCRIPT-V2] ❌ Direct API also failed: ${directError.message}`);
   }
 
-  // All methods failed
+  // All methods failed - create comprehensive error response
   const errorResponse = {
-   error: 'All transcript extraction methods failed',
+   error: 'Failed to retrieve a valid transcript after all attempts',
    videoId: videoId,
-   message: 'Video may not have transcripts available or YouTube is blocking access',
+   message: 'All transcript extraction methods failed. Video may not have transcripts available or YouTube is blocking access.',
+   userFriendly: true,
    technical_details: {
     orchestrator_error: orchestratorError.message,
+    extraction_attempts: ['Enhanced Transcript Orchestrator (Primary)', 'Robust Transcript Service V1 (Fallback)', 'YouTube Transcript API Direct (Final Fallback)'],
     timestamp: new Date().toISOString(),
    },
-   attempted_methods: ['Enhanced Transcript Orchestrator (Primary)', 'Robust Transcript Service V1 (Fallback)', 'YouTube Transcript API Direct (Final Fallback)'],
-   suggestions: ['Video may not have transcripts/captions available', 'Try a different video with verified captions', 'Check if the video is accessible in your region'],
+   suggested_actions: ['Verify the video has captions/transcripts enabled', 'Try a different video with verified captions', 'Check if the video is accessible and not age-restricted', 'Use manual transcript upload feature as workaround'],
   };
 
   // Cache failure
@@ -1173,7 +1210,7 @@ app.get('/api/yt-transcript', async (req, res) => {
    failed: true,
   });
 
-  console.log(`[TRANSCRIPT-V2] 💀 All methods failed for ${videoId}`);
+  console.log(`[TRANSCRIPT-V2] 💀 All methods failed for ${videoId} - throwing controlled error`);
   return res.status(404).json(errorResponse);
  }
 });
@@ -1523,6 +1560,21 @@ app.post('/api/intelligent-segments', async (req, res) => {
    throw orchestratorError;
   }
 
+  // CRITICAL: Validate transcript data before proceeding with processing
+  if (!transcriptData) {
+   throw new Error('Failed to retrieve a valid transcript after all attempts. Transcript data is null or undefined.');
+  }
+
+  if (!transcriptData.segments || !Array.isArray(transcriptData.segments) || transcriptData.segments.length === 0) {
+   throw new Error('Failed to retrieve a valid transcript after all attempts. No segments available.');
+  }
+
+  if (!transcriptData.validation || transcriptData.validation.totalLength < 250) {
+   throw new Error('Failed to retrieve a valid transcript after all attempts. Transcript too short or invalid.');
+  }
+
+  console.log(`[INTELLIGENT-SEGMENTS] ✅ Transcript validation passed - proceeding with segmentation...`);
+
   // Ensure we have timing data - if not, create estimated timing
   if (!transcriptData.hasRealTiming) {
    console.log(`[INTELLIGENT-SEGMENTS] No real timing available, creating estimated timing...`);
@@ -1643,14 +1695,28 @@ app.post('/api/intelligent-segments', async (req, res) => {
     videoId: videoId,
     reason: error.details.reason || 'unknown',
     userFriendly: true,
+    suggestions: ['This video may not have captions/transcripts available', 'The video owner may have disabled transcripts', 'Try a different video with verified captions', 'Check if the video is accessible and not age-restricted'],
    });
   }
 
-  // Handle other errors
-  res.status(500).json({
+  // Handle general validation errors (our controlled errors)
+  if (error.message.includes('Failed to retrieve a valid transcript after all attempts')) {
+   return res.status(422).json({
+    error: 'Transcript Extraction Failed',
+    message: error.message,
+    videoId: videoId,
+    userFriendly: true,
+    suggestions: ['This video may not have captions/transcripts available', 'The video owner may have disabled transcripts', 'Try a different video with verified captions', 'Use the manual transcript upload feature as a workaround'],
+   });
+  }
+
+  // Handle other controlled errors gracefully
+  return res.status(422).json({
    error: 'Intelligent segmentation failed',
-   message: error.message,
+   message: error.message || 'An error occurred during transcript processing',
    videoId: videoId,
+   userFriendly: true,
+   suggestions: ['Try a different video with verified captions', 'Check if the video is accessible and not restricted', 'Use the manual transcript upload feature as a workaround'],
   });
  }
 });

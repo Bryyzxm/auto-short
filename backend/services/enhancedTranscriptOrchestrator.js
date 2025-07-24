@@ -6,7 +6,7 @@
 import robustTranscriptServiceV2 from './robustTranscriptServiceV2.js';
 import alternativeTranscriptService from './alternativeTranscriptService.js';
 import emergencyTranscriptService from './emergencyTranscriptService.js';
-import {NoValidTranscriptError, TranscriptTooShortError, TranscriptDisabledError, TranscriptNotFoundError, TranscriptExtractionError, TranscriptValidator} from './transcriptErrors.js';
+import {NoValidTranscriptError, TranscriptTooShortError, TranscriptDisabledError, TranscriptValidator} from './transcriptErrors.js';
 
 class EnhancedTranscriptOrchestrator {
  constructor() {
@@ -59,12 +59,18 @@ class EnhancedTranscriptOrchestrator {
   let isDisabledByOwner = false;
 
   for (const {name, service, method, options: serviceOptions} of this.services) {
+   const startTime = Date.now(); // Define startTime outside try block to avoid "not defined" error
+
    try {
     console.log(`[TRANSCRIPT-ORCHESTRATOR] Trying ${name} service...`);
     servicesAttempted.push(name);
 
-    const startTime = Date.now();
     let result;
+
+    // Validate service and method exist before calling
+    if (!service || typeof service[method] !== 'function') {
+     throw new Error(`Service ${name} does not have method ${method}`);
+    }
 
     // Call the appropriate method based on service type
     if (method === 'extractWithRealTiming') {
@@ -75,6 +81,15 @@ class EnhancedTranscriptOrchestrator {
 
     const extractionTime = Date.now() - startTime;
     console.log(`[TRANSCRIPT-ORCHESTRATOR] ${name} service completed in ${extractionTime}ms`);
+
+    // CRITICAL: Check if result is null, undefined, or invalid before proceeding
+    if (!result) {
+     throw new Error(`Service ${name} returned null or undefined result`);
+    }
+
+    if (!result.segments || !Array.isArray(result.segments) || result.segments.length === 0) {
+     throw new Error(`Service ${name} returned invalid or empty segments`);
+    }
 
     // Validate the result using our enhanced validator
     const validation = TranscriptValidator.validate(result, videoId, minLength);
@@ -141,8 +156,18 @@ class EnhancedTranscriptOrchestrator {
    throw lastError;
   }
 
-  // Default to not found error
-  throw new TranscriptNotFoundError(videoId, servicesAttempted);
+  // Create comprehensive error with extraction failure details
+  const comprehensiveError = new NoValidTranscriptError(videoId, 'extraction_failed', lastError?.message || 'All transcript extraction methods failed', {
+   actualLength: 0,
+   minRequired: minLength,
+   servicesAttempted: servicesAttempted,
+   lastError: lastError?.message || 'Unknown error',
+   sessionId: sessionId,
+   totalAttempts: this.stats.totalAttempts,
+   timestamp: new Date().toISOString(),
+  });
+
+  throw comprehensiveError;
  }
 
  /**
