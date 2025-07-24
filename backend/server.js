@@ -1,7 +1,8 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import {execFile, execSync} from 'child_process';
+import {execFile, execSync, spawn} from 'child_process';
+import {promisify} from 'util';
 import {v4 as uuidv4} from 'uuid';
 import path from 'path';
 import fs from 'fs';
@@ -49,6 +50,87 @@ const USER_AGENTS = [
 
 function getRandomUserAgent() {
  return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+}
+
+// Secure yt-dlp execution helper using spawn to prevent shell injection
+async function executeYtDlpSecurely(args, options = {}) {
+ return new Promise((resolve, reject) => {
+  const ytdlpPath = process.platform === 'win32' ? YT_DLP_PATH : 'yt-dlp';
+
+  // Ensure all arguments are strings and properly escaped
+  const sanitizedArgs = args.map((arg) => String(arg).trim());
+
+  console.log(`[SECURE-YTDLP] Executing: ${ytdlpPath} ${sanitizedArgs.join(' ')}`);
+
+  const child = spawn(ytdlpPath, sanitizedArgs, {
+   stdio: ['pipe', 'pipe', 'pipe'],
+   timeout: options.timeout || 60000,
+   maxBuffer: options.maxBuffer || 1024 * 1024 * 10, // 10MB
+   ...options,
+  });
+
+  let stdout = '';
+  let stderr = '';
+
+  child.stdout.on('data', (data) => {
+   stdout += data.toString();
+  });
+
+  child.stderr.on('data', (data) => {
+   stderr += data.toString();
+  });
+
+  child.on('close', (code) => {
+   if (code === 0) {
+    resolve(stdout);
+   } else {
+    reject(new Error(`yt-dlp failed with code ${code}: ${stderr}`));
+   }
+  });
+
+  child.on('error', (error) => {
+   reject(new Error(`Failed to start yt-dlp process: ${error.message}`));
+  });
+ });
+}
+
+// Secure ffprobe execution helper using spawn to prevent shell injection
+async function executeFfprobeSecurely(filePath, options = {}) {
+ return new Promise((resolve, reject) => {
+  const ffprobeArgs = ['-v', 'quiet', '-print_format', 'json', '-show_streams', filePath];
+
+  console.log(`[SECURE-FFPROBE] Executing: ffprobe ${ffprobeArgs.join(' ')}`);
+
+  const child = spawn('ffprobe', ffprobeArgs, {
+   stdio: ['pipe', 'pipe', 'pipe'],
+   timeout: options.timeout || 30000,
+   maxBuffer: options.maxBuffer || 1024 * 1024, // 1MB
+   ...options,
+  });
+
+  let stdout = '';
+  let stderr = '';
+
+  child.stdout.on('data', (data) => {
+   stdout += data.toString();
+  });
+
+  child.stderr.on('data', (data) => {
+   stderr += data.toString();
+  });
+
+  child.on('close', (code) => {
+   if (code === 0) {
+    resolve(stdout);
+   } else {
+    reject(new Error(`ffprobe failed with code ${code}: ${stderr}`));
+   }
+  });
+
+  child.on('error', (error) => {
+   reject(new Error(`Failed to start ffprobe process: ${error.message}`));
+  });
+ });
 }
 
 const app = express();
@@ -142,18 +224,21 @@ app.use(express.json({limit: '10mb'}));
 app.use(express.urlencoded({extended: true, limit: '10mb'}));
 
 // 🔧 STARTUP VALIDATION: Verify yt-dlp is available
-console.log('🔧 Performing startup validation...');
-console.log(`Platform: ${process.platform}`);
-console.log(`YT-DLP Path: ${YT_DLP_PATH}`);
+async function validateStartup() {
+ console.log('🔧 Performing startup validation...');
+ console.log(`Platform: ${process.platform}`);
+ console.log(`YT-DLP Path: ${YT_DLP_PATH}`);
 
-if (!validateYtDlpPath()) {
- console.error('❌ YT-DLP validation failed at startup');
-} else {
+ if (!validateYtDlpPath()) {
+  console.error('❌ YT-DLP validation failed at startup');
+  return;
+ }
  console.log('✅ YT-DLP path validation passed');
 
  // Test yt-dlp execution
  try {
-  const testResult = process.platform === 'win32' ? execSync(`"${YT_DLP_PATH}" --version`, {timeout: 10000, encoding: 'utf8'}) : execSync('yt-dlp --version', {timeout: 10000, encoding: 'utf8'});
+  const versionArgs = ['--version'];
+  const testResult = await executeYtDlpSecurely(versionArgs, {timeout: 10000});
 
   console.log(`✅ YT-DLP executable test passed: ${testResult.trim()}`);
 
@@ -167,6 +252,9 @@ if (!validateYtDlpPath()) {
   console.warn('🔄 This may cause download failures. Check deployment configuration.');
  }
 }
+
+// Run startup validation
+validateStartup().catch(console.error);
 
 // Root endpoint
 app.get('/', (req, res) => {
@@ -185,7 +273,7 @@ app.get('/', (req, res) => {
 });
 
 // Health check endpoint
-app.get('/health', (req, res) => {
+app.get('/health', async (req, res) => {
  res.json({
   status: 'healthy',
   uptime: process.uptime(),
@@ -195,7 +283,7 @@ app.get('/health', (req, res) => {
 });
 
 // 🚨 DEBUG ENDPOINT: Production diagnostics (safe for production)
-app.get('/api/debug/environment', (req, res) => {
+app.get('/api/debug/environment', async (req, res) => {
  try {
   const debugInfo = {
    status: 'ok',
@@ -212,9 +300,8 @@ app.get('/api/debug/environment', (req, res) => {
 
   // Test yt-dlp availability
   try {
-   const testCommand = process.platform === 'win32' ? `"${YT_DLP_PATH}" --version` : 'yt-dlp --version';
-
-   const version = execSync(testCommand, {timeout: 5000, encoding: 'utf8'});
+   const versionArgs = ['--version'];
+   const version = await executeYtDlpSecurely(versionArgs, {timeout: 5000});
    debugInfo.ytdlp_version = version.trim();
    debugInfo.ytdlp_status = 'available';
   } catch (e) {
@@ -256,7 +343,7 @@ app.use(
  })
 );
 
-app.post('/api/video-quality-check', (req, res) => {
+app.post('/api/video-quality-check', async (req, res) => {
  const {url} = req.body;
 
  if (!url) {
@@ -269,11 +356,10 @@ app.post('/api/video-quality-check', (req, res) => {
   // Enhanced format checking with better reliability
   const qualityCheckArgs = ['--list-formats', '--no-warnings', '--user-agent', getRandomUserAgent(), '--extractor-args', 'youtube:player_client=web,android', '--retries', '2', '--socket-timeout', '20', url];
 
-  console.log(`[quality-check] yt-dlp command: ${YT_DLP_PATH} ${qualityCheckArgs.map((arg) => (arg.includes(' ') ? `"${arg}"` : arg)).join(' ')}`);
+  console.log(`[quality-check] yt-dlp command: ${process.platform === 'win32' ? YT_DLP_PATH : 'yt-dlp'} ${qualityCheckArgs.join(' ')}`);
 
-  // Check available formats with yt-dlp
-  const formatsResult = execSync(`"${YT_DLP_PATH}" ${qualityCheckArgs.join(' ')}`, {
-   encoding: 'utf8',
+  // Check available formats with yt-dlp using secure execution
+  const formatsResult = await executeYtDlpSecurely(qualityCheckArgs, {
    timeout: 30000, // 30 second timeout
   });
   console.log('Available formats:', formatsResult);
@@ -350,7 +436,7 @@ app.post('/api/shorts', async (req, res) => {
    '--list-formats',
    '--no-warnings',
    '--user-agent',
-   `"${getRandomUserAgent()}"`, // FIXED: Quote user agent properly
+   getRandomUserAgent(), // Remove quotes - spawn handles this properly
    '--extractor-args',
    'youtube:player_client=web,android',
    '--socket-timeout',
@@ -358,8 +444,7 @@ app.post('/api/shorts', async (req, res) => {
    youtubeUrl,
   ];
 
-  const formatCheck = execSync(`"${YT_DLP_PATH}" ${formatCheckArgs.join(' ')}`, {
-   encoding: 'utf8',
+  const formatCheck = await executeYtDlpSecurely(formatCheckArgs, {
    timeout: 30000,
   });
 
@@ -436,245 +521,248 @@ app.post('/api/shorts', async (req, res) => {
   youtubeUrl,
  ];
 
- console.log(`[${id}] yt-dlp command: ${YT_DLP_PATH} ${ytDlpArgs.map((arg) => (arg.includes(' ') ? `"${arg}"` : arg)).join(' ')}`);
+ console.log(`[${id}] yt-dlp command: ${process.platform === 'win32' ? YT_DLP_PATH : 'yt-dlp'} ${ytDlpArgs.join(' ')}`);
 
- execFile(YT_DLP_PATH, ytDlpArgs, {maxBuffer: 1024 * 1024 * 50}, (err, stdout, stderr) => {
+ try {
+  const result = await executeYtDlpSecurely(ytDlpArgs, {
+   maxBuffer: 1024 * 1024 * 50,
+   timeout: 300000, // 5 minutes timeout
+  });
+
   console.timeEnd(`[${id}] yt-dlp download`);
-  if (err) {
-   console.error(`[${id}] yt-dlp error:`, err.message);
-   console.error(`[${id}] yt-dlp stderr:`, stderr);
-   console.error(`[${id}] yt-dlp stdout:`, stdout);
+  console.log(`[${id}] yt-dlp download successful`);
 
-   // Enhanced error analysis with 2025.07.21 improvements
-   let errorDetails = 'Unknown yt-dlp error';
-   let userFriendlyError = 'Video download failed';
-
-   if (stderr) {
-    if (stderr.includes('Requested format is not available')) {
-     errorDetails = 'No compatible video format found';
-     userFriendlyError = 'This video format is not supported. Try a different video.';
-    } else if (stderr.includes('Sign in to confirm') || stderr.includes('Sign in to confirm your age')) {
-     errorDetails = 'YouTube age verification or sign-in required';
-     userFriendlyError = 'This video requires sign-in or age verification. Try a different video.';
-    } else if (stderr.includes('Video unavailable') || stderr.includes('Private video')) {
-     errorDetails = 'Video is not accessible';
-     userFriendlyError = 'This video is private, unavailable, or geo-blocked.';
-    } else if (stderr.includes('429') || stderr.includes('Too Many Requests')) {
-     errorDetails = 'YouTube rate limiting active';
-     userFriendlyError = 'YouTube is rate-limiting requests. Please wait and try again in 10-15 minutes.';
-    } else if (stderr.includes('network') || stderr.includes('timeout')) {
-     errorDetails = 'Network or timeout error';
-     userFriendlyError = 'Network connection issue. Please try again.';
-    } else if (stderr.includes('EACCES') || stderr.includes('Permission denied')) {
-     errorDetails = 'File permission error (production environment)';
-     userFriendlyError = 'Server configuration issue. This will be fixed soon.';
-    } else if (stderr.includes('404') || stderr.includes('Not Found')) {
-     errorDetails = 'Video not found';
-     userFriendlyError = 'This video was not found or has been deleted.';
-    } else if (stderr.includes('HTTP Error 403')) {
-     errorDetails = 'Access forbidden by YouTube';
-     userFriendlyError = 'YouTube has blocked access to this video from our server.';
-    } else if (stderr.includes('not a valid URL') || stderr.includes('generic')) {
-     errorDetails = 'Command line parsing error (likely user-agent issue)';
-     userFriendlyError = 'Server configuration error. Please try again.';
-    }
-   }
-
-   if (err.message) {
-    if (err.message.includes('EACCES')) {
-     errorDetails = 'yt-dlp executable permission denied (Linux production)';
-     userFriendlyError = 'Server is updating YouTube downloader. Please try again in a few minutes.';
-    } else if (err.message.includes('Command failed')) {
-     // Extract more specific error from command failure
-     if (stderr && stderr.includes('not a valid URL')) {
-      errorDetails = 'User-agent or command line parsing error';
-      userFriendlyError = 'Server configuration error. Development team has been notified.';
-     }
-    }
-   }
-   return res.status(500).json({
-    error: userFriendlyError,
-    technical_details: errorDetails,
-    stderr: stderr?.substring(0, 500) + '...',
-    environment: {
-     platform: process.platform,
-     node_env: process.env.NODE_ENV,
-     railway_env: process.env.RAILWAY_ENVIRONMENT_NAME || 'none',
-     ytdlp_path: YT_DLP_PATH,
-     timestamp: new Date().toISOString(),
-    },
-    request_info: {
-     id: id,
-     url: youtubeUrl,
-     duration: `${start}s - ${end}s`,
-    },
-    command: `${YT_DLP_PATH} [args_hidden_for_security]`,
-   });
+  // Verify file exists and has reasonable size
+  if (!fs.existsSync(tempFile)) {
+   throw new Error('Downloaded file not found');
   }
-  console.log(`[${id}] yt-dlp success. Downloaded to: ${tempFile}`);
 
-  // Analyze video resolution for upscaling decisions
-  let videoWidth = 0;
-  let videoHeight = 0;
-  let needsUpscaling = false;
+  const stats = fs.statSync(tempFile);
+  if (stats.size < 1024) {
+   throw new Error('Downloaded file too small (likely corrupted)');
+  }
 
-  try {
-   const ffprobeResult = execSync(`ffprobe -v quiet -print_format json -show_streams "${tempFile}"`, {encoding: 'utf8'});
-   const videoInfo = JSON.parse(ffprobeResult);
-   const videoStream = videoInfo.streams.find((s) => s.codec_type === 'video');
-   if (videoStream) {
-    videoWidth = parseInt(videoStream.width);
-    videoHeight = parseInt(videoStream.height);
-    needsUpscaling = videoHeight < 720;
+  console.log(`[${id}] Video downloaded successfully: ${(stats.size / 1024 / 1024).toFixed(2)} MB`);
+ } catch (err) {
+  console.timeEnd(`[${id}] yt-dlp download`);
+  console.error(`[${id}] yt-dlp error:`, err.message);
 
-    console.log(`[${id}] Video resolution: ${videoWidth}x${videoHeight} (${videoHeight}p)`);
+  // Enhanced error analysis with 2025.07.21 improvements
+  let errorDetails = 'Unknown yt-dlp error';
+  let userFriendlyError = 'Video download failed';
 
-    if (needsUpscaling) {
-     console.log(`[${id}] 📈 UPSCALING REQUIRED: ${videoHeight}p → 720p`);
-    } else {
-     console.log(`[${id}] ✅ Resolution adequate: ${videoHeight}p ≥ 720p`);
-    }
-   } else {
-    console.warn(`[${id}] Could not detect video stream, assuming upscaling needed`);
-    needsUpscaling = true;
+  if (err.message) {
+   if (err.message.includes('Requested format is not available')) {
+    errorDetails = 'No compatible video format found';
+    userFriendlyError = 'This video format is not supported. Try a different video.';
+   } else if (err.message.includes('Sign in to confirm') || err.message.includes('Sign in to confirm your age')) {
+    errorDetails = 'YouTube age verification or sign-in required';
+    userFriendlyError = 'This video requires sign-in or age verification. Try a different video.';
+   } else if (err.message.includes('Video unavailable') || err.message.includes('Private video')) {
+    errorDetails = 'Video is not accessible';
+    userFriendlyError = 'This video is private, unavailable, or geo-blocked.';
+   } else if (err.message.includes('429') || err.message.includes('Too Many Requests')) {
+    errorDetails = 'YouTube rate limiting active';
+    userFriendlyError = 'YouTube is rate-limiting requests. Please wait and try again in 10-15 minutes.';
+   } else if (err.message.includes('network') || err.message.includes('timeout')) {
+    errorDetails = 'Network or timeout error';
+    userFriendlyError = 'Network connection issue. Please try again.';
+   } else if (err.message.includes('EACCES') || err.message.includes('Permission denied')) {
+    errorDetails = 'File permission error (production environment)';
+    userFriendlyError = 'Server configuration issue. This will be fixed soon.';
+   } else if (err.message.includes('404') || err.message.includes('Not Found')) {
+    errorDetails = 'Video not found';
+    userFriendlyError = 'This video was not found or has been deleted.';
+   } else if (err.message.includes('HTTP Error 403')) {
+    errorDetails = 'Access forbidden by YouTube';
+    userFriendlyError = 'YouTube has blocked access to this video from our server.';
+   } else if (err.message.includes('not a valid URL') || err.message.includes('generic')) {
+    errorDetails = 'Command line parsing error (likely user-agent issue)';
+    userFriendlyError = 'Server configuration error. Please try again.';
    }
-  } catch (e) {
-   console.warn(`[${id}] Could not determine video resolution, assuming upscaling needed:`, e.message);
+  }
+
+  return res.status(500).json({
+   error: userFriendlyError,
+   technical_details: errorDetails,
+   error_message: err.message?.substring(0, 500) + '...',
+   environment: {
+    platform: process.platform,
+    node_env: process.env.NODE_ENV,
+    railway_env: process.env.RAILWAY_ENVIRONMENT_NAME || 'none',
+    ytdlp_path: process.platform === 'win32' ? YT_DLP_PATH : 'yt-dlp',
+    timestamp: new Date().toISOString(),
+   },
+   request_info: {
+    id: id,
+    url: youtubeUrl,
+    duration: `${start}s - ${end}s`,
+   },
+   command: `${process.platform === 'win32' ? YT_DLP_PATH : 'yt-dlp'} [args_hidden_for_security]`,
+  });
+ }
+
+ // Analyze video resolution for upscaling decisions
+ let videoWidth = 0;
+ let videoHeight = 0;
+ let needsUpscaling = false;
+
+ try {
+  const ffprobeResult = execSync(`ffprobe -v quiet -print_format json -show_streams "${tempFile}"`, {encoding: 'utf8'});
+  const videoInfo = JSON.parse(ffprobeResult);
+  const videoStream = videoInfo.streams.find((s) => s.codec_type === 'video');
+  if (videoStream) {
+   videoWidth = parseInt(videoStream.width);
+   videoHeight = parseInt(videoStream.height);
+   needsUpscaling = videoHeight < 720;
+
+   console.log(`[${id}] Video resolution: ${videoWidth}x${videoHeight} (${videoHeight}p)`);
+
+   if (needsUpscaling) {
+    console.log(`[${id}] 📈 UPSCALING REQUIRED: ${videoHeight}p → 720p`);
+   } else {
+    console.log(`[${id}] ✅ Resolution adequate: ${videoHeight}p ≥ 720p`);
+   }
+  } else {
+   console.warn(`[${id}] Could not detect video stream, assuming upscaling needed`);
    needsUpscaling = true;
   }
+ } catch (e) {
+  console.warn(`[${id}] Could not determine video resolution, assuming upscaling needed:`, e.message);
+  needsUpscaling = true;
+ }
 
-  // Check if file actually exists
-  if (!fs.existsSync(tempFile)) {
-   console.error(`[${id}] Downloaded file not found: ${tempFile}`);
+ // Check if file actually exists
+ if (!fs.existsSync(tempFile)) {
+  console.error(`[${id}] Downloaded file not found: ${tempFile}`);
+  return res.status(500).json({
+   error: 'Downloaded file not found',
+   details: `Expected file: ${tempFile}`,
+  });
+ }
+ // Enhanced FFmpeg processing with smart upscaling and aspect ratio handling
+ const cutFile = path.join(process.cwd(), `${id}-short.mp4`);
+ let ffmpegArgs = ['-y', '-ss', String(start), '-to', String(end), '-i', tempFile];
+
+ // Build video filter chain
+ const videoFilters = [];
+
+ // Step 1: Upscaling if needed (before aspect ratio changes)
+ if (needsUpscaling) {
+  const targetHeight = 720;
+  const targetWidth = Math.round((targetHeight * videoWidth) / videoHeight);
+  // Ensure width is even (required for most codecs)
+  const evenWidth = targetWidth % 2 === 0 ? targetWidth : targetWidth + 1;
+
+  videoFilters.push(`scale=${evenWidth}:${targetHeight}:flags=lanczos`);
+  console.log(`[${id}] 📈 Upscaling: ${videoWidth}x${videoHeight} → ${evenWidth}x${targetHeight}`);
+ }
+
+ // Step 2: Aspect ratio cropping
+ if (aspectRatio === '9:16') {
+  // Calculate dimensions for 9:16 aspect ratio
+  const currentHeight = needsUpscaling ? 720 : videoHeight;
+  const currentWidth = needsUpscaling ? Math.round((720 * videoWidth) / videoHeight) : videoWidth;
+  const targetWidth = Math.round(currentHeight * (9 / 16));
+
+  // Ensure even dimensions
+  const evenTargetWidth = targetWidth % 2 === 0 ? targetWidth : targetWidth - 1;
+  const evenCurrentHeight = currentHeight % 2 === 0 ? currentHeight : currentHeight - 1;
+
+  videoFilters.push(`crop=${evenTargetWidth}:${evenCurrentHeight}:(iw-${evenTargetWidth})/2:(ih-${evenCurrentHeight})/2`);
+  console.log(`[${id}] 📱 Cropping to 9:16: ${evenTargetWidth}x${evenCurrentHeight}`);
+ } else if (aspectRatio === '16:9') {
+  // Calculate dimensions for 16:9 aspect ratio
+  const currentHeight = needsUpscaling ? 720 : videoHeight;
+  const currentWidth = needsUpscaling ? Math.round((720 * videoWidth) / videoHeight) : videoWidth;
+  const targetWidth = Math.round(currentHeight * (16 / 9));
+
+  // Ensure even dimensions
+  const evenTargetWidth = targetWidth % 2 === 0 ? targetWidth : targetWidth - 1;
+  const evenCurrentHeight = currentHeight % 2 === 0 ? currentHeight : currentHeight - 1;
+
+  videoFilters.push(`crop=${evenTargetWidth}:${evenCurrentHeight}:(iw-${evenTargetWidth})/2:(ih-${evenCurrentHeight})/2`);
+  console.log(`[${id}] 🖥️ Cropping to 16:9: ${evenTargetWidth}x${evenCurrentHeight}`);
+ }
+
+ // Apply video filters if any
+ if (videoFilters.length > 0) {
+  ffmpegArgs.push('-vf', videoFilters.join(','));
+ }
+
+ // Enhanced encoding settings
+ if (aspectRatio === 'original' && !needsUpscaling) {
+  // Keep original quality with copy streams if no processing needed
+  ffmpegArgs.push('-c', 'copy');
+  console.log(`[${id}] 🚀 Using stream copy (no quality loss)`);
+ } else {
+  // High quality encoding for processed videos
+  const crf = needsUpscaling ? '16' : '18'; // Higher quality for upscaled content
+  ffmpegArgs.push('-c:v', 'libx264', '-crf', crf, '-preset', 'medium', '-profile:v', 'high', '-level:v', '4.0', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-movflags', '+faststart');
+  console.log(`[${id}] 🎬 Using high quality encoding (CRF ${crf})`);
+ }
+
+ ffmpegArgs.push(cutFile);
+ console.time(`[${id}] ffmpeg cut`);
+ execFile('ffmpeg', ffmpegArgs, (err2, stdout2, stderr2) => {
+  console.timeEnd(`[${id}] ffmpeg cut`);
+  fs.unlink(tempFile, () => {});
+  if (err2) {
+   console.error(`[${id}] ffmpeg error:`, err2.message);
+   console.error(`[${id}] ffmpeg stderr:`, stderr2);
+   console.error(`[${id}] ffmpeg stdout:`, stdout2);
    return res.status(500).json({
-    error: 'Downloaded file not found',
-    details: `Expected file: ${tempFile}`,
+    error: 'ffmpeg failed',
+    details: err2.message,
+    stderr: stderr2,
+    command: `ffmpeg ${ffmpegArgs.join(' ')}`,
    });
   }
-  // Enhanced FFmpeg processing with smart upscaling and aspect ratio handling
-  const cutFile = path.join(process.cwd(), `${id}-short.mp4`);
-  let ffmpegArgs = ['-y', '-ss', String(start), '-to', String(end), '-i', tempFile];
 
-  // Build video filter chain
-  const videoFilters = [];
-
-  // Step 1: Upscaling if needed (before aspect ratio changes)
-  if (needsUpscaling) {
-   const targetHeight = 720;
-   const targetWidth = Math.round((targetHeight * videoWidth) / videoHeight);
-   // Ensure width is even (required for most codecs)
-   const evenWidth = targetWidth % 2 === 0 ? targetWidth : targetWidth + 1;
-
-   videoFilters.push(`scale=${evenWidth}:${targetHeight}:flags=lanczos`);
-   console.log(`[${id}] 📈 Upscaling: ${videoWidth}x${videoHeight} → ${evenWidth}x${targetHeight}`);
+  // Check if output file exists and verify quality
+  if (!fs.existsSync(cutFile)) {
+   console.error(`[${id}] Cut file not found: ${cutFile}`);
+   return res.status(500).json({
+    error: 'Cut file not found',
+    details: `Expected file: ${cutFile}`,
+   });
   }
 
-  // Step 2: Aspect ratio cropping
-  if (aspectRatio === '9:16') {
-   // Calculate dimensions for 9:16 aspect ratio
-   const currentHeight = needsUpscaling ? 720 : videoHeight;
-   const currentWidth = needsUpscaling ? Math.round((720 * videoWidth) / videoHeight) : videoWidth;
-   const targetWidth = Math.round(currentHeight * (9 / 16));
+  // Verify final output resolution
+  try {
+   const finalProbeResult = execSync(`ffprobe -v quiet -print_format json -show_streams "${cutFile}"`, {encoding: 'utf8'});
+   const finalVideoInfo = JSON.parse(finalProbeResult);
+   const finalVideoStream = finalVideoInfo.streams.find((s) => s.codec_type === 'video');
 
-   // Ensure even dimensions
-   const evenTargetWidth = targetWidth % 2 === 0 ? targetWidth : targetWidth - 1;
-   const evenCurrentHeight = currentHeight % 2 === 0 ? currentHeight : currentHeight - 1;
+   if (finalVideoStream) {
+    const finalWidth = parseInt(finalVideoStream.width);
+    const finalHeight = parseInt(finalVideoStream.height);
+    console.log(`[${id}] ✅ Final output resolution: ${finalWidth}x${finalHeight} (${finalHeight}p)`);
 
-   videoFilters.push(`crop=${evenTargetWidth}:${evenCurrentHeight}:(iw-${evenTargetWidth})/2:(ih-${evenCurrentHeight})/2`);
-   console.log(`[${id}] 📱 Cropping to 9:16: ${evenTargetWidth}x${evenCurrentHeight}`);
-  } else if (aspectRatio === '16:9') {
-   // Calculate dimensions for 16:9 aspect ratio
-   const currentHeight = needsUpscaling ? 720 : videoHeight;
-   const currentWidth = needsUpscaling ? Math.round((720 * videoWidth) / videoHeight) : videoWidth;
-   const targetWidth = Math.round(currentHeight * (16 / 9));
-
-   // Ensure even dimensions
-   const evenTargetWidth = targetWidth % 2 === 0 ? targetWidth : targetWidth - 1;
-   const evenCurrentHeight = currentHeight % 2 === 0 ? currentHeight : currentHeight - 1;
-
-   videoFilters.push(`crop=${evenTargetWidth}:${evenCurrentHeight}:(iw-${evenTargetWidth})/2:(ih-${evenCurrentHeight})/2`);
-   console.log(`[${id}] 🖥️ Cropping to 16:9: ${evenTargetWidth}x${evenCurrentHeight}`);
-  }
-
-  // Apply video filters if any
-  if (videoFilters.length > 0) {
-   ffmpegArgs.push('-vf', videoFilters.join(','));
-  }
-
-  // Enhanced encoding settings
-  if (aspectRatio === 'original' && !needsUpscaling) {
-   // Keep original quality with copy streams if no processing needed
-   ffmpegArgs.push('-c', 'copy');
-   console.log(`[${id}] 🚀 Using stream copy (no quality loss)`);
-  } else {
-   // High quality encoding for processed videos
-   const crf = needsUpscaling ? '16' : '18'; // Higher quality for upscaled content
-   ffmpegArgs.push('-c:v', 'libx264', '-crf', crf, '-preset', 'medium', '-profile:v', 'high', '-level:v', '4.0', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-movflags', '+faststart');
-   console.log(`[${id}] 🎬 Using high quality encoding (CRF ${crf})`);
-  }
-
-  ffmpegArgs.push(cutFile);
-  console.time(`[${id}] ffmpeg cut`);
-  execFile('ffmpeg', ffmpegArgs, (err2, stdout2, stderr2) => {
-   console.timeEnd(`[${id}] ffmpeg cut`);
-   fs.unlink(tempFile, () => {});
-   if (err2) {
-    console.error(`[${id}] ffmpeg error:`, err2.message);
-    console.error(`[${id}] ffmpeg stderr:`, stderr2);
-    console.error(`[${id}] ffmpeg stdout:`, stdout2);
-    return res.status(500).json({
-     error: 'ffmpeg failed',
-     details: err2.message,
-     stderr: stderr2,
-     command: `ffmpeg ${ffmpegArgs.join(' ')}`,
-    });
+    if (finalHeight >= 720) {
+     console.log(`[${id}] 🎉 SUCCESS: Output meets 720p+ requirement!`);
+    } else {
+     console.warn(`[${id}] ⚠️ WARNING: Output resolution ${finalHeight}p is still below 720p`);
+    }
    }
+  } catch (e) {
+   console.warn(`[${id}] Could not verify final resolution:`, e.message);
+  }
 
-   // Check if output file exists and verify quality
-   if (!fs.existsSync(cutFile)) {
-    console.error(`[${id}] Cut file not found: ${cutFile}`);
-    return res.status(500).json({
-     error: 'Cut file not found',
-     details: `Expected file: ${cutFile}`,
-    });
-   }
+  console.log(`[${id}] Selesai proses. Download: /outputs/${path.basename(cutFile)}`);
 
-   // Verify final output resolution
-   try {
-    const finalProbeResult = execSync(`ffprobe -v quiet -print_format json -show_streams "${cutFile}"`, {encoding: 'utf8'});
-    const finalVideoInfo = JSON.parse(finalProbeResult);
-    const finalVideoStream = finalVideoInfo.streams.find((s) => s.codec_type === 'video');
-
-    if (finalVideoStream) {
-     const finalWidth = parseInt(finalVideoStream.width);
-     const finalHeight = parseInt(finalVideoStream.height);
-     console.log(`[${id}] ✅ Final output resolution: ${finalWidth}x${finalHeight} (${finalHeight}p)`);
-
-     if (finalHeight >= 720) {
-      console.log(`[${id}] 🎉 SUCCESS: Output meets 720p+ requirement!`);
-     } else {
-      console.warn(`[${id}] ⚠️ WARNING: Output resolution ${finalHeight}p is still below 720p`);
+  // Schedule auto-cleanup after 30 seconds if file is not downloaded
+  setTimeout(() => {
+   if (fs.existsSync(cutFile)) {
+    fs.unlink(cutFile, (err) => {
+     if (!err) {
+      console.log(`[CLEANUP] Auto-deleted undownloaded file: ${path.basename(cutFile)}`);
      }
-    }
-   } catch (e) {
-    console.warn(`[${id}] Could not verify final resolution:`, e.message);
+    });
    }
+  }, 30000); // 30 seconds timeout
 
-   console.log(`[${id}] Selesai proses. Download: /outputs/${path.basename(cutFile)}`);
-
-   // Schedule auto-cleanup after 30 seconds if file is not downloaded
-   setTimeout(() => {
-    if (fs.existsSync(cutFile)) {
-     fs.unlink(cutFile, (err) => {
-      if (!err) {
-       console.log(`[CLEANUP] Auto-deleted undownloaded file: ${path.basename(cutFile)}`);
-      }
-     });
-    }
-   }, 30000); // 30 seconds timeout
-
-   res.json({downloadUrl: `/outputs/${path.basename(cutFile)}`});
-  });
+  res.json({downloadUrl: `/outputs/${path.basename(cutFile)}`});
  });
 });
 
@@ -1244,11 +1332,10 @@ app.get('/api/video-metadata', async (req, res) => {
   // Enhanced yt-dlp command with better reliability
   const ytDlpMetadataArgs = ['--dump-json', '--no-check-certificate', '--no-warnings', '--user-agent', getRandomUserAgent(), '--extractor-args', 'youtube:player_client=web,android', '--retries', '3', '--socket-timeout', '30', videoUrl];
 
-  console.log(`[video-metadata] yt-dlp command: ${YT_DLP_PATH} ${ytDlpMetadataArgs.map((arg) => (arg.includes(' ') ? `"${arg}"` : arg)).join(' ')}`);
+  console.log(`[video-metadata] yt-dlp command: ${process.platform === 'win32' ? YT_DLP_PATH : 'yt-dlp'} ${ytDlpMetadataArgs.join(' ')}`);
 
   // Gunakan yt-dlp untuk mendapatkan metadata tanpa download
-  const result = execSync(`"${YT_DLP_PATH}" ${ytDlpMetadataArgs.join(' ')}`, {
-   encoding: 'utf8',
+  const result = await executeYtDlpSecurely(ytDlpMetadataArgs, {
    timeout: 60000, // Increase timeout to 60 seconds
    maxBuffer: 1024 * 1024 * 10, // 10MB buffer
   });
