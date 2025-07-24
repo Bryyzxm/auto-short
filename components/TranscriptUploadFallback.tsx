@@ -5,7 +5,7 @@
 
 import React, {useState} from 'react';
 
-export const TranscriptUploadFallback = ({videoId, onTranscriptUploaded}) => {
+export const TranscriptUploadFallback = ({videoId, onTranscriptUploaded, errorType = 'blocking'}) => {
  const [uploadMethod, setUploadMethod] = useState('auto'); // 'auto', 'upload', 'paste'
  const [transcriptText, setTranscriptText] = useState('');
  const [isProcessing, setIsProcessing] = useState(false);
@@ -38,14 +38,32 @@ export const TranscriptUploadFallback = ({videoId, onTranscriptUploaded}) => {
   }));
  };
 
+ // Determine message based on error type
+ const getErrorMessage = () => {
+  if (errorType === 'noValidTranscript') {
+   return {
+    title: 'Transcript Not Available',
+    description: 'This video does not have an automatic transcript available. You can still create shorts by providing the transcript manually:',
+    emoji: '📝',
+   };
+  }
+  return {
+   title: 'YouTube Transcript Currently Unavailable',
+   description: 'YouTube has enhanced their bot protection. You can still create shorts by providing the transcript manually:',
+   emoji: '⚠️',
+  };
+ };
+
+ const errorMessage = getErrorMessage();
+
  if (uploadMethod === 'auto') {
   return (
    <div className="bg-amber-50 border border-amber-200 rounded-lg p-6">
     <div className="flex items-start space-x-3">
-     <span className="text-2xl">⚠️</span>
+     <span className="text-2xl">{errorMessage.emoji}</span>
      <div className="flex-1">
-      <h3 className="text-lg font-semibold text-amber-800 mb-2">YouTube Transcript Currently Unavailable</h3>
-      <p className="text-amber-700 mb-4">YouTube has enhanced their bot protection. You can still create shorts by providing the transcript manually:</p>
+      <h3 className="text-lg font-semibold text-amber-800 mb-2">{errorMessage.title}</h3>
+      <p className="text-amber-700 mb-4">{errorMessage.description}</p>
 
       <div className="space-y-3">
        <button
@@ -125,12 +143,26 @@ export const TranscriptUploadFallback = ({videoId, onTranscriptUploaded}) => {
  */
 export const TranscriptErrorHandler = ({error, videoId, onRetry}) => {
  const isYouTubeBlocked = error?.includes('All transcript extraction services failed');
+ const isNoValidTranscript = error?.includes('A valid transcript is not available for this video');
 
+ // Handle NoValidTranscriptError - show manual upload option with specific message
+ if (isNoValidTranscript) {
+  return (
+   <TranscriptUploadFallback
+    videoId={videoId}
+    onTranscriptUploaded={onRetry}
+    errorType="noValidTranscript"
+   />
+  );
+ }
+
+ // Handle YouTube blocking issues
  if (isYouTubeBlocked) {
   return (
    <TranscriptUploadFallback
     videoId={videoId}
     onTranscriptUploaded={onRetry}
+    errorType="blocking"
    />
   );
  }

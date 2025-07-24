@@ -156,6 +156,19 @@ const App: React.FC = () => {
      method: data.method || 'Enhanced Backend',
     };
    } else {
+    // Check for specific error responses from backend
+    try {
+     const errorData = await response.json();
+     if (errorData.error) {
+      console.log(`[APP] Enhanced backend error: ${errorData.error}`);
+      // Propagate specific backend errors
+      if (errorData.error.includes('A valid transcript is not available for this video')) {
+       throw new Error(errorData.error);
+      }
+     }
+    } catch (parseError) {
+     // JSON parsing failed, continue with status-based handling
+    }
     console.log(`[APP] Enhanced backend failed with status: ${response.status}`);
    }
 
@@ -178,6 +191,16 @@ const App: React.FC = () => {
      method: emergencyData.method || 'Emergency Fallback',
     };
    } else {
+    // Check for specific error responses from emergency endpoint
+    try {
+     const errorData = await emergencyResponse.json();
+     if (errorData.error && errorData.error.includes('A valid transcript is not available for this video')) {
+      console.log(`[APP] Emergency endpoint - NoValidTranscriptError: ${errorData.error}`);
+      throw new Error(errorData.error);
+     }
+    } catch (parseError) {
+     // JSON parsing failed, continue
+    }
     console.log(`[APP] Emergency endpoint failed with status: ${emergencyResponse.status}`);
    }
 
@@ -217,6 +240,19 @@ const App: React.FC = () => {
    });
 
    if (!response.ok) {
+    // Try to get specific error message from backend
+    try {
+     const errorData = await response.json();
+     if (errorData.error) {
+      console.log(`[APP] Intelligent segments error: ${errorData.error}`);
+      // Propagate specific backend errors like NoValidTranscriptError
+      if (errorData.error.includes('A valid transcript is not available for this video')) {
+       throw new Error(errorData.error);
+      }
+     }
+    } catch (parseError) {
+     // JSON parsing failed, use generic error
+    }
     throw new Error(`Intelligent segments API failed: ${response.status}`);
    }
 
@@ -352,7 +388,16 @@ const App: React.FC = () => {
     setGeneratedShorts(manualShorts);
    } catch (error) {
     console.error('[APP] ❌ Manual transcript processing failed:', error);
-    setError('Failed to process manual transcript. Please try again.');
+
+    // Provide more specific error message based on the error type
+    const errorMessage = error?.message || String(error);
+    if (errorMessage.includes('API key')) {
+     setError('API key error occurred while processing transcript. Please check your configuration.');
+    } else if (errorMessage.includes('too short') || errorMessage.includes('insufficient')) {
+     setError('The transcript provided is too short to generate meaningful segments. Please provide a longer transcript.');
+    } else {
+     setError('Failed to process manual transcript. Please try again or check the transcript format.');
+    }
    } finally {
     setIsLoading(false);
    }
@@ -399,8 +444,20 @@ const App: React.FC = () => {
    } catch (intelligentError: any) {
     console.error(`[APP] ❌ Intelligent segmentation failed:`, intelligentError);
 
-    // Specific error messages for better user experience
+    // Check for specific error types
     const errorMessage = intelligentError?.message || String(intelligentError);
+
+    // Check for NoValidTranscriptError - don't fallback, show manual upload immediately
+    if (errorMessage.includes('A valid transcript is not available for this video')) {
+     console.log(`[APP] 🚨 NoValidTranscriptError from intelligent segments - showing manual upload`);
+     setError('Maaf, transkrip otomatis tidak tersedia untuk video ini. Silakan coba video lain atau unggah file transkrip secara manual.');
+     setCurrentVideoId(videoId);
+     setShowTranscriptUpload(true);
+     setIsLoading(false);
+     return;
+    }
+
+    // Other specific error messages for better user experience
     if (errorMessage.includes('Real timing data required')) {
      console.log(`[APP] 🔄 Falling back to legacy AI method due to timing issues...`);
     } else if (errorMessage.includes('No intelligent segments returned')) {
@@ -419,8 +476,20 @@ const App: React.FC = () => {
    } catch (error: any) {
     console.error(`[APP] Enhanced transcript extraction failed:`, error);
 
-    // Check if this is a YouTube blocking issue
+    // Check for specific error types and provide appropriate user feedback
     const errorMessage = error?.message || String(error);
+
+    // Check for NoValidTranscriptError from backend
+    if (errorMessage.includes('A valid transcript is not available for this video')) {
+     console.log(`[APP] 🚨 NoValidTranscriptError detected - transcript unavailable`);
+     setError('Maaf, transkrip otomatis tidak tersedia untuk video ini. Silakan coba video lain atau unggah file transkrip secara manual.');
+     setCurrentVideoId(videoId);
+     setShowTranscriptUpload(true);
+     setIsLoading(false);
+     return;
+    }
+
+    // Check if this is a YouTube blocking issue
     if (errorMessage.includes('All transcript extraction services failed') || errorMessage.includes('YouTube is blocking') || errorMessage.includes('bot protection')) {
      // YouTube blocking detected - show manual upload option
      console.log(`[APP] 🚨 YouTube blocking detected - showing manual transcript option`);
@@ -430,6 +499,7 @@ const App: React.FC = () => {
      return;
     }
 
+    // Generic error for other transcript issues
     setError('Transkrip tidak tersedia untuk video ini. Silakan coba video lain.');
     setIsLoading(false);
     return;
