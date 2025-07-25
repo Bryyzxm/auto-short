@@ -1,0 +1,13 @@
+setup.py
+project.egg-info/PKG-INFO
+project.egg-info/SOURCES.txt
+project.egg-info/dependency_links.txt
+project.egg-info/entry_points.txt
+project.egg-info/top_level.txt
+youtube_scraper/__init__.py
+youtube_scraper/items.py
+youtube_scraper/middlewares.py
+youtube_scraper/pipelines.py
+youtube_scraper/settings.py
+youtube_scraper/spiders/__init__.py
+youtube_scraper/spiders/transcript_spider.py
