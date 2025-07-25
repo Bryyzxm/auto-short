@@ -1829,6 +1829,20 @@ app.get('/api/enhanced-transcript/:videoId', async (req, res) => {
 
   console.log(`[ENHANCED-API] ✅ Success with ${result.serviceUsed} service: ${result.segments?.length || 0} segments`);
 
+  // Strict validation on the final result
+  const totalText =
+   result.segments
+    ?.map((s) => s.text || '')
+    .join(' ')
+    .trim() || '';
+  const hasValidSegments = result.segments && result.segments.length > 0;
+  const hasMinimumContent = totalText.length >= 200;
+
+  if (!result || !hasValidSegments || !hasMinimumContent) {
+   console.log(`[ENHANCED-API] ⚠️ Invalid transcript result for ${videoId}: segments=${hasValidSegments}, contentLength=${totalText.length}`);
+   throw new Error('TRANSCRIPT_NOT_AVAILABLE');
+  }
+
   // Return the result with orchestrator metadata
   return res.json({
    segments: result.segments,
@@ -1844,6 +1858,14 @@ app.get('/api/enhanced-transcript/:videoId', async (req, res) => {
   });
  } catch (error) {
   console.error(`[ENHANCED-API] ❌ Failed for ${videoId}:`, error.message);
+
+  // Check for specific transcript not available error
+  if (error.message === 'TRANSCRIPT_NOT_AVAILABLE') {
+   return res.status(422).json({
+    error: 'TRANSCRIPT_NOT_AVAILABLE',
+    message: 'A valid transcript is not available for this video.',
+   });
+  }
 
   // Handle specific transcript errors
   if (error instanceof TranscriptDisabledError) {
@@ -1881,12 +1903,10 @@ app.get('/api/enhanced-transcript/:videoId', async (req, res) => {
    });
   }
 
-  // Default error response
-  res.status(500).json({
-   error: 'Transcript extraction failed',
-   videoId: videoId,
-   message: error.message,
-   userFriendly: false,
+  // Default error response for any other unexpected error
+  return res.status(500).json({
+   error: 'INTERNAL_SERVER_ERROR',
+   message: 'An unexpected error occurred during transcript extraction.',
   });
  }
 });
