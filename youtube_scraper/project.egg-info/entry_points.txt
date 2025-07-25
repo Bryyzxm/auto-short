@@ -1,2 +1,0 @@
-[scrapy]
-settings = youtube_scraper.settings

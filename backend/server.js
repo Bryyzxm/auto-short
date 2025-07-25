@@ -17,7 +17,6 @@ import intelligentChunker from './services/intelligentChunker.js';
 import aiTitleGenerator from './services/aiTitleGenerator.js';
 import smartExcerptFormatter from './services/smartExcerptFormatter.js';
 import enhancedTranscriptOrchestrator from './services/enhancedTranscriptOrchestrator.js';
-import {scheduleZyteJob, checkZyteJobStatus, getZyteJobResults, getZyteJobResult} from './services/zyteService.js';
 import {NoValidTranscriptError, TranscriptTooShortError, TranscriptDisabledError, TranscriptNotFoundError} from './services/transcriptErrors.js';
 
 // Polyfill __dirname for ES module
@@ -1612,107 +1611,7 @@ app.post('/api/intelligent-segments', async (req, res) => {
  try {
   console.log(`[INTELLIGENT-SEGMENTS] Starting intelligent segmentation for ${videoId}`);
 
-  // NEW: Use Zyte Scrapy Cloud for transcript extraction
-  console.log(`[INTELLIGENT-SEGMENTS] Using Zyte Scrapy Cloud for transcript extraction...`);
-
-  // Step 1: Construct full YouTube URL from video ID
-  const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
-  console.log(`[INTELLIGENT-SEGMENTS] Full video URL: ${videoUrl}`);
-
-  // Step 2: Schedule Zyte job
-  let jobId;
-  try {
-   console.log(`[INTELLIGENT-SEGMENTS] Scheduling Zyte job...`);
-   jobId = await scheduleZyteJob(videoUrl);
-   console.log(`[INTELLIGENT-SEGMENTS] ✅ Zyte job scheduled with ID: ${jobId}`);
-  } catch (zyteScheduleError) {
-   console.error(`[INTELLIGENT-SEGMENTS] ❌ Failed to schedule Zyte job:`, zyteScheduleError.message);
-   return res.status(500).json({
-    error: 'Failed to schedule transcript extraction',
-    message: zyteScheduleError.message,
-    videoId: videoId,
-    details: 'Could not start transcript scraping job on Zyte Scrapy Cloud',
-   });
-  }
-
-  // Step 3: Poll for job completion and get transcript
-  let transcriptText;
-  try {
-   console.log(`[INTELLIGENT-SEGMENTS] Polling for job completion...`);
-   transcriptText = await getZyteJobResult(jobId);
-   console.log(`[INTELLIGENT-SEGMENTS] ✅ Got transcript from Zyte: ${transcriptText.length} characters`);
-  } catch (zyteResultError) {
-   console.error(`[INTELLIGENT-SEGMENTS] ❌ Failed to get Zyte job result:`, zyteResultError.message);
-   return res.status(500).json({
-    error: 'Failed to extract transcript',
-    message: zyteResultError.message,
-    videoId: videoId,
-    jobId: jobId,
-    details: 'Transcript scraping job failed or timed out',
-   });
-  }
-
-  // Step 4: Validate transcript
-  if (!transcriptText || transcriptText.trim().length < 250) {
-   console.error(`[INTELLIGENT-SEGMENTS] ❌ Transcript too short: ${transcriptText?.length || 0} characters`);
-   return res.status(422).json({
-    error: 'Transcript too short',
-    message: 'The extracted transcript is too short for intelligent segmentation',
-    videoId: videoId,
-    transcriptLength: transcriptText?.length || 0,
-    minRequired: 250,
-    userFriendly: true,
-    suggestions: ['This video may not have sufficient transcript content', 'Try a longer video with more dialogue', 'Check if the video has clear speech content'],
-   });
-  }
-
-  console.log(`[INTELLIGENT-SEGMENTS] ✅ Transcript validation passed: ${transcriptText.length} characters`);
-
-  // Step 5: Convert transcript text to segments format (since Zyte returns raw text)
-  // Create artificial segments for compatibility with existing AI processing
-  const words = transcriptText.split(' ');
-  const wordsPerSegment = Math.ceil(words.length / 20); // Create ~20 segments for processing
-
-  const transcriptSegments = [];
-  for (let i = 0; i < words.length; i += wordsPerSegment) {
-   const segmentWords = words.slice(i, i + wordsPerSegment);
-   const segmentText = segmentWords.join(' ');
-
-   // Estimate timing (150 words per minute average)
-   const startTime = (i / words.length) * ((words.length / 150) * 60);
-   const endTime = ((i + segmentWords.length) / words.length) * ((words.length / 150) * 60);
-
-   transcriptSegments.push({
-    text: segmentText,
-    start: startTime,
-    end: endTime,
-    duration: endTime - startTime,
-   });
-  }
-
-  // Create transcriptData object compatible with existing processing
-  const transcriptData = {
-   segments: transcriptSegments,
-   hasRealTiming: true,
-   totalDuration: (words.length / 150) * 60, // Estimated total duration
-   serviceUsed: 'Zyte Scrapy Cloud',
-   extractionTime: new Date().toISOString(),
-   validation: {
-    isValid: true,
-    totalLength: transcriptText.length,
-    fullText: transcriptText,
-    segmentCount: transcriptSegments.length,
-   },
-  };
-
-  console.log(`[INTELLIGENT-SEGMENTS] Created ${transcriptData.segments.length} segments from Zyte transcript`);
-
-  // Step 6: Continue with existing intelligent segmentation logic
-  console.log(`[INTELLIGENT-SEGMENTS] ✅ Transcript ready - proceeding with AI segmentation...`);
-
-  // The rest of the processing remains the same as before
-  const fullText = transcriptData.validation.fullText;
-  console.log(`[INTELLIGENT-SEGMENTS] Processing transcript: ${fullText.length} characters - proceeding with segmentation`);
+  // TODO: Implement the new Invidious workflow here.
 
   // Step 7: Create intelligent segments
   const intelligentSegments = intelligentChunker.createIntelligentSegments(transcriptData, targetSegmentCount);
@@ -1763,16 +1662,15 @@ app.post('/api/intelligent-segments', async (req, res) => {
    videoId: videoId,
    totalSegments: validSegments.length,
    averageDuration: Math.round(validSegments.reduce((sum, s) => sum + s.duration, 0) / validSegments.length),
-   method: 'Zyte Scrapy Cloud with AI Titles & Smart Excerpts',
+   method: 'TODO: Update method name when Invidious workflow is implemented',
    hasRealTiming: true,
    transcriptQuality: 'HIGH',
    aiTitlesEnabled: true,
    smartExcerptsEnabled: true,
    extractedAt: new Date().toISOString(),
-   serviceUsed: transcriptData.serviceUsed,
-   extractionTime: transcriptData.extractionTime,
-   validation: transcriptData.validation,
-   zyteJobId: jobId, // Include Zyte job ID for reference
+   serviceUsed: 'TODO: Update when new service is implemented',
+   extractionTime: new Date().toISOString(),
+   validation: {isValid: false, totalLength: 0, fullText: '', segmentCount: 0}, // TODO: Update validation
   };
 
   console.log(`[INTELLIGENT-SEGMENTS] ✅ Created ${validSegments.length} intelligent segments with AI titles (avg: ${result.averageDuration}s)`);
@@ -2018,184 +1916,6 @@ app.get('/api/transcript-diagnostics/:videoId', async (req, res) => {
   },
   status: 'diagnostic_complete',
  });
-});
-
-// =============================================================================
-// ZYTE SCRAPY CLOUD ENDPOINTS
-// =============================================================================
-
-// Schedule a transcript scraping job on Zyte Scrapy Cloud
-app.post('/api/zyte/schedule-job', async (req, res) => {
- try {
-  const {videoUrl} = req.body;
-
-  if (!videoUrl) {
-   return res.status(400).json({
-    error: 'videoUrl is required',
-   });
-  }
-
-  console.log(`[ZYTE-API] Scheduling transcript job for: ${videoUrl}`);
-
-  const jobId = await scheduleZyteJob(videoUrl);
-
-  res.json({
-   success: true,
-   jobId,
-   message: `Transcript scraping job scheduled successfully`,
-   videoUrl,
-  });
- } catch (error) {
-  console.error('[ZYTE-API] Error scheduling job:', error.message);
-  res.status(500).json({
-   error: 'Failed to schedule Zyte job',
-   details: error.message,
-  });
- }
-});
-
-// Check the status of a Zyte job
-app.get('/api/zyte/job-status/:jobId', async (req, res) => {
- try {
-  const {jobId} = req.params;
-
-  console.log(`[ZYTE-API] Checking status for job: ${jobId}`);
-
-  const jobStatus = await checkZyteJobStatus(jobId);
-
-  res.json({
-   success: true,
-   jobId,
-   status: jobStatus,
-  });
- } catch (error) {
-  console.error('[ZYTE-API] Error checking job status:', error.message);
-  res.status(500).json({
-   error: 'Failed to check job status',
-   details: error.message,
-  });
- }
-});
-
-// Get the results from a completed Zyte job
-app.get('/api/zyte/job-results/:jobId', async (req, res) => {
- try {
-  const {jobId} = req.params;
-
-  console.log(`[ZYTE-API] Getting results for job: ${jobId}`);
-
-  const results = await getZyteJobResults(jobId);
-
-  res.json({
-   success: true,
-   jobId,
-   results,
-  });
- } catch (error) {
-  console.error('[ZYTE-API] Error getting job results:', error.message);
-  res.status(500).json({
-   error: 'Failed to get job results',
-   details: error.message,
-  });
- }
-});
-
-// Combined endpoint: Schedule job and return transcript when ready
-app.post('/api/zyte/get-transcript', async (req, res) => {
- try {
-  const {videoUrl, timeout = 300000} = req.body; // 5 minute default timeout
-
-  if (!videoUrl) {
-   return res.status(400).json({
-    error: 'videoUrl is required',
-   });
-  }
-
-  console.log(`[ZYTE-API] Starting transcript extraction for: ${videoUrl}`);
-
-  // Schedule the job
-  const jobId = await scheduleZyteJob(videoUrl);
-  console.log(`[ZYTE-API] Job scheduled with ID: ${jobId}`);
-
-  // Poll for completion
-  const startTime = Date.now();
-  const pollInterval = 5000; // Check every 5 seconds
-
-  const pollForCompletion = async () => {
-   const elapsed = Date.now() - startTime;
-
-   if (elapsed > timeout) {
-    throw new Error(`Job timeout after ${timeout / 1000} seconds`);
-   }
-
-   const status = await checkZyteJobStatus(jobId);
-   const jobs = status.jobs || [];
-
-   if (jobs.length === 0) {
-    throw new Error('Job not found in status response');
-   }
-
-   const job = jobs[0];
-   console.log(`[ZYTE-API] Job ${jobId} status: ${job.state}`);
-
-   if (job.state === 'finished') {
-    // Job completed successfully
-    const results = await getZyteJobResults(jobId);
-
-    if (results && results.length > 0) {
-     return results[0]; // Return the first (and should be only) result
-    } else {
-     throw new Error('Job completed but no transcript data found');
-    }
-   } else if (job.state === 'cancelled' || job.state === 'failed') {
-    throw new Error(`Job ${job.state}: ${job.close_reason || 'Unknown error'}`);
-   } else {
-    // Job still running, wait and check again
-    await new Promise((resolve) => setTimeout(resolve, pollInterval));
-    return pollForCompletion();
-   }
-  };
-
-  const transcript = await pollForCompletion();
-
-  res.json({
-   success: true,
-   jobId,
-   transcript,
-   videoUrl,
-  });
- } catch (error) {
-  console.error('[ZYTE-API] Error in get-transcript:', error.message);
-  res.status(500).json({
-   error: 'Failed to extract transcript via Zyte',
-   details: error.message,
-  });
- }
-});
-
-// Poll for job completion and get transcript result
-app.get('/api/zyte/poll-result/:jobId', async (req, res) => {
- try {
-  const {jobId} = req.params;
-
-  console.log(`[ZYTE-API] Starting polling for job: ${jobId}`);
-
-  const transcriptText = await getZyteJobResult(jobId);
-
-  res.json({
-   success: true,
-   jobId,
-   transcript_text: transcriptText,
-   character_count: transcriptText.length,
-   word_count: transcriptText.split(' ').length,
-  });
- } catch (error) {
-  console.error('[ZYTE-API] Error polling for result:', error.message);
-  res.status(500).json({
-   error: 'Failed to poll for Zyte job result',
-   details: error.message,
-  });
- }
 });
 
 // Health check endpoint for transcript services
