@@ -14,6 +14,7 @@ import alternativeTranscriptService from './services/alternativeTranscriptServic
 import emergencyTranscriptService from './services/emergencyTranscriptService.js';
 import enhancedTranscriptOrchestrator from './services/enhancedTranscriptOrchestrator.js';
 import {fetchTranscriptViaInvidious} from './services/invidious.service.js';
+import {TranscriptDisabledError, TranscriptTooShortError, TranscriptNotFoundError} from './services/transcriptErrors.js';
 
 // Polyfill __dirname for ES module
 const __filename = fileURLToPath(import.meta.url);
@@ -491,7 +492,7 @@ function validateShortsInput(youtubeUrl, start, end) {
  if (!youtubeUrl || typeof start !== 'number' || typeof end !== 'number') {
   return {valid: false, error: 'youtubeUrl, start, end (in seconds) required'};
  }
- 
+
  if (!youtubeUrl.includes('youtube.com') && !youtubeUrl.includes('youtu.be')) {
   return {
    valid: false,
@@ -500,7 +501,7 @@ function validateShortsInput(youtubeUrl, start, end) {
    provided: youtubeUrl,
   };
  }
- 
+
  return {valid: true};
 }
 
@@ -517,13 +518,10 @@ function logEnvironmentInfo(id) {
 // Check video formats availability
 async function checkVideoFormats(id, youtubeUrl) {
  try {
-  const formatCheckArgs = [
-   '--list-formats', '--no-warnings', '--user-agent', getRandomUserAgent(),
-   '--extractor-args', 'youtube:player_client=web,android', '--socket-timeout', '20', youtubeUrl,
-  ];
+  const formatCheckArgs = ['--list-formats', '--no-warnings', '--user-agent', getRandomUserAgent(), '--extractor-args', 'youtube:player_client=web,android', '--socket-timeout', '20', youtubeUrl];
 
   const formatCheck = await executeYtDlpSecurely(formatCheckArgs, {timeout: 30000});
-  
+
   const has720p = /\b(720p|1280x720|1920x1080|2560x1440|3840x2160)\b/i.test(formatCheck);
   const has480p = /\b(480p|854x480)\b/i.test(formatCheck);
   const has360p = /\b(360p|640x360)\b/i.test(formatCheck);
@@ -565,13 +563,28 @@ function buildYtDlpArgs(tempFile, youtubeUrl) {
    'bestvideo[height>=360]+bestaudio/' +
    'best[height>=720][ext=mp4]/best[height>=480][ext=mp4]/best[height>=360][ext=mp4]/' +
    'best[ext=mp4]/best',
-  '--no-playlist', '--no-warnings', '--merge-output-format', 'mp4',
-  '--user-agent', getRandomUserAgent(),
-  '--extractor-args', 'youtube:player_client=web,android,ios',
-  '--retries', '5', '--socket-timeout', '45', '--fragment-retries', '3',
-  '--add-header', 'Accept-Language: en-US,en;q=0.9,id;q=0.8',
-  '--add-header', 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-  '--no-check-certificate', '-o', tempFile, youtubeUrl,
+  '--no-playlist',
+  '--no-warnings',
+  '--merge-output-format',
+  'mp4',
+  '--user-agent',
+  getRandomUserAgent(),
+  '--extractor-args',
+  'youtube:player_client=web,android,ios',
+  '--retries',
+  '5',
+  '--socket-timeout',
+  '45',
+  '--fragment-retries',
+  '3',
+  '--add-header',
+  'Accept-Language: en-US,en;q=0.9,id;q=0.8',
+  '--add-header',
+  'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+  '--no-check-certificate',
+  '-o',
+  tempFile,
+  youtubeUrl,
  ];
 }
 
@@ -620,7 +633,7 @@ function analyzeVideoResolution(id, tempFile) {
   const ffprobeResult = execSync(`ffprobe -v quiet -print_format json -show_streams "${tempFile}"`, {encoding: 'utf8'});
   const videoInfo = JSON.parse(ffprobeResult);
   const videoStream = videoInfo.streams.find((s) => s.codec_type === 'video');
-  
+
   if (videoStream) {
    const videoWidth = parseInt(videoStream.width);
    const videoHeight = parseInt(videoStream.height);
@@ -634,7 +647,7 @@ function analyzeVideoResolution(id, tempFile) {
  } catch (e) {
   console.warn(`[${id}] Could not determine video resolution, assuming upscaling needed:`, e.message);
  }
- 
+
  return {videoWidth: 0, videoHeight: 0, needsUpscaling: true};
 }
 
@@ -643,7 +656,7 @@ function ensureEvenDimension(dimension, roundUp = true) {
  if (dimension % 2 === 0) {
   return dimension;
  }
- 
+
  if (roundUp) {
   return dimension + 1;
  } else {
@@ -694,9 +707,7 @@ function buildFfmpegArgs(start, end, tempFile, cutFile, videoFilters, aspectRati
   ffmpegArgs.push('-c', 'copy');
  } else {
   const crf = needsUpscaling ? '16' : '18';
-  ffmpegArgs.push('-c:v', 'libx264', '-crf', crf, '-preset', 'medium', '-profile:v', 'high', 
-                  '-level:v', '4.0', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', 
-                  '-ar', '44100', '-movflags', '+faststart');
+  ffmpegArgs.push('-c:v', 'libx264', '-crf', crf, '-preset', 'medium', '-profile:v', 'high', '-level:v', '4.0', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-movflags', '+faststart');
  }
 
  ffmpegArgs.push(cutFile);
@@ -719,7 +730,7 @@ function scheduleFileCleanup(cutFile) {
 // Main endpoint with reduced complexity
 app.post('/api/shorts', async (req, res) => {
  const {youtubeUrl, start, end, aspectRatio} = req.body;
- 
+
  // Validate input
  const validation = validateShortsInput(youtubeUrl, start, end);
  if (!validation.valid) {
@@ -782,7 +793,7 @@ app.post('/api/shorts', async (req, res) => {
 
  // Analyze video and process with FFmpeg
  const {videoWidth, videoHeight, needsUpscaling} = analyzeVideoResolution(id, tempFile);
- 
+
  if (!fs.existsSync(tempFile)) {
   return res.status(500).json({
    error: 'Downloaded file not found',
@@ -798,7 +809,7 @@ app.post('/api/shorts', async (req, res) => {
  execFile('ffmpeg', ffmpegArgs, (err2, stdout2, stderr2) => {
   console.timeEnd(`[${id}] ffmpeg cut`);
   fs.unlink(tempFile, () => {});
-  
+
   if (err2) {
    console.error(`[${id}] ffmpeg error:`, err2.message);
    return res.status(500).json({
@@ -903,7 +914,6 @@ function cleanupOldMp4Files() {
   console.warn('Failed to cleanup old MP4 files:', e.message);
  }
 }
-
 
 // Add anti-detection debug endpoint
 app.get('/api/transcript-stats', (req, res) => {
@@ -1442,7 +1452,7 @@ async function extractTranscriptViaInvidious(videoId) {
  return {
   segments,
   source: 'Invidious Service (Primary)',
-  hasRealTiming: false
+  hasRealTiming: false,
  };
 }
 
@@ -1470,7 +1480,7 @@ async function extractTranscriptViaYouTubeFallback(videoId) {
     return {
      segments,
      source: 'YouTube Transcript API (Fallback)',
-     hasRealTiming: true
+     hasRealTiming: true,
     };
    }
   } catch (error) {

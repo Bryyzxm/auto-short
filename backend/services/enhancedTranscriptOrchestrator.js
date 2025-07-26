@@ -6,7 +6,7 @@
 import robustTranscriptServiceV2 from './robustTranscriptServiceV2.js';
 import alternativeTranscriptService from './alternativeTranscriptService.js';
 import emergencyTranscriptService from './emergencyTranscriptService.js';
-import {NoValidTranscriptError, TranscriptTooShortError, TranscriptDisabledError, TranscriptValidator} from './transcriptErrors.js';
+import {NoValidTranscriptError, TranscriptDisabledError, TranscriptValidator} from './transcriptErrors.js';
 
 class EnhancedTranscriptOrchestrator {
  constructor() {
@@ -54,118 +54,165 @@ class EnhancedTranscriptOrchestrator {
   console.log(`[TRANSCRIPT-ORCHESTRATOR] Minimum required length: ${minLength} characters`);
 
   this.stats.totalAttempts++;
-  const servicesAttempted = [];
-  let lastError = null;
-  let isDisabledByOwner = false;
+  const extractionContext = {
+   servicesAttempted: [],
+   lastError: null,
+   isDisabledByOwner: false,
+   sessionId,
+   minLength,
+   videoId
+  };
 
-  for (const {name, service, method, options: serviceOptions} of this.services) {
-   const startTime = Date.now(); // Define startTime outside try block to avoid "not defined" error
+  const result = await this.tryAllServices(extractionContext, options);
+  if (result) {
+   return result;
+  }
 
-   try {
-    console.log(`[TRANSCRIPT-ORCHESTRATOR] Trying ${name} service...`);
-    servicesAttempted.push(name);
+  // All services failed
+  this.stats.failureCount++;
+  this.logExtractionFailure(extractionContext);
+  this.throwAppropriateError(extractionContext);
+ }
 
-    let result;
-
-    // Validate service and method exist before calling
-    if (!service || typeof service[method] !== 'function') {
-     throw new Error(`Service ${name} does not have method ${method}`);
-    }
-
-    // Call the appropriate method based on service type
-    if (method === 'extractWithRealTiming') {
-     result = await service[method](videoId, {...serviceOptions, ...options});
-    } else {
-     result = await service[method](videoId, {...serviceOptions, ...options});
-    }
-
-    const extractionTime = Date.now() - startTime;
-    console.log(`[TRANSCRIPT-ORCHESTRATOR] ${name} service completed in ${extractionTime}ms`);
-
-    // CRITICAL: Check if result is null, undefined, or invalid before proceeding
-    if (!result) {
-     throw new Error(`Service ${name} returned null or undefined result`);
-    }
-
-    if (!result.segments || !Array.isArray(result.segments) || result.segments.length === 0) {
-     throw new Error(`Service ${name} returned invalid or empty segments`);
-    }
-
-    // Validate the result using our enhanced validator
-    const validation = TranscriptValidator.validate(result, videoId, minLength);
-
-    console.log(`[TRANSCRIPT-ORCHESTRATOR] ✅ ${name} service SUCCESS:`);
-    console.log(`  - Transcript length: ${validation.totalLength} characters`);
-    console.log(`  - Meaningful segments: ${validation.meaningfulSegments}`);
-    console.log(`  - Method: ${result.method || 'Unknown'}`);
-
-    // Track success stats
-    this.stats.successCount++;
-    this.updateServiceStats(name, true, extractionTime);
-
-    // Return successful result with additional metadata
-    return {
-     ...result,
-     serviceUsed: name,
-     extractionTime,
-     sessionId,
-     validation,
-     isValidated: true,
-    };
-   } catch (error) {
-    const extractionTime = Date.now() - startTime;
-    lastError = error;
-
-    console.log(`[TRANSCRIPT-ORCHESTRATOR] ❌ ${name} service failed: ${error.message}`);
-
-    // Check if this is a "disabled by owner" error - if so, stop trying other services
-    if (TranscriptValidator.isDisabledError(error)) {
-     console.log(`[TRANSCRIPT-ORCHESTRATOR] ⚠️ Video ${videoId} has transcripts disabled by owner - stopping service attempts`);
-     isDisabledByOwner = true;
-     this.updateServiceStats(name, false, extractionTime);
-     break;
-    }
-
-    // Check if this is our custom validation error - preserve it
-    if (error instanceof NoValidTranscriptError) {
-     console.log(`[TRANSCRIPT-ORCHESTRATOR] ⚠️ Validation failed: ${error.message}`);
-     this.updateServiceStats(name, false, extractionTime);
-     lastError = error;
-     break; // Don't try other services if validation specifically failed
-    }
-
-    // Track failure stats
-    this.updateServiceStats(name, false, extractionTime);
-    continue;
+ /**
+  * Try all services sequentially until one succeeds
+  */
+ async tryAllServices(context, options) {
+  for (const serviceConfig of this.services) {
+   const result = await this.tryService(serviceConfig, context, options);
+   if (result) {
+    return result;
+   }
+   
+   if (context.isDisabledByOwner || context.lastError instanceof NoValidTranscriptError) {
+    break;
    }
   }
+  return null;
+ }
 
-  // All services failed - determine the most appropriate error to throw
-  this.stats.failureCount++;
+ /**
+  * Try a single service
+  */
+ async tryService(serviceConfig, context, options) {
+  const {name, service, method, options: serviceOptions} = serviceConfig;
+  const startTime = Date.now();
 
-  console.log(`[TRANSCRIPT-ORCHESTRATOR] 💀 All services failed for ${videoId}`);
-  console.log(`[TRANSCRIPT-ORCHESTRATOR] Services attempted: ${servicesAttempted.join(', ')}`);
+  try {
+   console.log(`[TRANSCRIPT-ORCHESTRATOR] Trying ${name} service...`);
+   context.servicesAttempted.push(name);
 
-  // If we detected that transcripts are disabled by owner
-  if (isDisabledByOwner) {
-   throw new TranscriptDisabledError(videoId);
+   const result = await this.callService(service, method, name, context.videoId, serviceOptions, options);
+   const extractionTime = Date.now() - startTime;
+
+   return this.handleServiceSuccess(result, name, extractionTime, context);
+  } catch (error) {
+   const extractionTime = Date.now() - startTime;
+   this.handleServiceError(error, name, extractionTime, context);
+   return null;
+  }
+ }
+
+ /**
+  * Call the actual service method
+  */
+ async callService(service, method, name, videoId, serviceOptions, options) {
+  if (!service || typeof service[method] !== 'function') {
+   throw new Error(`Service ${name} does not have method ${method}`);
   }
 
-  // If the last error was our custom validation error, preserve it
-  if (lastError instanceof NoValidTranscriptError) {
-   throw lastError;
+  const result = await service[method](videoId, {...serviceOptions, ...options});
+  
+  if (!result || !result.segments || !Array.isArray(result.segments) || result.segments.length === 0) {
+   throw new Error(`Service ${name} returned invalid or empty segments`);
   }
 
-  // Create comprehensive error with extraction failure details
-  const comprehensiveError = new NoValidTranscriptError(videoId, 'extraction_failed', lastError?.message || 'All transcript extraction methods failed', {
-   actualLength: 0,
-   minRequired: minLength,
-   servicesAttempted: servicesAttempted,
-   lastError: lastError?.message || 'Unknown error',
-   sessionId: sessionId,
-   totalAttempts: this.stats.totalAttempts,
-   timestamp: new Date().toISOString(),
-  });
+  return result;
+ }
+
+ /**
+  * Handle successful service response
+  */
+ handleServiceSuccess(result, serviceName, extractionTime, context) {
+  console.log(`[TRANSCRIPT-ORCHESTRATOR] ${serviceName} service completed in ${extractionTime}ms`);
+
+  const validation = TranscriptValidator.validate(result, context.videoId, context.minLength);
+
+  console.log(`[TRANSCRIPT-ORCHESTRATOR] ✅ ${serviceName} service SUCCESS:`);
+  console.log(`  - Transcript length: ${validation.totalLength} characters`);
+  console.log(`  - Meaningful segments: ${validation.meaningfulSegments}`);
+  console.log(`  - Method: ${result.method || 'Unknown'}`);
+
+  this.stats.successCount++;
+  this.updateServiceStats(serviceName, true, extractionTime);
+
+  return {
+   ...result,
+   serviceUsed: serviceName,
+   extractionTime,
+   sessionId: context.sessionId,
+   validation,
+   isValidated: true,
+  };
+ }
+
+ /**
+  * Handle service error
+  */
+ handleServiceError(error, serviceName, extractionTime, context) {
+  context.lastError = error;
+  console.log(`[TRANSCRIPT-ORCHESTRATOR] ❌ ${serviceName} service failed: ${error.message}`);
+
+  if (TranscriptValidator.isDisabledError(error)) {
+   console.log(`[TRANSCRIPT-ORCHESTRATOR] ⚠️ Video ${context.videoId} has transcripts disabled by owner - stopping service attempts`);
+   context.isDisabledByOwner = true;
+   this.updateServiceStats(serviceName, false, extractionTime);
+   return;
+  }
+
+  if (error instanceof NoValidTranscriptError) {
+   console.log(`[TRANSCRIPT-ORCHESTRATOR] ⚠️ Validation failed: ${error.message}`);
+   this.updateServiceStats(serviceName, false, extractionTime);
+   return;
+  }
+
+  this.updateServiceStats(serviceName, false, extractionTime);
+ }
+
+ /**
+  * Log extraction failure details
+  */
+ logExtractionFailure(context) {
+  console.log(`[TRANSCRIPT-ORCHESTRATOR] 💀 All services failed for ${context.videoId}`);
+  console.log(`[TRANSCRIPT-ORCHESTRATOR] Services attempted: ${context.servicesAttempted.join(', ')}`);
+ }
+
+ /**
+  * Throw the most appropriate error based on context
+  */
+ throwAppropriateError(context) {
+  if (context.isDisabledByOwner) {
+   throw new TranscriptDisabledError(context.videoId);
+  }
+
+  if (context.lastError instanceof NoValidTranscriptError) {
+   throw context.lastError;
+  }
+
+  const comprehensiveError = new NoValidTranscriptError(
+   context.videoId,
+   'extraction_failed',
+   context.lastError?.message || 'All transcript extraction methods failed',
+   {
+    actualLength: 0,
+    minRequired: context.minLength,
+    servicesAttempted: context.servicesAttempted,
+    lastError: context.lastError?.message || 'Unknown error',
+    sessionId: context.sessionId,
+    totalAttempts: this.stats.totalAttempts,
+    timestamp: new Date().toISOString(),
+   }
+  );
 
   throw comprehensiveError;
  }
