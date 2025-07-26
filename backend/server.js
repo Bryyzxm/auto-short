@@ -9,7 +9,6 @@ import fetch from 'node-fetch';
 import {fileURLToPath} from 'url';
 import {YoutubeTranscript} from 'youtube-transcript';
 import antiDetectionTranscript from './services/antiDetectionTranscript.js';
-import robustTranscriptService from './services/robustTranscriptService.js';
 import robustTranscriptServiceV2 from './services/robustTranscriptServiceV2.js';
 import alternativeTranscriptService from './services/alternativeTranscriptService.js';
 import emergencyTranscriptService from './services/emergencyTranscriptService.js';
@@ -17,6 +16,7 @@ import intelligentChunker from './services/intelligentChunker.js';
 import aiTitleGenerator from './services/aiTitleGenerator.js';
 import smartExcerptFormatter from './services/smartExcerptFormatter.js';
 import enhancedTranscriptOrchestrator from './services/enhancedTranscriptOrchestrator.js';
+import {fetchTranscriptViaInvidious} from './services/invidious.service.js';
 import {NoValidTranscriptError, TranscriptTooShortError, TranscriptDisabledError, TranscriptNotFoundError} from './services/transcriptErrors.js';
 
 // Polyfill __dirname for ES module
@@ -1096,129 +1096,62 @@ app.get('/api/yt-transcript', async (req, res) => {
  }
 
  try {
-  console.log(`[TRANSCRIPT-V2] 🚀 Starting enhanced extraction V2 for ${videoId}`);
+  console.log(`[TRANSCRIPT-V2] 🚀 Starting Invidious-first extraction for ${videoId}`);
 
-  // Use Enhanced Transcript Orchestrator as primary method
-  const orchestratorResult = await enhancedTranscriptOrchestrator.extractTranscript(videoId, {
-   minLength: 50, // Lower threshold for basic transcript endpoint
-   lang: lang ? lang.split(',') : ['id', 'en'],
-  });
-
-  // CRITICAL: Validate orchestrator result before proceeding
-  if (!orchestratorResult) {
-   throw new Error('Failed to retrieve a valid transcript after all attempts. Orchestrator returned null or undefined.');
-  }
-
-  if (!orchestratorResult.segments || !Array.isArray(orchestratorResult.segments) || orchestratorResult.segments.length === 0) {
-   throw new Error('Failed to retrieve a valid transcript after all attempts. No valid segments available.');
-  }
-
-  if (!orchestratorResult.validation || orchestratorResult.validation.totalLength < 50) {
-   throw new Error('Failed to retrieve a valid transcript after all attempts. Transcript validation failed.');
-  }
-
-  console.log(`[TRANSCRIPT-V2] ✅ Orchestrator success: ${orchestratorResult.validation.totalLength} chars, ${orchestratorResult.segments.length} segments, service: ${orchestratorResult.serviceUsed}`);
-
-  const result = {
-   segments: orchestratorResult.segments,
-   language: orchestratorResult.language,
-   source: `Enhanced Orchestrator (${orchestratorResult.serviceUsed})`,
-   method: orchestratorResult.method,
-   length: orchestratorResult.validation.totalLength,
-   hasRealTiming: orchestratorResult.hasRealTiming,
-   serviceUsed: orchestratorResult.serviceUsed,
-   extractionTime: orchestratorResult.extractionTime,
-   sessionId: orchestratorResult.sessionId,
-   validation: orchestratorResult.validation,
-  };
-
-  // Cache successful result
-  transcriptCache.set(videoId, {
-   data: result,
-   timestamp: Date.now(),
-   failed: false,
-  });
-
-  return res.json(result);
- } catch (orchestratorError) {
-  console.log(`[TRANSCRIPT-V2] ❌ Orchestrator failed: ${orchestratorError.message}`);
-
-  // Handle specific transcript errors from orchestrator
-  if (orchestratorError instanceof NoValidTranscriptError) {
-   const errorResponse = {
-    error: 'No Valid Transcript Available',
-    videoId: videoId,
-    message: orchestratorError.message,
-    reason: orchestratorError.details.reason || 'unknown',
-    userFriendly: true,
-    technical_details: {
-     errorType: orchestratorError.name,
-     actualLength: orchestratorError.details.actualLength || 0,
-     minRequired: orchestratorError.details.minRequired || 50,
-     servicesAttempted: orchestratorError.details.servicesAttempted || [],
-     timestamp: new Date().toISOString(),
-    },
-    suggestions: ['Video may not have transcripts/captions available', 'Try a different video with verified captions', 'Check if the video is accessible in your region'],
-   };
-
-   // Cache failure
-   transcriptCache.set(videoId, {
-    data: errorResponse,
-    timestamp: Date.now(),
-    failed: true,
-   });
-
-   console.log(`[TRANSCRIPT-V2] 🚫 No valid transcript for ${videoId}: ${orchestratorError.details.reason}`);
-   return res.status(422).json(errorResponse);
-  }
-
-  // Fallback to original robust service
+  // PRIMARY METHOD: Try Invidious service first
   try {
-   console.log(`[TRANSCRIPT-V2] 🔄 Falling back to original robust service...`);
+   console.log(`[TRANSCRIPT-V2] 🎯 Attempting Invidious extraction for ${videoId}`);
 
-   const fallbackData = await robustTranscriptService.extractWithRealTiming(videoId, {
-    lang: lang ? lang.split(',') : ['id', 'en'],
-   });
+   const invidiousTranscript = await fetchTranscriptViaInvidious(videoId);
 
-   // CRITICAL: Validate fallback data before proceeding
-   if (!fallbackData) {
-    throw new Error('Fallback service returned null or undefined result');
+   if (invidiousTranscript && invidiousTranscript.length > 50) {
+    console.log(`[TRANSCRIPT-V2] ✅ Invidious success: ${invidiousTranscript.length} characters`);
+
+    // Convert plain text to segments (approximate timing)
+    const words = invidiousTranscript.split(' ');
+    const segments = [];
+    const wordsPerSegment = 10; // Approximate words per segment
+    const secondsPerWord = 0.5; // Approximate speaking rate
+
+    for (let i = 0; i < words.length; i += wordsPerSegment) {
+     const segmentWords = words.slice(i, i + wordsPerSegment);
+     const start = i * secondsPerWord;
+     const end = (i + segmentWords.length) * secondsPerWord;
+
+     segments.push({
+      text: segmentWords.join(' '),
+      start: start,
+      end: end,
+     });
+    }
+
+    const result = {
+     segments: segments,
+     language: 'auto-detected',
+     source: 'Invidious Service (Primary)',
+     method: 'Invidious API',
+     length: invidiousTranscript.length,
+     hasRealTiming: false, // Invidious gives plain text, timing is estimated
+     serviceUsed: 'invidious',
+     extractionTime: Date.now(),
+    };
+
+    // Cache successful result
+    transcriptCache.set(videoId, {
+     data: result,
+     timestamp: Date.now(),
+     failed: false,
+    });
+
+    return res.json(result);
+   } else {
+    throw new Error('Invidious returned empty or too short transcript');
    }
+  } catch (invidiousError) {
+   console.log(`[TRANSCRIPT-V2] ❌ Invidious workflow failed: ${invidiousError.message}, attempting fallback...`);
 
-   if (!fallbackData.transcript || fallbackData.transcript.length < 10) {
-    throw new Error('Fallback service returned insufficient transcript data');
-   }
-
-   if (!fallbackData.segments || !Array.isArray(fallbackData.segments) || fallbackData.segments.length === 0) {
-    throw new Error('Fallback service returned no valid segments');
-   }
-
-   console.log(`[TRANSCRIPT-V2] ✅ Fallback success: ${fallbackData.transcript.length} chars, ${fallbackData.segments.length} segments`);
-
-   const result = {
-    segments: fallbackData.segments,
-    language: fallbackData.language,
-    source: 'Robust Transcript Service (Fallback)',
-    method: fallbackData.method,
-    length: fallbackData.transcript.length,
-    hasRealTiming: fallbackData.hasRealTiming,
-   };
-
-   // Cache successful result
-   transcriptCache.set(videoId, {
-    data: result,
-    timestamp: Date.now(),
-    failed: false,
-   });
-
-   return res.json(result);
-  } catch (fallbackError) {
-   console.log(`[TRANSCRIPT-V2] ❌ Fallback also failed: ${fallbackError.message}`);
-  }
-
-  // Final fallback: Try youtube-transcript library directly
-  console.log(`[TRANSCRIPT-V2] 🔄 Final fallback: YouTube Transcript API...`);
-  try {
+   // FALLBACK METHOD: Use YouTube Transcript library directly
+   console.log(`[TRANSCRIPT-V2] 🔄 Fallback: YouTube Transcript API...`);
    const languages = ['id', 'en'];
 
    for (const langCode of languages) {
@@ -1257,7 +1190,7 @@ app.get('/api/yt-transcript', async (req, res) => {
      const result = {
       segments: segments,
       language: langCode === 'id' ? 'Indonesian' : 'English',
-      source: 'YouTube Transcript API (Direct)',
+      source: 'YouTube Transcript API (Fallback)',
       method: `Direct API (${langCode.toUpperCase()})`,
       length: transcriptText.length,
       hasRealTiming: true,
@@ -1275,19 +1208,22 @@ app.get('/api/yt-transcript', async (req, res) => {
      console.log(`[TRANSCRIPT-V2] Direct API failed for ${langCode}: ${langError.message}`);
     }
    }
-  } catch (directError) {
-   console.log(`[TRANSCRIPT-V2] ❌ Direct API also failed: ${directError.message}`);
+
+   // If we get here, both Invidious and direct YouTube API failed
+   throw new Error('Both Invidious and direct YouTube API methods failed');
   }
+ } catch (mainError) {
+  console.log(`[TRANSCRIPT-V2] ❌ All methods failed: ${mainError.message}`);
 
   // All methods failed - create comprehensive error response
   const errorResponse = {
    error: 'Failed to retrieve a valid transcript after all attempts',
    videoId: videoId,
-   message: 'All transcript extraction methods failed. Video may not have transcripts available or YouTube is blocking access.',
+   message: 'All transcript extraction methods failed. Video may not have transcripts available or services are blocking access.',
    userFriendly: true,
    technical_details: {
-    orchestrator_error: orchestratorError.message,
-    extraction_attempts: ['Enhanced Transcript Orchestrator (Primary)', 'Robust Transcript Service V1 (Fallback)', 'YouTube Transcript API Direct (Final Fallback)'],
+    main_error: mainError.message,
+    extraction_attempts: ['Invidious Service (Primary)', 'YouTube Transcript API (Fallback)'],
     timestamp: new Date().toISOString(),
    },
    suggested_actions: ['Verify the video has captions/transcripts enabled', 'Try a different video with verified captions', 'Check if the video is accessible and not age-restricted', 'Use manual transcript upload feature as workaround'],
@@ -1300,7 +1236,7 @@ app.get('/api/yt-transcript', async (req, res) => {
    failed: true,
   });
 
-  console.log(`[TRANSCRIPT-V2] 💀 All methods failed for ${videoId} - throwing controlled error`);
+  console.log(`[TRANSCRIPT-V2] 💀 All methods failed for ${videoId} - returning error response`);
   return res.status(404).json(errorResponse);
  }
 });
