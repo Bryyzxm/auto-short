@@ -1538,6 +1538,13 @@ app.get('/api/enhanced-transcript/:videoId', async (req, res) => {
   });
  } catch (error) {
   console.error(`[ENHANCED-API] ❌ Failed for ${videoId}:`, error.message);
+  console.error(`[ENHANCED-API] Error type: ${error.constructor.name}`);
+  console.error(`[ENHANCED-API] Error instance checks:`, {
+   isTranscriptDisabledError: error instanceof TranscriptDisabledError,
+   isTranscriptTooShortError: error instanceof TranscriptTooShortError,
+   isTranscriptNotFoundError: error instanceof TranscriptNotFoundError,
+   hasTranscriptErrorFlag: error.isTranscriptError,
+  });
 
   // Check for specific transcript not available error
   if (error.message === 'TRANSCRIPT_NOT_AVAILABLE') {
@@ -1547,8 +1554,8 @@ app.get('/api/enhanced-transcript/:videoId', async (req, res) => {
    });
   }
 
-  // Handle specific transcript errors
-  if (error instanceof TranscriptDisabledError) {
+  // Handle specific transcript errors with defensive checks
+  if (error instanceof TranscriptDisabledError || error.name === 'TranscriptDisabledError') {
    return res.status(404).json({
     error: 'Transcript is disabled on this video',
     videoId: videoId,
@@ -1560,24 +1567,24 @@ app.get('/api/enhanced-transcript/:videoId', async (req, res) => {
    });
   }
 
-  if (error instanceof TranscriptTooShortError) {
+  if (error instanceof TranscriptTooShortError || error.name === 'TranscriptTooShortError') {
    return res.status(422).json({
     error: 'Transcript too short',
     videoId: videoId,
     message: error.message,
-    actualLength: error.details.actualLength,
-    minRequired: error.details.minRequired,
+    actualLength: error.details?.actualLength || 0,
+    minRequired: error.details?.minRequired || 250,
     reason: 'transcript_too_short',
     userFriendly: true,
    });
   }
 
-  if (error instanceof TranscriptNotFoundError) {
+  if (error instanceof TranscriptNotFoundError || error.name === 'TranscriptNotFoundError') {
    return res.status(404).json({
     error: 'No transcript found',
     videoId: videoId,
     message: error.message,
-    servicesAttempted: error.details.servicesAttempted,
+    servicesAttempted: error.details?.servicesAttempted || [],
     reason: 'transcript_not_found',
     userFriendly: true,
    });

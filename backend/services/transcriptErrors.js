@@ -3,6 +3,7 @@
  * Enhanced error handling with specific error types for better user experience
  */
 
+// Base error class for all transcript-related errors
 export class NoValidTranscriptError extends Error {
  constructor(message, videoId, details = {}) {
   super(message);
@@ -14,6 +15,7 @@ export class NoValidTranscriptError extends Error {
  }
 }
 
+// Specific error when transcript is too short to be useful
 export class TranscriptTooShortError extends NoValidTranscriptError {
  constructor(videoId, actualLength, minRequired = 250) {
   const message = `A valid transcript is not available for this video. The extracted transcript is too short (${actualLength} characters, minimum required: ${minRequired}).`;
@@ -26,6 +28,7 @@ export class TranscriptTooShortError extends NoValidTranscriptError {
  }
 }
 
+// Specific error when video owner has disabled transcripts/captions
 export class TranscriptDisabledError extends NoValidTranscriptError {
  constructor(videoId) {
   const message = 'A valid transcript is not available for this video. The video owner has disabled captions/transcripts.';
@@ -36,6 +39,7 @@ export class TranscriptDisabledError extends NoValidTranscriptError {
  }
 }
 
+// Specific error when no transcript can be found despite trying multiple methods
 export class TranscriptNotFoundError extends NoValidTranscriptError {
  constructor(videoId, servicesAttempted = []) {
   const message = 'A valid transcript is not available for this video. No captions were found despite trying multiple extraction methods.';
