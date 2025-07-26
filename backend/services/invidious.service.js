@@ -1,4 +1,4 @@
-const axios = require('axios');
+import axios from 'axios';
 
 /**
  * Fetches and filters healthy Invidious instances from the official API
@@ -179,7 +179,4 @@ async function fetchTranscriptViaInvidious(videoId) {
  throw new Error('Failed to fetch transcript from all available Invidious instances');
 }
 
-module.exports = {
- getHealthyInvidiousInstances,
- fetchTranscriptViaInvidious,
-};
+export {getHealthyInvidiousInstances, fetchTranscriptViaInvidious};
