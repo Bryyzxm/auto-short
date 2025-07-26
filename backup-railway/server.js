@@ -240,10 +240,9 @@ app.post('/api/video-quality-check', (req, res) => {
   // Parse for quality levels with better detection
   const has720p = /\b(720p|1280x720|1920x1080|2560x1440|3840x2160)\b/i.test(formatsResult);
   const has480p = /\b(480p|854x480)\b/i.test(formatsResult);
-  const has360p = /\b(360p|640x360)\b/i.test(formatsResult);
 
-  let maxQuality = '360p';
-  let upscalingNeeded = true;
+  let maxQuality;
+  let upscalingNeeded;
 
   if (has720p) {
    maxQuality = '720p+';
@@ -251,7 +250,7 @@ app.post('/api/video-quality-check', (req, res) => {
   } else if (has480p) {
    maxQuality = '480p';
    upscalingNeeded = true;
-  } else if (has360p) {
+  } else {
    maxQuality = '360p';
    upscalingNeeded = true;
   }
@@ -272,7 +271,6 @@ app.post('/api/video-quality-check', (req, res) => {
 });
 
 // Endpoint: POST /api/shorts
-// Body: { youtubeUrl, start, end }
 app.post('/api/shorts', async (req, res) => {
  const {youtubeUrl, start, end, aspectRatio} = req.body;
  if (!youtubeUrl || typeof start !== 'number' || typeof end !== 'number') {
@@ -395,7 +393,8 @@ app.post('/api/shorts', async (req, res) => {
   youtubeUrl,
  ];
 
- console.log(`[${id}] yt-dlp command: ${YT_DLP_PATH} ${ytDlpArgs.map((arg) => (arg.includes(' ') ? `"${arg}"` : arg)).join(' ')}`);
+ const commandDisplay = ytDlpArgs.map((arg) => (arg.includes(' ') ? `"${arg}"` : arg)).join(' ');
+ console.log(`[${id}] yt-dlp command: ${YT_DLP_PATH} ${commandDisplay}`);
 
  execFile(YT_DLP_PATH, ytDlpArgs, {maxBuffer: 1024 * 1024 * 50}, (err, stdout, stderr) => {
   console.timeEnd(`[${id}] yt-dlp download`);
@@ -532,7 +531,6 @@ app.post('/api/shorts', async (req, res) => {
   if (aspectRatio === '9:16') {
    // Calculate dimensions for 9:16 aspect ratio
    const currentHeight = needsUpscaling ? 720 : videoHeight;
-   const currentWidth = needsUpscaling ? Math.round((720 * videoWidth) / videoHeight) : videoWidth;
    const targetWidth = Math.round(currentHeight * (9 / 16));
 
    // Ensure even dimensions
@@ -544,7 +542,6 @@ app.post('/api/shorts', async (req, res) => {
   } else if (aspectRatio === '16:9') {
    // Calculate dimensions for 16:9 aspect ratio
    const currentHeight = needsUpscaling ? 720 : videoHeight;
-   const currentWidth = needsUpscaling ? Math.round((720 * videoWidth) / videoHeight) : videoWidth;
    const targetWidth = Math.round(currentHeight * (16 / 9));
 
    // Ensure even dimensions
@@ -722,20 +719,6 @@ function parseVttContent(vttContent) {
 
  // Parse VTT ke array segmen {start, end, text}
  const segments = [];
- // Gunakan set untuk mendeteksi teks identik
- const seenNormalizedTexts = new Set();
- // Helper Jaccard similarity untuk fuzzy duplikasi
- const jaccard = (a, b) => {
-  const sa = new Set(a.split(' '));
-  const sb = new Set(b.split(' '));
-  const inter = [...sa].filter((w) => sb.has(w)).length;
-  return inter / Math.max(sa.size, sb.size || 1);
- };
- // Helper konversi timestamp HH:MM:SS.mmm → detik
- const toSec = (ts) => {
-  const [h, m, s] = ts.split(':');
-  return parseInt(h) * 3600 + parseInt(m) * 60 + parseFloat(s);
- };
 
  // Split berdasarkan baris kosong untuk mendapatkan blok-blok subtitle
  const blocks = cleanContent.split(/\n\s*\n/).filter((block) => block.trim());

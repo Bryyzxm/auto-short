@@ -12,12 +12,8 @@ import antiDetectionTranscript from './services/antiDetectionTranscript.js';
 import robustTranscriptServiceV2 from './services/robustTranscriptServiceV2.js';
 import alternativeTranscriptService from './services/alternativeTranscriptService.js';
 import emergencyTranscriptService from './services/emergencyTranscriptService.js';
-import intelligentChunker from './services/intelligentChunker.js';
-import aiTitleGenerator from './services/aiTitleGenerator.js';
-import smartExcerptFormatter from './services/smartExcerptFormatter.js';
 import enhancedTranscriptOrchestrator from './services/enhancedTranscriptOrchestrator.js';
 import {fetchTranscriptViaInvidious} from './services/invidious.service.js';
-import {NoValidTranscriptError, TranscriptTooShortError, TranscriptDisabledError, TranscriptNotFoundError} from './services/transcriptErrors.js';
 
 // Polyfill __dirname for ES module
 const __filename = fileURLToPath(import.meta.url);
@@ -458,10 +454,9 @@ app.post('/api/video-quality-check', async (req, res) => {
   // Parse for quality levels with better detection
   const has720p = /\b(720p|1280x720|1920x1080|2560x1440|3840x2160)\b/i.test(formatsResult);
   const has480p = /\b(480p|854x480)\b/i.test(formatsResult);
-  const has360p = /\b(360p|640x360)\b/i.test(formatsResult);
 
-  let maxQuality = '360p';
-  let upscalingNeeded = true;
+  let maxQuality;
+  let upscalingNeeded;
 
   if (has720p) {
    maxQuality = '720p+';
@@ -469,7 +464,7 @@ app.post('/api/video-quality-check', async (req, res) => {
   } else if (has480p) {
    maxQuality = '480p';
    upscalingNeeded = true;
-  } else if (has360p) {
+  } else {
    maxQuality = '360p';
    upscalingNeeded = true;
   }
@@ -489,141 +484,270 @@ app.post('/api/video-quality-check', async (req, res) => {
  }
 });
 
-// Endpoint: POST /api/shorts
-// Body: { youtubeUrl, start, end }
-app.post('/api/shorts', async (req, res) => {
- const {youtubeUrl, start, end, aspectRatio} = req.body;
+// Helper functions for /api/shorts endpoint to reduce complexity
+
+// Validate input parameters
+function validateShortsInput(youtubeUrl, start, end) {
  if (!youtubeUrl || typeof start !== 'number' || typeof end !== 'number') {
-  return res.status(400).json({error: 'youtubeUrl, start, end (in seconds) required'});
+  return {valid: false, error: 'youtubeUrl, start, end (in seconds) required'};
  }
- const id = uuidv4();
- const tempFile = path.join(process.cwd(), `${id}.mp4`);
+ 
+ if (!youtubeUrl.includes('youtube.com') && !youtubeUrl.includes('youtu.be')) {
+  return {
+   valid: false,
+   error: 'Invalid YouTube URL',
+   details: 'Please provide a valid YouTube URL',
+   provided: youtubeUrl,
+  };
+ }
+ 
+ return {valid: true};
+}
 
- // Logging waktu
- console.log(`[${id}] Mulai proses download dan cut segmen: ${youtubeUrl} (${start}s - ${end}s, rasio: ${aspectRatio})`);
-
- // 🚨 PRODUCTION DEBUGGING: Add detailed environment info for error tracking
+// Log environment information for debugging
+function logEnvironmentInfo(id) {
  console.log(`[${id}] 🔧 Environment Debug Info:`);
  console.log(`[${id}] - Platform: ${process.platform}`);
  console.log(`[${id}] - YT-DLP Path: ${YT_DLP_PATH}`);
  console.log(`[${id}] - YT-DLP Exists: ${fs.existsSync(YT_DLP_PATH) || 'N/A (system binary)'}`);
  console.log(`[${id}] - NODE_ENV: ${process.env.NODE_ENV || 'undefined'}`);
  console.log(`[${id}] - Railway Env: ${process.env.RAILWAY_ENVIRONMENT_NAME || 'none'}`);
+}
 
- // Enhanced input validation
- if (!youtubeUrl || (!youtubeUrl.includes('youtube.com') && !youtubeUrl.includes('youtu.be'))) {
-  console.error(`[${id}] ❌ Invalid YouTube URL: ${youtubeUrl}`);
-  return res.status(400).json({
-   error: 'Invalid YouTube URL',
-   details: 'Please provide a valid YouTube URL',
-   provided: youtubeUrl,
-  });
- }
-
- // Pre-check: List available formats to ensure compatibility
- console.log(`[${id}] Checking available formats...`);
+// Check video formats availability
+async function checkVideoFormats(id, youtubeUrl) {
  try {
   const formatCheckArgs = [
-   '--list-formats',
-   '--no-warnings',
-   '--user-agent',
-   getRandomUserAgent(), // Remove quotes - spawn handles this properly
-   '--extractor-args',
-   'youtube:player_client=web,android',
-   '--socket-timeout',
-   '20',
-   youtubeUrl,
+   '--list-formats', '--no-warnings', '--user-agent', getRandomUserAgent(),
+   '--extractor-args', 'youtube:player_client=web,android', '--socket-timeout', '20', youtubeUrl,
   ];
 
-  const formatCheck = await executeYtDlpSecurely(formatCheckArgs, {
-   timeout: 30000,
-  });
-
-  // Enhanced quality detection
+  const formatCheck = await executeYtDlpSecurely(formatCheckArgs, {timeout: 30000});
+  
   const has720p = /\b(720p|1280x720|1920x1080|2560x1440|3840x2160)\b/i.test(formatCheck);
   const has480p = /\b(480p|854x480)\b/i.test(formatCheck);
   const has360p = /\b(360p|640x360)\b/i.test(formatCheck);
 
   console.log(`[${id}] Quality analysis - 720p+: ${has720p}, 480p: ${has480p}, 360p: ${has360p}`);
 
-  // We'll accept any quality and upscale if needed
   if (!has720p && !has480p && !has360p) {
-   console.error(`[${id}] No detectable quality formats available for this video`);
-   return res.status(400).json({
+   return {
+    success: false,
     error: 'No usable formats available',
     details: 'This video does not have any recognizable quality formats. Please try a different video.',
     availableFormats: formatCheck.split('\n').slice(0, 10).join('\n'),
-   });
+   };
   }
 
   const willUpscale = !has720p;
   console.log(`[${id}] ${willUpscale ? '📈 Will upscale to 720p after download' : '✅ Native 720p+ available'}`);
+  return {success: true, willUpscale};
  } catch (e) {
   console.warn(`[${id}] Could not check formats, proceeding with fallback strategy:`, e.message);
+  return {success: true, willUpscale: true};
  }
+}
 
- console.time(`[${id}] yt-dlp download`);
-
- // Enhanced format selection with 2025.07.21 yt-dlp compatibility
- const ytDlpArgs = [
+// Build yt-dlp arguments for video download
+function buildYtDlpArgs(tempFile, youtubeUrl) {
+ return [
   '-f',
-  // NEW: 2025.07.21 optimized format selection for YouTube's latest changes
-  // Priority 1: 720p+ DASH streams (YouTube's preferred method as of July 2025)
-  'bestvideo[height>=720][vcodec^=avc1]+bestaudio[acodec^=mp4a]/' + // H.264 + AAC (most compatible)
-   'bestvideo[height>=720][ext=mp4]+bestaudio[ext=m4a]/' + // Standard MP4/M4A combo
-   'bestvideo[height>=720][vcodec^=vp9]+bestaudio[acodec^=opus]/' + // VP9 + Opus (modern)
-   'bestvideo[height>=720]+bestaudio[ext=m4a]/' + // Any 720p video + M4A audio
-   'bestvideo[height>=720]+bestaudio/' + // Any 720p video + best audio
-   // Priority 2: 480p for upscaling (better than 360p)
+  'bestvideo[height>=720][vcodec^=avc1]+bestaudio[acodec^=mp4a]/' +
+   'bestvideo[height>=720][ext=mp4]+bestaudio[ext=m4a]/' +
+   'bestvideo[height>=720][vcodec^=vp9]+bestaudio[acodec^=opus]/' +
+   'bestvideo[height>=720]+bestaudio[ext=m4a]/' +
+   'bestvideo[height>=720]+bestaudio/' +
    'bestvideo[height>=480][vcodec^=avc1]+bestaudio[acodec^=mp4a]/' +
    'bestvideo[height>=480][ext=mp4]+bestaudio[ext=m4a]/' +
    'bestvideo[height>=480]+bestaudio[ext=m4a]/' +
    'bestvideo[height>=480]+bestaudio/' +
-   // Priority 3: 360p minimum acceptable quality
    'bestvideo[height>=360][ext=mp4]+bestaudio[ext=m4a]/' +
    'bestvideo[height>=360]+bestaudio/' +
-   // Priority 4: Progressive formats as last resort
    'best[height>=720][ext=mp4]/best[height>=480][ext=mp4]/best[height>=360][ext=mp4]/' +
-   // Final fallback: anything that works
    'best[ext=mp4]/best',
-  '--no-playlist',
-  '--no-warnings',
-  '--merge-output-format',
-  'mp4',
-  // Enhanced reliability parameters for 2025.07.21
-  '--user-agent',
-  getRandomUserAgent(),
-  '--extractor-args',
-  'youtube:player_client=web,android,ios', // Multi-client strategy for better success rate
-  '--retries',
-  '5', // Increased from 3 to handle YouTube's stricter rate limits
-  '--socket-timeout',
-  '45', // Increased timeout for complex DASH resolution
-  '--fragment-retries',
-  '3', // Retry failed fragments
-  '--add-header',
-  'Accept-Language: en-US,en;q=0.9,id;q=0.8',
-  '--add-header',
-  'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-  // Better cookie handling
-  '--no-check-certificate',
-  '-o',
-  tempFile,
-  youtubeUrl,
+  '--no-playlist', '--no-warnings', '--merge-output-format', 'mp4',
+  '--user-agent', getRandomUserAgent(),
+  '--extractor-args', 'youtube:player_client=web,android,ios',
+  '--retries', '5', '--socket-timeout', '45', '--fragment-retries', '3',
+  '--add-header', 'Accept-Language: en-US,en;q=0.9,id;q=0.8',
+  '--add-header', 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+  '--no-check-certificate', '-o', tempFile, youtubeUrl,
  ];
+}
 
+// Handle yt-dlp download errors with user-friendly messages
+function handleDownloadError(err) {
+ let errorDetails = 'Unknown yt-dlp error';
+ let userFriendlyError = 'Video download failed';
+
+ if (err.message) {
+  if (err.message.includes('Requested format is not available')) {
+   errorDetails = 'No compatible video format found';
+   userFriendlyError = 'This video format is not supported. Try a different video.';
+  } else if (err.message.includes('Sign in to confirm')) {
+   errorDetails = 'YouTube age verification or sign-in required';
+   userFriendlyError = 'This video requires sign-in or age verification. Try a different video.';
+  } else if (err.message.includes('Video unavailable') || err.message.includes('Private video')) {
+   errorDetails = 'Video is not accessible';
+   userFriendlyError = 'This video is private, unavailable, or geo-blocked.';
+  } else if (err.message.includes('429') || err.message.includes('Too Many Requests')) {
+   errorDetails = 'YouTube rate limiting active';
+   userFriendlyError = 'YouTube is rate-limiting requests. Please wait and try again in 10-15 minutes.';
+  } else if (err.message.includes('network') || err.message.includes('timeout')) {
+   errorDetails = 'Network or timeout error';
+   userFriendlyError = 'Network connection issue. Please try again.';
+  } else if (err.message.includes('EACCES') || err.message.includes('Permission denied')) {
+   errorDetails = 'File permission error (production environment)';
+   userFriendlyError = 'Server configuration issue. This will be fixed soon.';
+  } else if (err.message.includes('404') || err.message.includes('Not Found')) {
+   errorDetails = 'Video not found';
+   userFriendlyError = 'This video was not found or has been deleted.';
+  } else if (err.message.includes('HTTP Error 403')) {
+   errorDetails = 'Access forbidden by YouTube';
+   userFriendlyError = 'YouTube has blocked access to this video from our server.';
+  } else if (err.message.includes('not a valid URL') || err.message.includes('generic')) {
+   errorDetails = 'Command line parsing error (likely user-agent issue)';
+   userFriendlyError = 'Server configuration error. Please try again.';
+  }
+ }
+
+ return {errorDetails, userFriendlyError};
+}
+
+// Analyze video resolution and determine if upscaling is needed
+function analyzeVideoResolution(id, tempFile) {
+ try {
+  const ffprobeResult = execSync(`ffprobe -v quiet -print_format json -show_streams "${tempFile}"`, {encoding: 'utf8'});
+  const videoInfo = JSON.parse(ffprobeResult);
+  const videoStream = videoInfo.streams.find((s) => s.codec_type === 'video');
+  
+  if (videoStream) {
+   const videoWidth = parseInt(videoStream.width);
+   const videoHeight = parseInt(videoStream.height);
+   const needsUpscaling = videoHeight < 720;
+
+   console.log(`[${id}] Video resolution: ${videoWidth}x${videoHeight} (${videoHeight}p)`);
+   console.log(`[${id}] ${needsUpscaling ? '📈 UPSCALING REQUIRED' : '✅ Resolution adequate'}: ${videoHeight}p`);
+
+   return {videoWidth, videoHeight, needsUpscaling};
+  }
+ } catch (e) {
+  console.warn(`[${id}] Could not determine video resolution, assuming upscaling needed:`, e.message);
+ }
+ 
+ return {videoWidth: 0, videoHeight: 0, needsUpscaling: true};
+}
+
+// Helper function to ensure even dimensions for FFmpeg
+function ensureEvenDimension(dimension, roundUp = true) {
+ if (dimension % 2 === 0) {
+  return dimension;
+ }
+ 
+ if (roundUp) {
+  return dimension + 1;
+ } else {
+  return dimension - 1;
+ }
+}
+
+// Helper function to build crop filter string
+function buildCropFilter(targetWidth, currentHeight) {
+ const evenTargetWidth = ensureEvenDimension(targetWidth, false);
+ const evenCurrentHeight = ensureEvenDimension(currentHeight, false);
+ return `crop=${evenTargetWidth}:${evenCurrentHeight}:(iw-${evenTargetWidth})/2:(ih-${evenCurrentHeight})/2`;
+}
+
+// Build video filters for FFmpeg processing
+function buildVideoFilters(needsUpscaling, aspectRatio, videoWidth, videoHeight) {
+ const videoFilters = [];
+
+ if (needsUpscaling) {
+  const targetHeight = 720;
+  const targetWidth = Math.round((targetHeight * videoWidth) / videoHeight);
+  const evenWidth = ensureEvenDimension(targetWidth, true);
+  videoFilters.push(`scale=${evenWidth}:${targetHeight}:flags=lanczos`);
+ }
+
+ if (aspectRatio === '9:16') {
+  const currentHeight = needsUpscaling ? 720 : videoHeight;
+  const targetWidth = Math.round(currentHeight * (9 / 16));
+  videoFilters.push(buildCropFilter(targetWidth, currentHeight));
+ } else if (aspectRatio === '16:9') {
+  const currentHeight = needsUpscaling ? 720 : videoHeight;
+  const targetWidth = Math.round(currentHeight * (16 / 9));
+  videoFilters.push(buildCropFilter(targetWidth, currentHeight));
+ }
+
+ return videoFilters;
+}
+
+// Build FFmpeg arguments for video processing
+function buildFfmpegArgs(start, end, tempFile, cutFile, videoFilters, aspectRatio, needsUpscaling) {
+ let ffmpegArgs = ['-y', '-ss', String(start), '-to', String(end), '-i', tempFile];
+
+ if (videoFilters.length > 0) {
+  ffmpegArgs.push('-vf', videoFilters.join(','));
+ }
+
+ if (aspectRatio === 'original' && !needsUpscaling) {
+  ffmpegArgs.push('-c', 'copy');
+ } else {
+  const crf = needsUpscaling ? '16' : '18';
+  ffmpegArgs.push('-c:v', 'libx264', '-crf', crf, '-preset', 'medium', '-profile:v', 'high', 
+                  '-level:v', '4.0', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', 
+                  '-ar', '44100', '-movflags', '+faststart');
+ }
+
+ ffmpegArgs.push(cutFile);
+ return ffmpegArgs;
+}
+
+// Schedule file cleanup
+function scheduleFileCleanup(cutFile) {
+ setTimeout(() => {
+  if (fs.existsSync(cutFile)) {
+   fs.unlink(cutFile, (err) => {
+    if (!err) {
+     console.log(`[CLEANUP] Auto-deleted undownloaded file: ${path.basename(cutFile)}`);
+    }
+   });
+  }
+ }, 30000);
+}
+
+// Main endpoint with reduced complexity
+app.post('/api/shorts', async (req, res) => {
+ const {youtubeUrl, start, end, aspectRatio} = req.body;
+ 
+ // Validate input
+ const validation = validateShortsInput(youtubeUrl, start, end);
+ if (!validation.valid) {
+  return res.status(400).json(validation);
+ }
+
+ const id = uuidv4();
+ const tempFile = path.join(process.cwd(), `${id}.mp4`);
+
+ console.log(`[${id}] Mulai proses download dan cut segmen: ${youtubeUrl} (${start}s - ${end}s, rasio: ${aspectRatio})`);
+ logEnvironmentInfo(id);
+
+ // Check video formats
+ const formatCheck = await checkVideoFormats(id, youtubeUrl);
+ if (!formatCheck.success) {
+  return res.status(400).json(formatCheck);
+ }
+
+ // Download video
+ console.time(`[${id}] yt-dlp download`);
+ const ytDlpArgs = buildYtDlpArgs(tempFile, youtubeUrl);
  console.log(`[${id}] yt-dlp command: ${process.platform === 'win32' ? YT_DLP_PATH : 'yt-dlp'} ${ytDlpArgs.join(' ')}`);
 
  try {
-  const result = await executeYtDlpSecurely(ytDlpArgs, {
-   maxBuffer: 1024 * 1024 * 50,
-   timeout: 300000, // 5 minutes timeout
-  });
-
+  await executeYtDlpSecurely(ytDlpArgs, {maxBuffer: 1024 * 1024 * 50, timeout: 300000});
   console.timeEnd(`[${id}] yt-dlp download`);
   console.log(`[${id}] yt-dlp download successful`);
 
-  // Verify file exists and has reasonable size
   if (!fs.existsSync(tempFile)) {
    throw new Error('Downloaded file not found');
   }
@@ -638,40 +762,7 @@ app.post('/api/shorts', async (req, res) => {
   console.timeEnd(`[${id}] yt-dlp download`);
   console.error(`[${id}] yt-dlp error:`, err.message);
 
-  // Enhanced error analysis with 2025.07.21 improvements
-  let errorDetails = 'Unknown yt-dlp error';
-  let userFriendlyError = 'Video download failed';
-
-  if (err.message) {
-   if (err.message.includes('Requested format is not available')) {
-    errorDetails = 'No compatible video format found';
-    userFriendlyError = 'This video format is not supported. Try a different video.';
-   } else if (err.message.includes('Sign in to confirm') || err.message.includes('Sign in to confirm your age')) {
-    errorDetails = 'YouTube age verification or sign-in required';
-    userFriendlyError = 'This video requires sign-in or age verification. Try a different video.';
-   } else if (err.message.includes('Video unavailable') || err.message.includes('Private video')) {
-    errorDetails = 'Video is not accessible';
-    userFriendlyError = 'This video is private, unavailable, or geo-blocked.';
-   } else if (err.message.includes('429') || err.message.includes('Too Many Requests')) {
-    errorDetails = 'YouTube rate limiting active';
-    userFriendlyError = 'YouTube is rate-limiting requests. Please wait and try again in 10-15 minutes.';
-   } else if (err.message.includes('network') || err.message.includes('timeout')) {
-    errorDetails = 'Network or timeout error';
-    userFriendlyError = 'Network connection issue. Please try again.';
-   } else if (err.message.includes('EACCES') || err.message.includes('Permission denied')) {
-    errorDetails = 'File permission error (production environment)';
-    userFriendlyError = 'Server configuration issue. This will be fixed soon.';
-   } else if (err.message.includes('404') || err.message.includes('Not Found')) {
-    errorDetails = 'Video not found';
-    userFriendlyError = 'This video was not found or has been deleted.';
-   } else if (err.message.includes('HTTP Error 403')) {
-    errorDetails = 'Access forbidden by YouTube';
-    userFriendlyError = 'YouTube has blocked access to this video from our server.';
-   } else if (err.message.includes('not a valid URL') || err.message.includes('generic')) {
-    errorDetails = 'Command line parsing error (likely user-agent issue)';
-    userFriendlyError = 'Server configuration error. Please try again.';
-   }
-  }
+  const {errorDetails, userFriendlyError} = handleDownloadError(err);
 
   return res.status(500).json({
    error: userFriendlyError,
@@ -684,124 +775,32 @@ app.post('/api/shorts', async (req, res) => {
     ytdlp_path: process.platform === 'win32' ? YT_DLP_PATH : 'yt-dlp',
     timestamp: new Date().toISOString(),
    },
-   request_info: {
-    id: id,
-    url: youtubeUrl,
-    duration: `${start}s - ${end}s`,
-   },
+   request_info: {id, url: youtubeUrl, duration: `${start}s - ${end}s`},
    command: `${process.platform === 'win32' ? YT_DLP_PATH : 'yt-dlp'} [args_hidden_for_security]`,
   });
  }
 
- // Analyze video resolution for upscaling decisions
- let videoWidth = 0;
- let videoHeight = 0;
- let needsUpscaling = false;
-
- try {
-  const ffprobeResult = execSync(`ffprobe -v quiet -print_format json -show_streams "${tempFile}"`, {encoding: 'utf8'});
-  const videoInfo = JSON.parse(ffprobeResult);
-  const videoStream = videoInfo.streams.find((s) => s.codec_type === 'video');
-  if (videoStream) {
-   videoWidth = parseInt(videoStream.width);
-   videoHeight = parseInt(videoStream.height);
-   needsUpscaling = videoHeight < 720;
-
-   console.log(`[${id}] Video resolution: ${videoWidth}x${videoHeight} (${videoHeight}p)`);
-
-   if (needsUpscaling) {
-    console.log(`[${id}] 📈 UPSCALING REQUIRED: ${videoHeight}p → 720p`);
-   } else {
-    console.log(`[${id}] ✅ Resolution adequate: ${videoHeight}p ≥ 720p`);
-   }
-  } else {
-   console.warn(`[${id}] Could not detect video stream, assuming upscaling needed`);
-   needsUpscaling = true;
-  }
- } catch (e) {
-  console.warn(`[${id}] Could not determine video resolution, assuming upscaling needed:`, e.message);
-  needsUpscaling = true;
- }
-
- // Check if file actually exists
+ // Analyze video and process with FFmpeg
+ const {videoWidth, videoHeight, needsUpscaling} = analyzeVideoResolution(id, tempFile);
+ 
  if (!fs.existsSync(tempFile)) {
-  console.error(`[${id}] Downloaded file not found: ${tempFile}`);
   return res.status(500).json({
    error: 'Downloaded file not found',
    details: `Expected file: ${tempFile}`,
   });
  }
- // Enhanced FFmpeg processing with smart upscaling and aspect ratio handling
+
  const cutFile = path.join(process.cwd(), `${id}-short.mp4`);
- let ffmpegArgs = ['-y', '-ss', String(start), '-to', String(end), '-i', tempFile];
+ const videoFilters = buildVideoFilters(needsUpscaling, aspectRatio, videoWidth, videoHeight);
+ const ffmpegArgs = buildFfmpegArgs(start, end, tempFile, cutFile, videoFilters, aspectRatio, needsUpscaling);
 
- // Build video filter chain
- const videoFilters = [];
-
- // Step 1: Upscaling if needed (before aspect ratio changes)
- if (needsUpscaling) {
-  const targetHeight = 720;
-  const targetWidth = Math.round((targetHeight * videoWidth) / videoHeight);
-  // Ensure width is even (required for most codecs)
-  const evenWidth = targetWidth % 2 === 0 ? targetWidth : targetWidth + 1;
-
-  videoFilters.push(`scale=${evenWidth}:${targetHeight}:flags=lanczos`);
-  console.log(`[${id}] 📈 Upscaling: ${videoWidth}x${videoHeight} → ${evenWidth}x${targetHeight}`);
- }
-
- // Step 2: Aspect ratio cropping
- if (aspectRatio === '9:16') {
-  // Calculate dimensions for 9:16 aspect ratio
-  const currentHeight = needsUpscaling ? 720 : videoHeight;
-  const currentWidth = needsUpscaling ? Math.round((720 * videoWidth) / videoHeight) : videoWidth;
-  const targetWidth = Math.round(currentHeight * (9 / 16));
-
-  // Ensure even dimensions
-  const evenTargetWidth = targetWidth % 2 === 0 ? targetWidth : targetWidth - 1;
-  const evenCurrentHeight = currentHeight % 2 === 0 ? currentHeight : currentHeight - 1;
-
-  videoFilters.push(`crop=${evenTargetWidth}:${evenCurrentHeight}:(iw-${evenTargetWidth})/2:(ih-${evenCurrentHeight})/2`);
-  console.log(`[${id}] 📱 Cropping to 9:16: ${evenTargetWidth}x${evenCurrentHeight}`);
- } else if (aspectRatio === '16:9') {
-  // Calculate dimensions for 16:9 aspect ratio
-  const currentHeight = needsUpscaling ? 720 : videoHeight;
-  const currentWidth = needsUpscaling ? Math.round((720 * videoWidth) / videoHeight) : videoWidth;
-  const targetWidth = Math.round(currentHeight * (16 / 9));
-
-  // Ensure even dimensions
-  const evenTargetWidth = targetWidth % 2 === 0 ? targetWidth : targetWidth - 1;
-  const evenCurrentHeight = currentHeight % 2 === 0 ? currentHeight : currentHeight - 1;
-
-  videoFilters.push(`crop=${evenTargetWidth}:${evenCurrentHeight}:(iw-${evenTargetWidth})/2:(ih-${evenCurrentHeight})/2`);
-  console.log(`[${id}] 🖥️ Cropping to 16:9: ${evenTargetWidth}x${evenCurrentHeight}`);
- }
-
- // Apply video filters if any
- if (videoFilters.length > 0) {
-  ffmpegArgs.push('-vf', videoFilters.join(','));
- }
-
- // Enhanced encoding settings
- if (aspectRatio === 'original' && !needsUpscaling) {
-  // Keep original quality with copy streams if no processing needed
-  ffmpegArgs.push('-c', 'copy');
-  console.log(`[${id}] 🚀 Using stream copy (no quality loss)`);
- } else {
-  // High quality encoding for processed videos
-  const crf = needsUpscaling ? '16' : '18'; // Higher quality for upscaled content
-  ffmpegArgs.push('-c:v', 'libx264', '-crf', crf, '-preset', 'medium', '-profile:v', 'high', '-level:v', '4.0', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-movflags', '+faststart');
-  console.log(`[${id}] 🎬 Using high quality encoding (CRF ${crf})`);
- }
-
- ffmpegArgs.push(cutFile);
  console.time(`[${id}] ffmpeg cut`);
  execFile('ffmpeg', ffmpegArgs, (err2, stdout2, stderr2) => {
   console.timeEnd(`[${id}] ffmpeg cut`);
   fs.unlink(tempFile, () => {});
+  
   if (err2) {
    console.error(`[${id}] ffmpeg error:`, err2.message);
-   console.error(`[${id}] ffmpeg stderr:`, stderr2);
-   console.error(`[${id}] ffmpeg stdout:`, stdout2);
    return res.status(500).json({
     error: 'ffmpeg failed',
     details: err2.message,
@@ -810,9 +809,7 @@ app.post('/api/shorts', async (req, res) => {
    });
   }
 
-  // Check if output file exists and verify quality
   if (!fs.existsSync(cutFile)) {
-   console.error(`[${id}] Cut file not found: ${cutFile}`);
    return res.status(500).json({
     error: 'Cut file not found',
     details: `Expected file: ${cutFile}`,
@@ -829,30 +826,13 @@ app.post('/api/shorts', async (req, res) => {
     const finalWidth = parseInt(finalVideoStream.width);
     const finalHeight = parseInt(finalVideoStream.height);
     console.log(`[${id}] ✅ Final output resolution: ${finalWidth}x${finalHeight} (${finalHeight}p)`);
-
-    if (finalHeight >= 720) {
-     console.log(`[${id}] 🎉 SUCCESS: Output meets 720p+ requirement!`);
-    } else {
-     console.warn(`[${id}] ⚠️ WARNING: Output resolution ${finalHeight}p is still below 720p`);
-    }
    }
   } catch (e) {
    console.warn(`[${id}] Could not verify final resolution:`, e.message);
   }
 
   console.log(`[${id}] Selesai proses. Download: /outputs/${path.basename(cutFile)}`);
-
-  // Schedule auto-cleanup after 30 seconds if file is not downloaded
-  setTimeout(() => {
-   if (fs.existsSync(cutFile)) {
-    fs.unlink(cutFile, (err) => {
-     if (!err) {
-      console.log(`[CLEANUP] Auto-deleted undownloaded file: ${path.basename(cutFile)}`);
-     }
-    });
-   }
-  }, 30000); // 30 seconds timeout
-
+  scheduleFileCleanup(cutFile);
   res.json({downloadUrl: `/outputs/${path.basename(cutFile)}`});
  });
 });
@@ -924,130 +904,6 @@ function cleanupOldMp4Files() {
  }
 }
 
-// Helper function untuk parse VTT content
-function parseVttContent(vttContent) {
- console.log('[PARSE VTT] Starting to parse VTT content...');
- console.log(`[PARSE VTT] Original content length: ${vttContent.length}`);
- console.log(`[PARSE VTT] Content preview (first 1000 chars):\n${vttContent.substring(0, 1000)}`);
-
- // Bersihkan metadata WebVTT dan tag HTML
- let cleanContent = vttContent
-  .replace(/WEBVTT[^\n]*\n/g, '')
-  .replace(/NOTE[^\n]*\n/g, '')
-  .replace(/Kind:[^\n]*\n/g, '')
-  .replace(/Language:[^\n]*\n/g, '');
-
- console.log(`[PARSE VTT] Clean content length: ${cleanContent.length}`);
- console.log(`[PARSE VTT] Clean content preview (first 500 chars):\n${cleanContent.substring(0, 500)}`);
-
- // Parse VTT ke array segmen {start, end, text}
- const segments = [];
- // Gunakan set untuk mendeteksi teks identik
- const seenNormalizedTexts = new Set();
- // Helper Jaccard similarity untuk fuzzy duplikasi
- const jaccard = (a, b) => {
-  const sa = new Set(a.split(' '));
-  const sb = new Set(b.split(' '));
-  const inter = [...sa].filter((w) => sb.has(w)).length;
-  return inter / Math.max(sa.size, sb.size || 1);
- };
- // Helper konversi timestamp HH:MM:SS.mmm → detik
- const toSec = (ts) => {
-  const [h, m, s] = ts.split(':');
-  return parseInt(h) * 3600 + parseInt(m) * 60 + parseFloat(s);
- };
-
- // Split berdasarkan baris kosong untuk mendapatkan blok-blok subtitle
- const blocks = cleanContent.split(/\n\s*\n/).filter((block) => block.trim());
- console.log(`[PARSE VTT] Found ${blocks.length} blocks`);
-
- for (let blockIndex = 0; blockIndex < blocks.length; blockIndex++) {
-  const block = blocks[blockIndex];
-  const lines = block.trim().split('\n');
-  console.log(`[PARSE VTT] Processing block ${blockIndex + 1}/${blocks.length} with ${lines.length} lines`);
-  console.log(`[PARSE VTT] Block content: ${JSON.stringify(lines)}`);
-
-  // Cari baris yang mengandung timestamp (format: 00:00:00.000 --> 00:00:00.000)
-  let timestampLine = null;
-  let timestampIndex = -1;
-
-  for (let i = 0; i < lines.length; i++) {
-   if (lines[i].includes(' --> ')) {
-    timestampLine = lines[i];
-    timestampIndex = i;
-    console.log(`[PARSE VTT] Found timestamp line at index ${i}: ${timestampLine}`);
-    break;
-   }
-  }
-
-  if (timestampLine) {
-   // Extract timestamp dari baris yang mungkin mengandung align/position
-   const timestampMatch = timestampLine.match(/([0-9:.]+)\s+-->\s+([0-9:.]+)/);
-   console.log(`[PARSE VTT] Timestamp match result:`, timestampMatch);
-
-   if (timestampMatch) {
-    // Ambil semua baris setelah timestamp sebagai teks
-    const textLines = lines.slice(timestampIndex + 1);
-    console.log(`[PARSE VTT] Text lines:`, textLines);
-
-    // Gabungkan semua baris teks dan bersihkan tag HTML
-    let text = textLines.join(' ');
-    console.log(`[PARSE VTT] Raw text: ${text}`);
-
-    // Hapus tag HTML timing seperti <00:00:00.320>
-    text = text.replace(/<\d{2}:\d{2}:\d{2}\.\d{3}>/g, '');
-
-    // Hapus tag <c> dan </c>
-    text = text.replace(/<\/?c[^>]*>/g, '');
-
-    // Bersihkan spasi ekstra dan trim
-    text = text.replace(/\s+/g, ' ').trim();
-    console.log(`[PARSE VTT] Cleaned text: ${text}`);
-
-    // Normalized text untuk dedup fuzzy
-    const normalized = text.toLowerCase();
-
-    // Skip jika mirip (≥85%) dengan salah satu 3 segmen terakhir
-    let isDuplicate = false;
-    for (let i = Math.max(0, segments.length - 3); i < segments.length; i++) {
-     const prevNorm = segments[i].text.toLowerCase();
-     if (jaccard(prevNorm, normalized) > 0.85) {
-      isDuplicate = true;
-      console.log(`[PARSE VTT] Skipping duplicate text: ${text}`);
-      break;
-     }
-    }
-    if (isDuplicate) continue;
-
-    // Skip jika teks kosong atau hanya berisi spasi
-    if (text && text.length > 0) {
-     const segment = {
-      start: timestampMatch[1],
-      end: timestampMatch[2],
-      text: text,
-     };
-     segments.push(segment);
-     console.log(`[PARSE VTT] Added segment ${segments.length}: ${JSON.stringify(segment)}`);
-    } else {
-     console.log(`[PARSE VTT] Skipping empty text`);
-    }
-   } else {
-    console.log(`[PARSE VTT] No timestamp match found for line: ${timestampLine}`);
-   }
-  } else {
-   console.log(`[PARSE VTT] No timestamp line found in block ${blockIndex + 1}`);
-  }
- }
-
- console.log(`[PARSE VTT] Parsed ${segments.length} segments`);
- if (segments.length > 0) {
-  console.log(`[PARSE VTT] First segment: ${segments[0].start} --> ${segments[0].end}: "${segments[0].text}"`);
- } else {
-  console.log(`[PARSE VTT] WARNING: No segments were parsed!`);
- }
-
- return segments;
-}
 
 // Add anti-detection debug endpoint
 app.get('/api/transcript-stats', (req, res) => {
@@ -1070,176 +926,315 @@ app.post('/api/clear-transcript-cache', (req, res) => {
  }
 });
 
+// Helper function to check cache
+function checkTranscriptCache(videoId) {
+ const cached = transcriptCache.get(videoId);
+ if (!cached) return null;
+
+ const age = Date.now() - cached.timestamp;
+ const maxAge = cached.failed ? FAILED_CACHE_DURATION : CACHE_DURATION;
+
+ if (age < maxAge) {
+  console.log(`[TRANSCRIPT-V2] ✅ Cache hit for ${videoId} (${cached.failed ? 'failed' : 'success'}, ${Math.round(age / 1000)}s ago)`);
+  return cached;
+ } else {
+  console.log(`[TRANSCRIPT-V2] 🗑️ Cache expired for ${videoId} (${Math.round(age / 1000)}s old)`);
+  transcriptCache.delete(videoId);
+  return null;
+ }
+}
+
+// Helper function to convert text to segments
+function convertTextToSegments(text) {
+ const words = text.split(' ');
+ const segments = [];
+ const wordsPerSegment = 10;
+ const secondsPerWord = 0.5;
+
+ for (let i = 0; i < words.length; i += wordsPerSegment) {
+  const segmentWords = words.slice(i, i + wordsPerSegment);
+  const start = i * secondsPerWord;
+  const end = (i + segmentWords.length) * secondsPerWord;
+
+  segments.push({
+   text: segmentWords.join(' '),
+   start: start,
+   end: end,
+  });
+ }
+
+ return segments;
+}
+
+// Helper function to try Invidious extraction
+async function tryInvidiousExtraction(videoId) {
+ console.log(`[TRANSCRIPT-V2] 🎯 Attempting Invidious extraction for ${videoId}`);
+
+ const invidiousTranscript = await fetchTranscriptViaInvidious(videoId);
+
+ if (!invidiousTranscript || invidiousTranscript.length <= 50) {
+  throw new Error('Invidious returned empty or too short transcript');
+ }
+
+ console.log(`[TRANSCRIPT-V2] ✅ Invidious success: ${invidiousTranscript.length} characters`);
+
+ const segments = convertTextToSegments(invidiousTranscript);
+
+ return {
+  segments: segments,
+  language: 'auto-detected',
+  source: 'Invidious Service (Primary)',
+  method: 'Invidious API',
+  length: invidiousTranscript.length,
+  hasRealTiming: false,
+  serviceUsed: 'invidious',
+  extractionTime: Date.now(),
+ };
+}
+
+// Helper function to try YouTube API extraction
+async function tryYouTubeAPIExtraction(videoId) {
+ console.log(`[TRANSCRIPT-V2] 🔄 Fallback: YouTube Transcript API...`);
+ const languages = ['id', 'en'];
+
+ for (const langCode of languages) {
+  try {
+   const transcript = await YoutubeTranscript.fetchTranscript(videoId, {
+    lang: langCode,
+    country: langCode === 'id' ? 'ID' : 'US',
+   });
+
+   if (!transcript || !Array.isArray(transcript) || transcript.length === 0) {
+    console.log(`[TRANSCRIPT-V2] Direct API returned no data for ${langCode}`);
+    continue;
+   }
+
+   console.log(`[TRANSCRIPT-V2] ✅ Direct API success (${langCode}): ${transcript.length} segments`);
+
+   const segments = transcript.map((item) => ({
+    text: item.text,
+    start: item.offset / 1000,
+    end: (item.offset + item.duration) / 1000,
+   }));
+
+   if (!segments || segments.length === 0) {
+    console.log(`[TRANSCRIPT-V2] No valid segments after processing for ${langCode}`);
+    continue;
+   }
+
+   const transcriptText = segments.map((s) => s.text).join(' ');
+   if (transcriptText.length < 10) {
+    console.log(`[TRANSCRIPT-V2] Transcript too short after processing for ${langCode}`);
+    continue;
+   }
+
+   return {
+    segments: segments,
+    language: langCode === 'id' ? 'Indonesian' : 'English',
+    source: 'YouTube Transcript API (Fallback)',
+    method: `Direct API (${langCode.toUpperCase()})`,
+    length: transcriptText.length,
+    hasRealTiming: true,
+   };
+  } catch (langError) {
+   console.log(`[TRANSCRIPT-V2] Direct API failed for ${langCode}: ${langError.message}`);
+  }
+ }
+
+ throw new Error('Both Invidious and direct YouTube API methods failed');
+}
+
+// Helper function to cache and return result
+function cacheAndReturnResult(videoId, result, res) {
+ transcriptCache.set(videoId, {
+  data: result,
+  timestamp: Date.now(),
+  failed: false,
+ });
+
+ return res.json(result);
+}
+
+// Helper function to handle extraction failure
+function handleExtractionFailure(videoId, error, res) {
+ console.log(`[TRANSCRIPT-V2] ❌ All methods failed: ${error.message}`);
+
+ const errorResponse = {
+  error: 'Failed to retrieve a valid transcript after all attempts',
+  videoId: videoId,
+  message: 'All transcript extraction methods failed. Video may not have transcripts available or services are blocking access.',
+  userFriendly: true,
+  technical_details: {
+   main_error: error.message,
+   extraction_attempts: ['Invidious Service (Primary)', 'YouTube Transcript API (Fallback)'],
+   timestamp: new Date().toISOString(),
+  },
+  suggested_actions: ['Verify the video has captions/transcripts enabled', 'Try a different video with verified captions', 'Check if the video is accessible and not age-restricted', 'Use manual transcript upload feature as workaround'],
+ };
+
+ transcriptCache.set(videoId, {
+  data: errorResponse,
+  timestamp: Date.now(),
+  failed: true,
+ });
+
+ console.log(`[TRANSCRIPT-V2] 💀 All methods failed for ${videoId} - returning error response`);
+ return res.status(404).json(errorResponse);
+}
+
 // Enhanced transcript endpoint with anti-detection V2
 app.get('/api/yt-transcript', async (req, res) => {
- const {videoId, lang} = req.query;
+ const {videoId} = req.query;
  if (!videoId) return res.status(400).json({error: 'videoId required'});
 
  console.log(`[TRANSCRIPT-V2] 🎯 Enhanced request for videoId: ${videoId}`);
 
  // Check cache first
- const cached = transcriptCache.get(videoId);
+ const cached = checkTranscriptCache(videoId);
  if (cached) {
-  const age = Date.now() - cached.timestamp;
-  const maxAge = cached.failed ? FAILED_CACHE_DURATION : CACHE_DURATION;
-
-  if (age < maxAge) {
-   console.log(`[TRANSCRIPT-V2] ✅ Cache hit for ${videoId} (${cached.failed ? 'failed' : 'success'}, ${Math.round(age / 1000)}s ago)`);
-   if (cached.failed) {
-    return res.status(404).json(cached.data);
-   }
-   return res.json(cached.data);
-  } else {
-   console.log(`[TRANSCRIPT-V2] 🗑️ Cache expired for ${videoId} (${Math.round(age / 1000)}s old)`);
-   transcriptCache.delete(videoId);
+  if (cached.failed) {
+   return res.status(404).json(cached.data);
   }
+  return res.json(cached.data);
  }
 
  try {
   console.log(`[TRANSCRIPT-V2] 🚀 Starting Invidious-first extraction for ${videoId}`);
 
-  // PRIMARY METHOD: Try Invidious service first
+  // Try Invidious first
   try {
-   console.log(`[TRANSCRIPT-V2] 🎯 Attempting Invidious extraction for ${videoId}`);
-
-   const invidiousTranscript = await fetchTranscriptViaInvidious(videoId);
-
-   if (invidiousTranscript && invidiousTranscript.length > 50) {
-    console.log(`[TRANSCRIPT-V2] ✅ Invidious success: ${invidiousTranscript.length} characters`);
-
-    // Convert plain text to segments (approximate timing)
-    const words = invidiousTranscript.split(' ');
-    const segments = [];
-    const wordsPerSegment = 10; // Approximate words per segment
-    const secondsPerWord = 0.5; // Approximate speaking rate
-
-    for (let i = 0; i < words.length; i += wordsPerSegment) {
-     const segmentWords = words.slice(i, i + wordsPerSegment);
-     const start = i * secondsPerWord;
-     const end = (i + segmentWords.length) * secondsPerWord;
-
-     segments.push({
-      text: segmentWords.join(' '),
-      start: start,
-      end: end,
-     });
-    }
-
-    const result = {
-     segments: segments,
-     language: 'auto-detected',
-     source: 'Invidious Service (Primary)',
-     method: 'Invidious API',
-     length: invidiousTranscript.length,
-     hasRealTiming: false, // Invidious gives plain text, timing is estimated
-     serviceUsed: 'invidious',
-     extractionTime: Date.now(),
-    };
-
-    // Cache successful result
-    transcriptCache.set(videoId, {
-     data: result,
-     timestamp: Date.now(),
-     failed: false,
-    });
-
-    return res.json(result);
-   } else {
-    throw new Error('Invidious returned empty or too short transcript');
-   }
+   const result = await tryInvidiousExtraction(videoId);
+   return cacheAndReturnResult(videoId, result, res);
   } catch (invidiousError) {
    console.log(`[TRANSCRIPT-V2] ❌ Invidious workflow failed: ${invidiousError.message}, attempting fallback...`);
 
-   // FALLBACK METHOD: Use YouTube Transcript library directly
-   console.log(`[TRANSCRIPT-V2] 🔄 Fallback: YouTube Transcript API...`);
-   const languages = ['id', 'en'];
-
-   for (const langCode of languages) {
-    try {
-     const transcript = await YoutubeTranscript.fetchTranscript(videoId, {
-      lang: langCode,
-      country: langCode === 'id' ? 'ID' : 'US',
-     });
-
-     // CRITICAL: Validate direct API result before proceeding
-     if (!transcript || !Array.isArray(transcript) || transcript.length === 0) {
-      console.log(`[TRANSCRIPT-V2] Direct API returned no data for ${langCode}`);
-      continue;
-     }
-
-     console.log(`[TRANSCRIPT-V2] ✅ Direct API success (${langCode}): ${transcript.length} segments`);
-
-     const segments = transcript.map((item) => ({
-      text: item.text,
-      start: item.offset / 1000,
-      end: (item.offset + item.duration) / 1000,
-     }));
-
-     // Validate processed segments
-     if (!segments || segments.length === 0) {
-      console.log(`[TRANSCRIPT-V2] No valid segments after processing for ${langCode}`);
-      continue;
-     }
-
-     const transcriptText = segments.map((s) => s.text).join(' ');
-     if (transcriptText.length < 10) {
-      console.log(`[TRANSCRIPT-V2] Transcript too short after processing for ${langCode}`);
-      continue;
-     }
-
-     const result = {
-      segments: segments,
-      language: langCode === 'id' ? 'Indonesian' : 'English',
-      source: 'YouTube Transcript API (Fallback)',
-      method: `Direct API (${langCode.toUpperCase()})`,
-      length: transcriptText.length,
-      hasRealTiming: true,
-     };
-
-     // Cache successful result
-     transcriptCache.set(videoId, {
-      data: result,
-      timestamp: Date.now(),
-      failed: false,
-     });
-
-     return res.json(result);
-    } catch (langError) {
-     console.log(`[TRANSCRIPT-V2] Direct API failed for ${langCode}: ${langError.message}`);
-    }
-   }
-
-   // If we get here, both Invidious and direct YouTube API failed
-   throw new Error('Both Invidious and direct YouTube API methods failed');
+   // Try YouTube API as fallback
+   const result = await tryYouTubeAPIExtraction(videoId);
+   return cacheAndReturnResult(videoId, result, res);
   }
  } catch (mainError) {
-  console.log(`[TRANSCRIPT-V2] ❌ All methods failed: ${mainError.message}`);
-
-  // All methods failed - create comprehensive error response
-  const errorResponse = {
-   error: 'Failed to retrieve a valid transcript after all attempts',
-   videoId: videoId,
-   message: 'All transcript extraction methods failed. Video may not have transcripts available or services are blocking access.',
-   userFriendly: true,
-   technical_details: {
-    main_error: mainError.message,
-    extraction_attempts: ['Invidious Service (Primary)', 'YouTube Transcript API (Fallback)'],
-    timestamp: new Date().toISOString(),
-   },
-   suggested_actions: ['Verify the video has captions/transcripts enabled', 'Try a different video with verified captions', 'Check if the video is accessible and not age-restricted', 'Use manual transcript upload feature as workaround'],
-  };
-
-  // Cache failure
-  transcriptCache.set(videoId, {
-   data: errorResponse,
-   timestamp: Date.now(),
-   failed: true,
-  });
-
-  console.log(`[TRANSCRIPT-V2] 💀 All methods failed for ${videoId} - returning error response`);
-  return res.status(404).json(errorResponse);
+  return handleExtractionFailure(videoId, mainError, res);
  }
 });
+
+// Helper function to check and return cached transcript
+function checkLegacyCachedTranscript(videoId) {
+ const cached = transcriptCache.get(videoId);
+ if (!cached) return null;
+
+ const age = Date.now() - cached.timestamp;
+ const maxAge = cached.failed ? FAILED_CACHE_DURATION : CACHE_DURATION;
+
+ if (age < maxAge) {
+  console.log(`[TRANSCRIPT] ✅ Cache hit for ${videoId} (${cached.failed ? 'failed' : 'success'}, ${Math.round(age / 1000)}s ago)`);
+  return cached;
+ }
+
+ console.log(`[TRANSCRIPT] 🗑️ Cache expired for ${videoId} (${Math.round(age / 1000)}s old)`);
+ transcriptCache.delete(videoId);
+ return null;
+}
+
+// Helper function to try anti-detection transcript extraction
+async function tryAntiDetectionExtraction(videoId, lang) {
+ console.log(`[TRANSCRIPT] 🚀 Starting anti-detection extraction for ${videoId}`);
+
+ const transcript = await antiDetectionTranscript.extractTranscript(videoId, {
+  lang: lang ? lang.split(',') : ['id', 'en'],
+ });
+
+ if (!transcript || transcript.length <= 10) {
+  throw new Error('Anti-detection service returned empty transcript');
+ }
+
+ const segments = transcript
+  .split(/[.!?]+/)
+  .filter((text) => text.trim().length > 0)
+  .map((text, index) => ({
+   text: text.trim(),
+   start: index * 5,
+   end: (index + 1) * 5,
+  }));
+
+ const result = {
+  segments: segments,
+  language: 'Auto-detected',
+  source: 'Anti-Detection Service',
+  method: 'Advanced Cookie Strategy',
+  length: transcript.length,
+ };
+
+ console.log(`[TRANSCRIPT] ✅ Anti-detection success for ${videoId} (${transcript.length} chars, ${segments.length} segments)`);
+ return result;
+}
+
+// Helper function to try YouTube transcript API with specific language
+async function tryYouTubeTranscriptAPI(videoId, langCode, countryCode) {
+ const transcript = await YoutubeTranscript.fetchTranscript(videoId, {
+  lang: langCode,
+  country: countryCode,
+ });
+
+ if (!transcript || transcript.length === 0) {
+  throw new Error(`No transcript found for ${langCode}`);
+ }
+
+ console.log(`[TRANSCRIPT] ✅ ${langCode.toUpperCase()} API successful: got ${transcript.length} segments`);
+
+ const segments = transcript.map((item) => ({
+  text: item.text,
+  start: item.offset / 1000,
+  end: (item.offset + item.duration) / 1000,
+ }));
+
+ return {
+  segments: segments,
+  language: langCode === 'id' ? 'Indonesian' : 'English',
+  source: 'YouTube Transcript API',
+  method: `${langCode.toUpperCase()} Fallback`,
+ };
+}
+
+// Helper function to try all fallback methods
+async function tryAllFallbackMethods(videoId) {
+ // Fallback 1: Indonesian
+ console.log(`[TRANSCRIPT] 🔄 Trying fallback: youtube-transcript library`);
+ try {
+  const result = await tryYouTubeTranscriptAPI(videoId, 'id', 'ID');
+  return result;
+ } catch (fallbackError) {
+  console.log(`[TRANSCRIPT] ❌ Indonesian fallback failed: ${fallbackError.message}`);
+ }
+
+ // Fallback 2: English
+ console.log(`[TRANSCRIPT] 🔄 Trying English fallback`);
+ const result = await tryYouTubeTranscriptAPI(videoId, 'en', 'US');
+ return result;
+}
+
+// Helper function to cache transcript result
+function cacheTranscriptResult(videoId, result, failed = false) {
+ transcriptCache.set(videoId, {
+  data: result,
+  timestamp: Date.now(),
+  failed: failed,
+ });
+}
+
+// Helper function to create error response
+function createLegacyErrorResponse(videoId, antiDetectionError) {
+ return {
+  error: 'All transcript extraction methods failed',
+  videoId: videoId,
+  message: 'YouTube bot detection is blocking all access methods',
+  technical_details: {
+   anti_detection_error: antiDetectionError.message,
+   timestamp: new Date().toISOString(),
+  },
+  attempted_methods: ['Anti-Detection Cookie Strategy (Primary)', 'YouTube Transcript API Indonesian (Fallback 1)', 'YouTube Transcript API English (Fallback 2)'],
+  suggestions: ['Video may not have transcripts available', 'YouTube may be actively blocking server IP', 'Try again in a few minutes', 'Consider using manual transcript extraction'],
+ };
+}
 
 // Legacy VTT-based transcript endpoint (for backward compatibility)
 app.get('/api/yt-transcript-legacy', async (req, res) => {
@@ -1249,159 +1244,37 @@ app.get('/api/yt-transcript-legacy', async (req, res) => {
  console.log(`[TRANSCRIPT] 🎯 Anti-Detection request for videoId: ${videoId}`);
 
  // Check cache first
- const cached = transcriptCache.get(videoId);
+ const cached = checkLegacyCachedTranscript(videoId);
  if (cached) {
-  const age = Date.now() - cached.timestamp;
-  const maxAge = cached.failed ? FAILED_CACHE_DURATION : CACHE_DURATION;
-
-  if (age < maxAge) {
-   console.log(`[TRANSCRIPT] ✅ Cache hit for ${videoId} (${cached.failed ? 'failed' : 'success'}, ${Math.round(age / 1000)}s ago)`);
-   if (cached.failed) {
-    return res.status(404).json(cached.data);
-   }
-   return res.json(cached.data);
-  } else {
-   console.log(`[TRANSCRIPT] 🗑️ Cache expired for ${videoId} (${Math.round(age / 1000)}s old)`);
-   transcriptCache.delete(videoId);
+  if (cached.failed) {
+   return res.status(404).json(cached.data);
   }
+  return res.json(cached.data);
  }
 
  try {
-  console.log(`[TRANSCRIPT] 🚀 Starting anti-detection extraction for ${videoId}`);
-
-  // Use anti-detection service as primary method
-  const transcript = await antiDetectionTranscript.extractTranscript(videoId, {
-   lang: lang ? lang.split(',') : ['id', 'en'],
-  });
-
-  if (transcript && transcript.length > 10) {
-   // Parse transcript into segments (simple splitting for now)
-   const segments = transcript
-    .split(/[.!?]+/)
-    .filter((text) => text.trim().length > 0)
-    .map((text, index) => ({
-     text: text.trim(),
-     start: index * 5, // Approximate timing
-     end: (index + 1) * 5,
-    }));
-
-   const result = {
-    segments: segments,
-    language: 'Auto-detected',
-    source: 'Anti-Detection Service',
-    method: 'Advanced Cookie Strategy',
-    length: transcript.length,
-   };
-
-   // Cache successful result
-   transcriptCache.set(videoId, {
-    data: result,
-    timestamp: Date.now(),
-    failed: false,
-   });
-
-   console.log(`[TRANSCRIPT] ✅ Anti-detection success for ${videoId} (${transcript.length} chars, ${segments.length} segments)`);
-   return res.json(result);
-  } else {
-   throw new Error('Anti-detection service returned empty transcript');
-  }
+  // Try anti-detection first
+  const result = await tryAntiDetectionExtraction(videoId, lang);
+  cacheTranscriptResult(videoId, result);
+  return res.json(result);
  } catch (antiDetectionError) {
   console.log(`[TRANSCRIPT] ❌ Anti-detection failed: ${antiDetectionError.message}`);
 
-  // Fallback 1: Try youtube-transcript library
-  console.log(`[TRANSCRIPT] 🔄 Trying fallback: youtube-transcript library`);
   try {
-   const transcript = await YoutubeTranscript.fetchTranscript(videoId, {
-    lang: 'id',
-    country: 'ID',
-   });
-
-   if (transcript && transcript.length > 0) {
-    console.log(`[TRANSCRIPT] ✅ Fallback successful: got ${transcript.length} segments`);
-    const segments = transcript.map((item) => ({
-     text: item.text,
-     start: item.offset / 1000,
-     end: (item.offset + item.duration) / 1000,
-    }));
-
-    const result = {
-     segments: segments,
-     language: 'Indonesian',
-     source: 'YouTube Transcript API',
-     method: 'Fallback Library',
-    };
-
-    // Cache fallback result
-    transcriptCache.set(videoId, {
-     data: result,
-     timestamp: Date.now(),
-     failed: false,
-    });
-
-    return res.json(result);
-   }
-  } catch (fallbackError) {
-   console.log(`[TRANSCRIPT] ❌ Fallback also failed: ${fallbackError.message}`);
-  }
-
-  // Fallback 2: Try English
-  console.log(`[TRANSCRIPT] 🔄 Trying English fallback`);
-  try {
-   const transcript = await YoutubeTranscript.fetchTranscript(videoId, {
-    lang: 'en',
-    country: 'US',
-   });
-
-   if (transcript && transcript.length > 0) {
-    console.log(`[TRANSCRIPT] ✅ English fallback successful: got ${transcript.length} segments`);
-    const segments = transcript.map((item) => ({
-     text: item.text,
-     start: item.offset / 1000,
-     end: (item.offset + item.duration) / 1000,
-    }));
-
-    const result = {
-     segments: segments,
-     language: 'English',
-     source: 'YouTube Transcript API',
-     method: 'English Fallback',
-    };
-
-    // Cache English result
-    transcriptCache.set(videoId, {
-     data: result,
-     timestamp: Date.now(),
-     failed: false,
-    });
-
-    return res.json(result);
-   }
+   // Try fallback methods
+   const result = await tryAllFallbackMethods(videoId);
+   cacheTranscriptResult(videoId, result);
+   return res.json(result);
   } catch (englishError) {
    console.log(`[TRANSCRIPT] ❌ English fallback also failed: ${englishError.message}`);
+
+   // All methods failed
+   const errorResponse = createLegacyErrorResponse(videoId, antiDetectionError);
+   cacheTranscriptResult(videoId, errorResponse, true);
+
+   console.log(`[TRANSCRIPT] 💀 All methods failed for ${videoId}`);
+   return res.status(404).json(errorResponse);
   }
-
-  // All methods failed
-  const errorResponse = {
-   error: 'All transcript extraction methods failed',
-   videoId: videoId,
-   message: 'YouTube bot detection is blocking all access methods',
-   technical_details: {
-    anti_detection_error: antiDetectionError.message,
-    timestamp: new Date().toISOString(),
-   },
-   attempted_methods: ['Anti-Detection Cookie Strategy (Primary)', 'YouTube Transcript API Indonesian (Fallback 1)', 'YouTube Transcript API English (Fallback 2)'],
-   suggestions: ['Video may not have transcripts available', 'YouTube may be actively blocking server IP', 'Try again in a few minutes', 'Consider using manual transcript extraction'],
-  };
-
-  // Cache failure
-  transcriptCache.set(videoId, {
-   data: errorResponse,
-   timestamp: Date.now(),
-   failed: true,
-  });
-
-  console.log(`[TRANSCRIPT] 💀 All methods failed for ${videoId}`);
-  return res.status(404).json(errorResponse);
  }
 });
 
@@ -1536,116 +1409,77 @@ app.get('/api/yt-transcript-with-timing', async (req, res) => {
  }
 });
 
-// Enhanced API endpoint for intelligent segmentation
-app.post('/api/intelligent-segments', async (req, res) => {
- const {videoId, targetSegmentCount = 8} = req.body;
+// Helper function to extract transcript via Invidious
+async function extractTranscriptViaInvidious(videoId) {
+ console.log(`[INTELLIGENT-SEGMENTS] 🎯 Attempting Invidious extraction for ${videoId}`);
 
- if (!videoId) {
-  return res.status(400).json({error: 'Video ID is required'});
+ const invidiousTranscript = await fetchTranscriptViaInvidious(videoId);
+
+ if (!invidiousTranscript || invidiousTranscript.length <= 100) {
+  throw new Error('Invidious returned empty or too short transcript');
  }
 
- try {
-  console.log(`[INTELLIGENT-SEGMENTS] Starting intelligent segmentation for ${videoId}`);
+ console.log(`[INTELLIGENT-SEGMENTS] ✅ Invidious success: ${invidiousTranscript.length} characters`);
 
-  // TODO: Implement the new Invidious workflow here.
+ // Convert plain text to segments for intelligent chunking (approximate timing)
+ const words = invidiousTranscript.split(' ');
+ const segments = [];
+ const wordsPerSegment = 15;
+ const secondsPerWord = 0.4;
 
-  // Step 7: Create intelligent segments
-  const intelligentSegments = intelligentChunker.createIntelligentSegments(transcriptData, targetSegmentCount);
+ for (let i = 0; i < words.length; i += wordsPerSegment) {
+  const segmentWords = words.slice(i, i + wordsPerSegment);
+  const start = i * secondsPerWord;
+  const end = (i + segmentWords.length) * secondsPerWord;
 
-  // Step 8: Generate AI titles and descriptions
-  console.log(`[INTELLIGENT-SEGMENTS] Generating AI titles for ${intelligentSegments.length} segments...`);
-  const segmentsWithTitles = await aiTitleGenerator.generateSegmentTitles(intelligentSegments, `YouTube video: ${videoId}`);
-
-  // Step 9: Format for frontend with smart excerpts
-  const formattedSegments = segmentsWithTitles.map((segment, index) => {
-   // Use full text for transcript, smart excerpt only for preview
-   const smartExcerpt = smartExcerptFormatter.formatExcerpt(segment.text, 800);
-
-   return {
-    id: `intelligent-${videoId}-${index + 1}`,
-    title: segment.title || `Pembahasan Bagian ${index + 1}`,
-    description: segment.description || `Segmen menarik dengan durasi ${segment.duration} detik`,
-    startTimeSeconds: segment.start,
-    endTimeSeconds: segment.end,
-    duration: segment.duration,
-    transcriptExcerpt: segment.text, // USE FULL TEXT INSTEAD OF TRUNCATED
-    transcriptFull: segment.text, // Full transcript for reference
-    transcriptPreview: smartExcerpt, // Shortened version for preview only
-    youtubeVideoId: videoId,
-    thumbnailUrl: `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
-    hasRealTiming: true,
-    segmentCount: segment.segmentCount,
-    excerptLength: segment.text.length, // Full text length
-    fullTextLength: segment.text.length,
-   };
+  segments.push({
+   text: segmentWords.join(' '),
+   start: start,
+   end: end,
   });
+ }
 
-  // SERVER-SIDE FINAL VALIDATION: Ensure no segments exceed 120s
-  const validSegments = formattedSegments.filter((seg) => {
-   const isValid = seg.duration >= 30 && seg.duration <= 120;
-   if (!isValid) {
-    console.log(`[SERVER] ❌ FINAL VALIDATION: Filtering out invalid segment "${seg.title}" (${seg.duration}s)`);
-   }
-   return isValid;
-  });
+ return {
+  segments,
+  source: 'Invidious Service (Primary)',
+  hasRealTiming: false
+ };
+}
 
-  if (validSegments.length !== formattedSegments.length) {
-   console.log(`[SERVER] ⚠️ Filtered ${formattedSegments.length - validSegments.length} invalid segments`);
-  }
+// Helper function to extract transcript via YouTube API fallback
+async function extractTranscriptViaYouTubeFallback(videoId) {
+ console.log(`[INTELLIGENT-SEGMENTS] 🔄 Fallback: YouTube Transcript API...`);
+ const languages = ['id', 'en'];
 
-  const result = {
-   segments: validSegments, // Use filtered segments
-   videoId: videoId,
-   totalSegments: validSegments.length,
-   averageDuration: Math.round(validSegments.reduce((sum, s) => sum + s.duration, 0) / validSegments.length),
-   method: 'TODO: Update method name when Invidious workflow is implemented',
-   hasRealTiming: true,
-   transcriptQuality: 'HIGH',
-   aiTitlesEnabled: true,
-   smartExcerptsEnabled: true,
-   extractedAt: new Date().toISOString(),
-   serviceUsed: 'TODO: Update when new service is implemented',
-   extractionTime: new Date().toISOString(),
-   validation: {isValid: false, totalLength: 0, fullText: '', segmentCount: 0}, // TODO: Update validation
-  };
-
-  console.log(`[INTELLIGENT-SEGMENTS] ✅ Created ${validSegments.length} intelligent segments with AI titles (avg: ${result.averageDuration}s)`);
-
-  // DURATION VALIDATION LOG - Show all segment durations
-  validSegments.forEach((seg, i) => {
-   console.log(`[DURATION-CHECK] Segment ${i + 1}: "${seg.title}" = ${seg.duration}s`);
-  });
-
-  // Log sample titles for debugging
-  validSegments.slice(0, 3).forEach((seg, i) => {
-   console.log(`[AI-TITLE] Sample ${i + 1}: "${seg.title}" (${seg.excerptLength}/${seg.fullTextLength} chars)`);
-  });
-
-  res.json(result);
- } catch (error) {
-  console.error(`[INTELLIGENT-SEGMENTS] ❌ Error for ${videoId}:`, error);
-
-  // Handle transcript-specific errors
-  if (error instanceof NoValidTranscriptError) {
-   return res.status(422).json({
-    error: 'No Valid Transcript Available',
-    message: error.message,
-    videoId: videoId,
-    reason: error.details?.reason || 'unknown',
-    userFriendly: true,
-    suggestions: ['This video may not have captions/transcripts available', 'The video owner may have disabled transcripts', 'Try a different video with verified captions', 'Check if the video is accessible and not age-restricted'],
+ for (const langCode of languages) {
+  try {
+   const transcript = await YoutubeTranscript.fetchTranscript(videoId, {
+    lang: langCode,
+    country: langCode === 'id' ? 'ID' : 'US',
    });
-  }
 
-  // Handle general errors
-  res.status(500).json({
-   error: 'Internal server error during intelligent segmentation',
-   message: error.message,
-   videoId: videoId,
-   details: 'An unexpected error occurred while processing the video',
-  });
+   if (transcript && Array.isArray(transcript) && transcript.length > 0) {
+    console.log(`[INTELLIGENT-SEGMENTS] ✅ Direct API success (${langCode}): ${transcript.length} segments`);
+
+    const segments = transcript.map((item) => ({
+     text: item.text,
+     start: item.offset / 1000,
+     end: (item.offset + item.duration) / 1000,
+    }));
+
+    return {
+     segments,
+     source: 'YouTube Transcript API (Fallback)',
+     hasRealTiming: true
+    };
+   }
+  } catch (error) {
+   console.log(`[INTELLIGENT-SEGMENTS] ❌ Direct API failed for ${langCode}: ${error.message}`);
+  }
  }
-});
+
+ throw new Error('Both Invidious and direct YouTube API methods failed');
+}
 
 // Enhanced transcript endpoint with multi-service fallback
 app.get('/api/enhanced-transcript/:videoId', async (req, res) => {

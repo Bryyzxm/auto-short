@@ -87,6 +87,87 @@ function shuffleArray(array) {
 }
 
 /**
+ * Selects the best caption track from available captions
+ * @param {Array} captions - Array of caption objects
+ * @returns {Object|null} Selected caption object or null
+ */
+function selectBestCaptions(captions) {
+ const preferredLanguages = ['en', 'id'];
+ 
+ for (const lang of preferredLanguages) {
+  const caption = captions.find((caption) => caption.language_code === lang);
+  if (caption) {
+   console.log(`Found captions in language: ${lang}`);
+   return caption;
+  }
+ }
+
+ if (captions.length > 0) {
+  const firstCaption = captions[0];
+  console.log(`Using first available captions in language: ${firstCaption.language_code || 'unknown'}`);
+  return firstCaption;
+ }
+
+ return null;
+}
+
+/**
+ * Converts caption text array to transcript string
+ * @param {Array} textArray - Array of text objects
+ * @returns {string} Transcript text
+ */
+function extractTranscriptText(textArray) {
+ return textArray
+  .map((textObj) => textObj.text || '')
+  .filter((text) => text.trim().length > 0)
+  .join(' ')
+  .trim();
+}
+
+/**
+ * Fetches captions from a single Invidious instance
+ * @param {string} hostname - Invidious instance hostname
+ * @param {string} videoId - YouTube video ID
+ * @returns {Promise<string|null>} Transcript text or null if failed
+ */
+async function fetchFromInstance(hostname, videoId) {
+ const apiUrl = `https://${hostname}/api/v1/captions/${videoId}`;
+ console.log(`Trying instance: ${hostname}`);
+
+ const response = await axios.get(apiUrl, {
+  timeout: 5000,
+  headers: {
+   'User-Agent': 'YouTube-to-Shorts-Segmenter/1.0',
+  },
+ });
+
+ if (response.status !== 200 || !response.data) {
+  return null;
+ }
+
+ const { captions } = response.data;
+ if (!captions || !Array.isArray(captions)) {
+  console.warn(`Invalid captions format from ${hostname}`);
+  return null;
+ }
+
+ const selectedCaptions = selectBestCaptions(captions);
+ if (!selectedCaptions || !Array.isArray(selectedCaptions.text)) {
+  console.warn(`No valid caption text found from ${hostname}`);
+  return null;
+ }
+
+ const transcriptText = extractTranscriptText(selectedCaptions.text);
+ if (transcriptText.length === 0) {
+  console.warn(`Empty transcript received from ${hostname}`);
+  return null;
+ }
+
+ console.log(`Successfully fetched transcript from ${hostname} (${transcriptText.length} characters)`);
+ return transcriptText;
+}
+
+/**
  * Fetches video transcript by trying multiple Invidious instances
  * @param {string} videoId - YouTube video ID
  * @returns {Promise<string>} Transcript text
@@ -94,88 +175,25 @@ function shuffleArray(array) {
 async function fetchTranscriptViaInvidious(videoId) {
  console.log(`Attempting to fetch transcript for video: ${videoId}`);
 
- // Step 1: Get healthy instances
  const instances = await getHealthyInvidiousInstances();
-
- // Step 2: Check if we have any instances
  if (!instances || instances.length === 0) {
   throw new Error('No healthy Invidious instances found');
  }
 
- // Step 3: Shuffle instances to distribute load
  const shuffledInstances = shuffleArray(instances);
  console.log(`Trying ${shuffledInstances.length} instances in random order`);
 
- // Step 4: Try each instance
  for (const hostname of shuffledInstances) {
   try {
-   // Step 5: Construct API URL
-   const apiUrl = `https://${hostname}/api/v1/captions/${videoId}`;
-   console.log(`Trying instance: ${hostname}`);
-
-   // Step 6: Make request with short timeout
-   const response = await axios.get(apiUrl, {
-    timeout: 5000, // 5 second timeout
-    headers: {
-     'User-Agent': 'YouTube-to-Shorts-Segmenter/1.0',
-    },
-   });
-
-   // Step 8: Parse successful response
-   if (response.status === 200 && response.data) {
-    const {captions} = response.data;
-
-    if (!captions || !Array.isArray(captions)) {
-     console.warn(`Invalid captions format from ${hostname}`);
-     continue;
-    }
-
-    // Find caption track for desired language (prioritize 'en', fallback to 'id' or first available)
-    const preferredLanguages = ['en', 'id'];
-    let selectedCaptions = null;
-
-    for (const lang of preferredLanguages) {
-     selectedCaptions = captions.find((caption) => caption.language_code === lang);
-     if (selectedCaptions) {
-      console.log(`Found captions in language: ${lang}`);
-      break;
-     }
-    }
-
-    // If no preferred language found, use first available
-    if (!selectedCaptions && captions.length > 0) {
-     selectedCaptions = captions[0];
-     console.log(`Using first available captions in language: ${selectedCaptions.language_code || 'unknown'}`);
-    }
-
-    if (!selectedCaptions || !Array.isArray(selectedCaptions.text)) {
-     console.warn(`No valid caption text found from ${hostname}`);
-     continue;
-    }
-
-    // Join all text parts into a single string
-    const transcriptText = selectedCaptions.text
-     .map((textObj) => textObj.text || '')
-     .filter((text) => text.trim().length > 0)
-     .join(' ')
-     .trim();
-
-    if (transcriptText.length > 0) {
-     console.log(`Successfully fetched transcript from ${hostname} (${transcriptText.length} characters)`);
-     return transcriptText;
-    } else {
-     console.warn(`Empty transcript received from ${hostname}`);
-     continue;
-    }
+   const transcript = await fetchFromInstance(hostname, videoId);
+   if (transcript) {
+    return transcript;
    }
   } catch (error) {
-   // Step 9: Log warning and continue to next instance
    console.warn(`Failed to fetch from ${hostname}:`, error.message);
-   continue;
   }
  }
 
- // Step 10: All instances failed
  throw new Error('Failed to fetch transcript from all available Invidious instances');
 }
 

@@ -7,8 +7,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Install system dependencies dengan optimisasi untuk Railway
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
     ca-certificates \
+    curl \
     ffmpeg \
     python3 \
     python3-pip \
@@ -17,10 +17,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
     && rm -rf /tmp/* \
-    && rm -rf /var/tmp/*
-
-# Verify installations
-RUN echo "🔍 Verifying installations..." \
+    && rm -rf /var/tmp/* \
+    && echo "🔍 Verifying installations..." \
     && ffmpeg -version > /dev/null && echo "✅ FFmpeg verified" \
     && yt-dlp --version && echo "✅ yt-dlp verified" \
     && which yt-dlp && echo "✅ yt-dlp path confirmed"
