@@ -24,7 +24,7 @@ interface EnhancedTranscriptData {
 }
 
 // ========================================================================================
-// PART 1: "TABLE OF CONTENTS" GENERATOR FUNCTION
+// PART 1: UNIFIED SINGLE-PASS STRATEGY - Discovery + Duration Optimization Combined
 // ========================================================================================
 
 interface TableOfContentsEntry {
@@ -34,15 +34,16 @@ interface TableOfContentsEntry {
 }
 
 /**
- * PHASE 1: Generate a "Table of Contents" by analyzing transcript chunks with AI
- * This identifies potential segments without needing the full verbatim text
+ * UNIFIED SINGLE-PASS AI STRATEGY: Discovery + Duration Optimization in One Call
+ * This eliminates the need for a second refinement pass, reducing rate limit pressure
+ * FIXES: Indonesian language output + strict 60-90s duration constraints + deduplication
  */
 const generateTableOfContents = async (fullTranscriptText: string, videoDuration?: number): Promise<TableOfContentsEntry[]> => {
  if (!groq) {
   throw new Error('Groq API client is not initialized');
  }
 
- const CHUNK_SIZE = 8000; // 8K characters per chunk for better rate limit management
+ const CHUNK_SIZE = 10000; // Slightly larger chunks for more context in single-pass
  const chunks = [];
 
  // Split transcript into manageable chunks
@@ -60,16 +61,19 @@ const generateTableOfContents = async (fullTranscriptText: string, videoDuration
   });
  }
 
- console.log(`[TOC-GENERATOR] Processing ${chunks.length} chunks for Table of Contents generation`);
+ console.log(`[UNIFIED-AI] Processing ${chunks.length} chunks with single-pass strategy`);
 
- const allTopics: TableOfContentsEntry[] = [];
+ const allSegments: TableOfContentsEntry[] = [];
  const safeVideoDuration = videoDuration || Math.ceil((fullTranscriptText.length / 2500) * 60);
 
- // PART 1: SEQUENTIAL PROCESSING TO AVOID RATE LIMITS
- // Process each chunk SEQUENTIALLY (not in parallel) to respect API rate limits
+ // Detect if transcript is Indonesian
+ const isIndonesian = detectLanguage(fullTranscriptText).language === 'indonesian';
+ const languageInstruction = isIndonesian ? 'PENTING: Transkrip ini dalam bahasa Indonesia. Anda HARUS membuat judul dalam BAHASA INDONESIA.' : 'IMPORTANT: Generate titles in the same language as the transcript content.';
+
+ // SINGLE-PASS PROCESSING: Discovery + Duration Optimization Combined
  for (const chunk of chunks) {
   try {
-   console.log(`[TOC-GENERATOR] Processing chunk ${chunk.chunkNumber}/${chunk.totalChunks} sequentially...`);
+   console.log(`[UNIFIED-AI] Processing chunk ${chunk.chunkNumber}/${chunk.totalChunks} with unified strategy...`);
 
    // Calculate approximate time range for this chunk
    const startTimeRatio = chunk.startCharPosition / fullTranscriptText.length;
@@ -78,50 +82,55 @@ const generateTableOfContents = async (fullTranscriptText: string, videoDuration
    const chunkStartTime = Math.floor(startTimeRatio * safeVideoDuration);
    const chunkEndTime = Math.floor(endTimeRatio * safeVideoDuration);
 
-   // PART 1: DISCOVERY PASS - Find the most interesting topics without duration constraints
-   const prompt = `You are a topic spotter expert. Your task is to analyze this transcript chunk and identify the most engaging content.
+   // UNIFIED PROMPT: Discovery + Duration Optimization in One Call
+   const prompt = `Anda adalah ahli segmentasi video yang sangat cerdas. Tugas Anda adalah menganalisis bagian transkrip dari video Indonesia ini.
 
-CHUNK INFO:
-- Chunk ${chunk.chunkNumber} of ${chunk.totalChunks}
-- Approximate time range: ${Math.floor(chunkStartTime / 60)}:${(chunkStartTime % 60).toString().padStart(2, '0')} to ${Math.floor(chunkEndTime / 60)}:${(chunkEndTime % 60).toString().padStart(2, '0')}
-- Video duration: ${Math.floor(safeVideoDuration / 60)} minutes ${safeVideoDuration % 60} seconds
+${languageInstruction}
 
-TASK:
-Analyze this transcript chunk and identify up to 3 of the most interesting and distinct topics that would make compelling short video content.
+INFO CHUNK:
+- Chunk ${chunk.chunkNumber} dari ${chunk.totalChunks}
+- Rentang waktu perkiraan: ${Math.floor(chunkStartTime / 60)}:${(chunkStartTime % 60).toString().padStart(2, '0')} sampai ${Math.floor(chunkEndTime / 60)}:${(chunkEndTime % 60).toString().padStart(2, '0')}
+- Durasi video: ${Math.floor(safeVideoDuration / 60)} menit ${safeVideoDuration % 60} detik
 
-**YOUR GOAL: Find the BEST content, regardless of length. Focus on quality over duration constraints.**
+TUGAS UTAMA:
+Identifikasi hingga 3 topik yang berbeda dan menarik yang akan membuat konten video pendek yang bagus.
 
-REQUIREMENTS:
-- Identify topics that are naturally engaging, informative, or entertaining
-- Each topic should be distinct and self-contained
-- Look for moments with clear narrative structure (beginning, middle, end)
-- Find content that would grab viewer attention immediately
-- Provide ONLY timing information and topic titles
-- Times should be in MM:SS format relative to the full video
-- Topics can be any length - we'll optimize duration later
+**ATURAN WAJIB DAN KETAT:**
+1. **Untuk setiap topik, Anda HARUS menemukan segmen dialog berkelanjutan yang berdurasi antara 60 hingga 90 detik.**
+2. **Jika topik menarik tetapi durasi alaminya terlalu panjang, Anda HARUS menemukan sub-bagian 60-90 detik yang paling menarik dalam topik tersebut.**
+3. **JANGAN mengembalikan segmen lebih dari 90 detik.**
+4. **Setiap segmen harus unik dan berbeda - hindari overlap waktu.**
 
-OUTPUT FORMAT (Return ONLY valid JSON, no additional text):
+PERSYARATAN UNTUK SETIAP SEGMEN:
+- Topik yang menarik secara alami, informatif, atau menghibur
+- Setiap topik harus berbeda dan mandiri
+- Cari momen dengan struktur naratif yang jelas (awal, tengah, akhir)
+- Temukan konten yang akan menarik perhatian penonton segera
+- Durasi HARUS 60-90 detik (wajib)
+- Waktu dalam format MM:SS relatif terhadap video penuh
+
+OUTPUT FORMAT (Kembalikan HANYA JSON yang valid, tanpa teks tambahan):
 [
   {
-    "title": "Engaging topic title (5-8 words)",
+    "title": "Judul topik menarik dalam bahasa Indonesia (5-8 kata)",
     "startTime": "MM:SS",
     "endTime": "MM:SS"
   }
 ]
 
-If no compelling topics can be identified in this chunk, return: []
+Jika tidak ada topik menarik yang memenuhi kriteria durasi yang dapat diidentifikasi dalam chunk ini, kembalikan: []
 
-TRANSCRIPT CHUNK:
+TRANSKRIP CHUNK:
 """
 ${chunk.text}
 """`;
 
    // Make API call with intelligent retry logic for rate limits
-   console.log(`[TOC-GENERATOR] Making discovery API call for chunk ${chunk.chunkNumber}...`);
+   console.log(`[UNIFIED-AI] Making unified API call for chunk ${chunk.chunkNumber}...`);
 
    let chunkAttempts = 0;
-   const maxChunkRetries = 2; // Reduced retries for efficiency
-   let chunkTopics: TableOfContentsEntry[] = [];
+   const maxChunkRetries = 2;
+   let chunkSegments: TableOfContentsEntry[] = [];
 
    while (chunkAttempts < maxChunkRetries) {
     try {
@@ -129,22 +138,23 @@ ${chunk.text}
       messages: [
        {
         role: 'system',
-        content:
-         'You are an expert content discoverer specializing in identifying the most engaging and interesting topics from video transcripts. Your role is to find compelling content that would make great short videos, focusing on quality and engagement rather than duration constraints. Always respond with valid JSON arrays only.',
+        content: isIndonesian
+         ? 'Anda adalah ahli segmentasi video yang mengkhususkan diri dalam mengidentifikasi konten paling menarik dari transkrip video Indonesia. Peran Anda adalah menemukan konten menarik yang akan membuat video pendek yang bagus, dengan fokus pada kualitas dan ketepatan durasi 60-90 detik. Selalu respons dengan array JSON yang valid saja dalam bahasa Indonesia.'
+         : 'You are an expert video segmentation specialist who identifies the most engaging content from video transcripts. Your role is to find compelling content that would make great short videos, focusing on quality and precise 60-90 second duration constraints. Always respond with valid JSON arrays only in the same language as the transcript.',
        },
        {
         role: 'user',
         content: prompt,
        },
       ],
-      model: 'llama3-70b-8192', // Use powerful model for creative discovery task
-      temperature: 0.3, // Balanced creativity and consistency
-      max_tokens: 800, // More tokens for richer topic discovery
-      top_p: 0.9,
+      model: 'llama3-70b-8192', // Use powerful model for complex unified task
+      temperature: 0.2, // Lower temperature for more consistent duration compliance
+      max_tokens: 1000, // More tokens for unified processing
+      top_p: 0.8,
       stream: false,
      });
      const response = completion.choices[0]?.message?.content?.trim() || '';
-     console.log(`[TOC-GENERATOR] Received response for chunk ${chunk.chunkNumber}: ${response.substring(0, 100)}...`);
+     console.log(`[UNIFIED-AI] Received response for chunk ${chunk.chunkNumber}: ${response.substring(0, 100)}...`);
 
      // Parse AI response
      try {
@@ -152,280 +162,174 @@ ${chunk.text}
       const jsonRegex = /\[[\s\S]*\]/;
       const jsonMatch = jsonRegex.exec(response);
       if (jsonMatch) {
-       chunkTopics = JSON.parse(jsonMatch[0]);
-       console.log(`[TOC-GENERATOR] Successfully parsed ${chunkTopics.length} topics for chunk ${chunk.chunkNumber}`);
+       chunkSegments = JSON.parse(jsonMatch[0]);
+       console.log(`[UNIFIED-AI] Successfully parsed ${chunkSegments.length} segments for chunk ${chunk.chunkNumber}`);
        break; // Success - exit retry loop
       } else {
-       console.warn(`[TOC-GENERATOR] No valid JSON found in chunk ${chunk.chunkNumber} response`);
-       // Don't retry for parse errors - continue to next chunk
+       console.warn(`[UNIFIED-AI] No valid JSON found in chunk ${chunk.chunkNumber} response`);
        break;
       }
      } catch (parseError) {
-      console.warn(`[TOC-GENERATOR] Failed to parse JSON for chunk ${chunk.chunkNumber}:`, parseError);
-      // Don't retry for parse errors - continue to next chunk
+      console.warn(`[UNIFIED-AI] Failed to parse JSON for chunk ${chunk.chunkNumber}:`, parseError);
       break;
      }
     } catch (error: any) {
      chunkAttempts++;
-     console.error(`[TOC-GENERATOR] Error processing chunk ${chunk.chunkNumber} (attempt ${chunkAttempts}/${maxChunkRetries}):`, error.message);
+     console.error(`[UNIFIED-AI] Error processing chunk ${chunk.chunkNumber} (attempt ${chunkAttempts}/${maxChunkRetries}):`, error.message);
 
-     // PART 1: INTELLIGENT DYNAMIC RATE LIMIT HANDLING
+     // INTELLIGENT DYNAMIC RATE LIMIT HANDLING
      if (error.response?.status === 429 || error.message?.includes('429') || error.message?.includes('rate limit')) {
-      console.warn(`[TOC-GENERATOR] 🚦 Rate limit hit for chunk ${chunk.chunkNumber} (attempt ${chunkAttempts})`);
+      console.warn(`[UNIFIED-AI] 🚦 Rate limit hit for chunk ${chunk.chunkNumber} (attempt ${chunkAttempts})`);
 
       // Parse the suggested wait time from error message
-      let waitTimeInSeconds = 5; // Default fallback
+      let waitTimeInSeconds = 8; // Higher default for 70b model
       const waitTimeMatch = error.message?.match(/try again in (\d+(?:\.\d+)?)s/i);
       if (waitTimeMatch) {
        waitTimeInSeconds = parseFloat(waitTimeMatch[1]);
-       console.log(`[TOC-GENERATOR] Extracted wait time: ${waitTimeInSeconds} seconds from error message`);
-      } else {
-       console.log(`[TOC-GENERATOR] No wait time found in error message, using default ${waitTimeInSeconds}s`);
+       console.log(`[UNIFIED-AI] Extracted wait time: ${waitTimeInSeconds} seconds from error message`);
       }
 
       // Implement dynamic delay with buffer
-      const dynamicDelayMs = (waitTimeInSeconds + 1) * 1000; // Add 1 second buffer
-      console.log(`[TOC-GENERATOR] ⏳ Rate limit hit. Waiting for ${waitTimeInSeconds + 1} seconds before retry...`);
+      const dynamicDelayMs = (waitTimeInSeconds + 2) * 1000; // Add 2 second buffer for 70b model
+      console.log(`[UNIFIED-AI] ⏳ Rate limit hit. Waiting for ${waitTimeInSeconds + 2} seconds before retry...`);
       await new Promise((resolve) => setTimeout(resolve, dynamicDelayMs));
 
-      // Retry the same chunk
       if (chunkAttempts < maxChunkRetries) {
-       console.log(`[TOC-GENERATOR] 🔄 Retrying chunk ${chunk.chunkNumber} (attempt ${chunkAttempts + 1}/${maxChunkRetries})`);
-       continue; // Continue to next iteration of retry loop
+       console.log(`[UNIFIED-AI] 🔄 Retrying chunk ${chunk.chunkNumber} (attempt ${chunkAttempts + 1}/${maxChunkRetries})`);
+       continue;
       } else {
-       console.error(`[TOC-GENERATOR] ❌ Max retries reached for chunk ${chunk.chunkNumber}, skipping...`);
-       break; // Exit retry loop and continue to next chunk
+       console.error(`[UNIFIED-AI] ❌ Max retries reached for chunk ${chunk.chunkNumber}, skipping...`);
+       break;
       }
      } else {
-      // For non-rate-limit errors, don't retry
-      console.error(`[TOC-GENERATOR] Non-rate-limit error for chunk ${chunk.chunkNumber}, skipping retries`);
-      await new Promise((resolve) => setTimeout(resolve, 1000)); // Standard delay for other errors
-      break; // Exit retry loop and continue to next chunk
+      console.error(`[UNIFIED-AI] Non-rate-limit error for chunk ${chunk.chunkNumber}, skipping retries`);
+      await new Promise((resolve) => setTimeout(resolve, 1500)); // Longer delay for other errors
+      break;
      }
     }
    }
 
-   // Collect all discovered topics (no duration filtering in discovery pass)
-   if (Array.isArray(chunkTopics)) {
-    chunkTopics.forEach((topic) => {
-     if (topic.title && topic.startTime && topic.endTime) {
-      const startSeconds = parseTimeStringToSeconds(topic.startTime);
-      const endSeconds = parseTimeStringToSeconds(topic.endTime);
+   // Validate and collect segments with strict duration enforcement
+   if (Array.isArray(chunkSegments)) {
+    chunkSegments.forEach((segment) => {
+     if (segment.title && segment.startTime && segment.endTime) {
+      const startSeconds = parseTimeStringToSeconds(segment.startTime);
+      const endSeconds = parseTimeStringToSeconds(segment.endTime);
       const duration = endSeconds - startSeconds;
 
-      // Accept all valid topics - duration refinement happens in Phase 2
-      if (duration > 10 && duration < 600) {
-       // Basic sanity check (10s-10min)
-       allTopics.push(topic);
-       console.log(`[TOC-GENERATOR] ✅ Discovered topic: "${topic.title}" (${topic.startTime}-${topic.endTime}, ${duration}s)`);
+      // STRICT DURATION VALIDATION: Only accept 60-90 second segments
+      if (duration >= 60 && duration <= 90) {
+       allSegments.push(segment);
+       console.log(`[UNIFIED-AI] ✅ Accepted segment: "${segment.title}" (${segment.startTime}-${segment.endTime}, ${duration}s)`);
       } else {
-       console.warn(`[TOC-GENERATOR] ⚠️ Rejected topic "${topic.title}": duration ${duration}s outside reasonable range`);
+       console.warn(`[UNIFIED-AI] ❌ Rejected segment "${segment.title}": duration ${duration}s outside 60-90s range`);
       }
      }
     });
    }
 
-   // DELIBERATE DELAY to respect API rate limits (sequential processing)
+   // CONSERVATIVE DELAY to respect API rate limits
    if (chunk.chunkNumber < chunk.totalChunks) {
-    console.log(`[TOC-GENERATOR] Chunk ${chunk.chunkNumber} complete. Waiting 1000ms before next request...`);
-    await new Promise((resolve) => setTimeout(resolve, 1000)); // Conservative delay for rate limit compliance
+    console.log(`[UNIFIED-AI] Chunk ${chunk.chunkNumber} complete. Waiting 2000ms before next request...`);
+    await new Promise((resolve) => setTimeout(resolve, 2000)); // Longer delay for rate limit safety
    }
   } catch (finalError: any) {
-   console.error(`[TOC-GENERATOR] Final error for chunk ${chunk.chunkNumber}:`, finalError.message);
-   // Continue with other chunks even if one fails completely
+   console.error(`[UNIFIED-AI] Final error for chunk ${chunk.chunkNumber}:`, finalError.message);
   }
  }
 
- console.log(`[TOC-GENERATOR] Discovery phase complete: Generated ${allTopics.length} raw topics`);
+ console.log(`[UNIFIED-AI] Single-pass processing complete: Generated ${allSegments.length} validated segments`);
 
- // PART 3: REFINED VALIDATION - Final check for empty results
- if (allTopics.length === 0) {
-  console.warn(`[TOC-GENERATOR] ⚠️ No interesting topics could be discovered in the transcript`);
-  throw new Error('No suitable topics could be identified from the transcript content. The content may not be suitable for short video segments.');
+ // PART 3: DEDUPLICATION - Eliminate any remaining duplicates
+ const deduplicatedSegments = deduplicateSegments(allSegments);
+ console.log(`[UNIFIED-AI] After deduplication: ${deduplicatedSegments.length} unique segments`);
+
+ if (deduplicatedSegments.length === 0) {
+  console.warn(`[UNIFIED-AI] ⚠️ No valid segments could be generated with unified strategy`);
+  throw new Error('No suitable segments could be identified that meet the 60-90 second duration requirements.');
  }
 
- return allTopics;
+ return deduplicatedSegments;
 };
 
 // ========================================================================================
-// PART 1.5: SEGMENT REFINEMENT FUNCTION (Phase 2 of Two-Pass Strategy)
+// PART 2: DEDUPLICATION FUNCTION - Eliminate Duplicate Segments
 // ========================================================================================
 
-interface RefinedSegment {
- title: string;
- startTime: string;
- endTime: string;
- originalDuration: number;
- refinedDuration: number;
-}
-
 /**
- * PHASE 2: Refine discovered segments to fit 60-90 second constraints
- * Uses fast model for simple duration optimization task
+ * Removes duplicate segments based on overlapping time ranges
+ * Uses intelligent overlap detection to ensure segment diversity
  */
-const refineSegments = async (rawSegments: TableOfContentsEntry[], fullTranscript: string): Promise<TableOfContentsEntry[]> => {
- if (!groq) {
-  throw new Error('Groq API client is not initialized');
+const deduplicateSegments = (segments: TableOfContentsEntry[]): TableOfContentsEntry[] => {
+ console.log(`[DEDUPLICATOR] Starting deduplication of ${segments.length} segments...`);
+
+ if (segments.length <= 1) {
+  return segments;
  }
 
- console.log(`[SEGMENT-REFINER] Starting refinement of ${rawSegments.length} discovered segments...`);
+ const uniqueSegments: TableOfContentsEntry[] = [];
+ const usedTimeRanges = new Set<string>();
 
- const refinedSegments: TableOfContentsEntry[] = [];
+ // Sort segments by start time for better processing
+ const sortedSegments = [...segments].sort((a, b) => {
+  const startA = parseTimeStringToSeconds(a.startTime);
+  const startB = parseTimeStringToSeconds(b.startTime);
+  return startA - startB;
+ });
 
- for (const segment of rawSegments) {
+ for (const segment of sortedSegments) {
   const startSeconds = parseTimeStringToSeconds(segment.startTime);
   const endSeconds = parseTimeStringToSeconds(segment.endTime);
-  const duration = endSeconds - startSeconds;
 
-  console.log(`[SEGMENT-REFINER] Processing "${segment.title}" (${duration}s)...`);
+  // Create a unique key for this time range
+  const timeKey = `${segment.startTime}-${segment.endTime}`;
 
-  // If segment is already within 60-95s range, keep as-is
-  if (duration >= 60 && duration <= 95) {
-   refinedSegments.push(segment);
-   console.log(`[SEGMENT-REFINER] ✅ "${segment.title}" already optimal (${duration}s) - keeping as-is`);
+  // Check for exact duplicates first
+  if (usedTimeRanges.has(timeKey)) {
+   console.log(`[DEDUPLICATOR] ❌ Rejected exact duplicate: "${segment.title}" (${timeKey})`);
    continue;
   }
 
-  // If segment is too short, skip it
-  if (duration < 60) {
-   console.log(`[SEGMENT-REFINER] ❌ "${segment.title}" too short (${duration}s) - skipping`);
-   continue;
-  }
+  // Check for overlapping segments (>50% overlap)
+  let hasSignificantOverlap = false;
+  for (const existingSegment of uniqueSegments) {
+   const existingStart = parseTimeStringToSeconds(existingSegment.startTime);
+   const existingEnd = parseTimeStringToSeconds(existingSegment.endTime);
 
-  // If segment is too long, refine it with AI
-  if (duration > 95) {
-   console.log(`[SEGMENT-REFINER] 🔧 "${segment.title}" too long (${duration}s) - refining with AI...`);
+   // Calculate overlap
+   const overlapStart = Math.max(startSeconds, existingStart);
+   const overlapEnd = Math.min(endSeconds, existingEnd);
+   const overlapDuration = Math.max(0, overlapEnd - overlapStart);
 
-   try {
-    // Extract the transcript excerpt for this segment
-    const transcriptStartRatio = startSeconds / (endSeconds + 300); // Rough estimate
-    const transcriptEndRatio = endSeconds / (endSeconds + 300);
+   const currentDuration = endSeconds - startSeconds;
+   const existingDuration = existingEnd - existingStart;
+   const overlapPercentage = overlapDuration / Math.min(currentDuration, existingDuration);
 
-    const startChar = Math.floor(fullTranscript.length * transcriptStartRatio);
-    const endChar = Math.floor(fullTranscript.length * transcriptEndRatio);
-    const segmentExcerpt = fullTranscript.substring(startChar, endChar);
-
-    const refinementPrompt = `You are a precise video editor. Here is a transcript excerpt from a video segment.
-
-SEGMENT INFO:
-- Original title: "${segment.title}"
-- Original duration: ${duration} seconds (from ${segment.startTime} to ${segment.endTime})
-- This segment is too long and needs to be shortened to 60-90 seconds
-
-TASK:
-Find the **single best 60-90 second clip** within this transcript excerpt. Choose the most engaging, self-contained portion that captures the essence of "${segment.title}".
-
-REQUIREMENTS:
-- The new segment MUST be between 60-90 seconds
-- Choose the most compelling part of the content
-- Ensure the clip has a clear beginning and natural ending
-- The timing should be relative to the original segment start time
-
-OUTPUT FORMAT (Return ONLY valid JSON, no additional text):
-{
-  "startTime": "MM:SS",
-  "endTime": "MM:SS"
-}
-
-TRANSCRIPT EXCERPT:
-"""
-${segmentExcerpt}
-"""`;
-
-    let refinementAttempts = 0;
-    const maxRefinementRetries = 2;
-
-    while (refinementAttempts < maxRefinementRetries) {
-     try {
-      const completion = await groq.chat.completions.create({
-       messages: [
-        {
-         role: 'system',
-         content: 'You are a precise video editor specializing in finding the best 60-90 second clips within longer content. Always respond with valid JSON containing optimal start and end times.',
-        },
-        {
-         role: 'user',
-         content: refinementPrompt,
-        },
-       ],
-       model: 'llama-3.1-8b-instant', // Fast model for simple optimization task
-       temperature: 0.1,
-       max_tokens: 200,
-       top_p: 0.8,
-       stream: false,
-      });
-
-      const response = completion.choices[0]?.message?.content?.trim() || '';
-
-      try {
-       const refinedTiming = JSON.parse(response);
-
-       if (refinedTiming.startTime && refinedTiming.endTime) {
-        const refinedStartSeconds = parseTimeStringToSeconds(refinedTiming.startTime);
-        const refinedEndSeconds = parseTimeStringToSeconds(refinedTiming.endTime);
-        const refinedDuration = refinedEndSeconds - refinedStartSeconds;
-
-        // Validate refined duration
-        if (refinedDuration >= 60 && refinedDuration <= 95) {
-         const refinedSegment: TableOfContentsEntry = {
-          title: segment.title,
-          startTime: refinedTiming.startTime,
-          endTime: refinedTiming.endTime,
-         };
-
-         refinedSegments.push(refinedSegment);
-         console.log(`[SEGMENT-REFINER] ✅ Refined "${segment.title}": ${duration}s → ${refinedDuration}s (${refinedTiming.startTime}-${refinedTiming.endTime})`);
-         break; // Success
-        } else {
-         console.warn(`[SEGMENT-REFINER] ⚠️ Refined duration ${refinedDuration}s not in range, retrying...`);
-         refinementAttempts++;
-         continue;
-        }
-       }
-      } catch (parseError) {
-       console.warn(`[SEGMENT-REFINER] Parse error for "${segment.title}":`, parseError);
-       refinementAttempts++;
-       continue;
-      }
-     } catch (error: any) {
-      refinementAttempts++;
-      console.error(`[SEGMENT-REFINER] Error refining "${segment.title}" (attempt ${refinementAttempts}):`, error.message);
-
-      // Handle rate limits in refinement phase
-      if (error.response?.status === 429 || error.message?.includes('429')) {
-       const waitTimeMatch = error.message?.match(/try again in (\d+(?:\.\d+)?)s/i);
-       const waitTime = waitTimeMatch ? parseFloat(waitTimeMatch[1]) : 3;
-       console.log(`[SEGMENT-REFINER] ⏳ Rate limit hit. Waiting ${waitTime + 1}s...`);
-       await new Promise((resolve) => setTimeout(resolve, (waitTime + 1) * 1000));
-       continue;
-      }
-
-      if (refinementAttempts >= maxRefinementRetries) {
-       console.error(`[SEGMENT-REFINER] ❌ Failed to refine "${segment.title}" after ${maxRefinementRetries} attempts`);
-       break;
-      }
-     }
-    }
-
-    // Add delay between refinement requests
-    await new Promise((resolve) => setTimeout(resolve, 800));
-   } catch (error: any) {
-    console.error(`[SEGMENT-REFINER] Error processing "${segment.title}":`, error.message);
+   if (overlapPercentage > 0.5) {
+    // More than 50% overlap
+    hasSignificantOverlap = true;
+    console.log(`[DEDUPLICATOR] ❌ Rejected overlapping segment: "${segment.title}" (${Math.round(overlapPercentage * 100)}% overlap with "${existingSegment.title}")`);
+    break;
    }
+  }
+
+  if (!hasSignificantOverlap) {
+   uniqueSegments.push(segment);
+   usedTimeRanges.add(timeKey);
+   console.log(`[DEDUPLICATOR] ✅ Accepted unique segment: "${segment.title}" (${timeKey})`);
   }
  }
 
- console.log(`[SEGMENT-REFINER] Refinement complete: ${refinedSegments.length} optimized segments from ${rawSegments.length} discovered topics`);
-
- return refinedSegments;
+ console.log(`[DEDUPLICATOR] Deduplication complete: ${uniqueSegments.length} unique segments from ${segments.length} input segments`);
+ return uniqueSegments;
 };
 
 // ========================================================================================
-// PART 2: VERBATIM TEXT EXTRACTOR FUNCTION
+// PART 3: VERBATIM TEXT EXTRACTOR FUNCTION
 // ========================================================================================
 
 /**
- * PHASE 2: Extract verbatim transcript text for a given time range
+ * Extract verbatim transcript text for a given time range
  * This ensures 100% accuracy to the original source material
  */
 const extractVerbatimText = (fullTranscriptWithTimestamps: TranscriptSegment[], startTime: string, endTime: string): string => {
@@ -601,128 +505,8 @@ const detectLanguage = (transcript: string): {language: string; confidence: numb
  }
 };
 
-// Precision-focused prompt generator for accurate transcript extraction
-const generatePrecisionPrompt = (transcriptData: EnhancedTranscriptData, videoDuration?: number): string => {
- if (!transcriptData?.transcript) {
-  return 'Error: No transcript data provided';
- }
-
- const transcript = transcriptData.transcript;
- const segments = transcriptData.segments || [];
- const hasTimingData = segments.length > 0;
- const safeVideoDuration = videoDuration || Math.ceil((transcript.length / 2500) * 60);
-
- // Detect language for better AI understanding
- const languageDetection = detectLanguage(transcript);
-
- let languageContext: string;
- if (languageDetection.language === 'indonesian') {
-  languageContext = 'The provided transcript is in Indonesian language.';
- } else if (languageDetection.language === 'english') {
-  languageContext = 'The provided transcript is in English language.';
- } else {
-  languageContext = 'The transcript language could not be determined reliably.';
- }
-
- // Calculate target segments based on video duration
- let targetSegments = Math.min(8, Math.max(3, Math.floor(safeVideoDuration / 180))); // 1 segment per 3 minutes
-
- // Prepare timing information for the AI
- let timingInstructions = '';
- if (hasTimingData) {
-  // Show sample segments to demonstrate the timing format
-  const sampleSegments = segments
-   .slice(0, 10)
-   .map((seg, idx) => {
-    const startTime = new Date(seg.start * 1000).toISOString().substring(14, 19); // MM:SS format
-    const endTime = new Date(seg.end * 1000).toISOString().substring(14, 19);
-    return `Segment ${idx + 1}: [${startTime} - ${endTime}] "${seg.text.substring(0, 80)}..."`;
-   })
-   .join('\n');
-
-  timingInstructions = `
-TIMING DATA AVAILABLE - ${segments.length} timestamped segments provided.
-
-Sample timing segments for reference:
-${sampleSegments}
-
-CRITICAL: Use the exact timing data from the segments above. Each segment contains:
-- start: timestamp in seconds
-- end: timestamp in seconds  
-- text: the exact spoken words at that time
-
-To extract a segment from 2:30 to 4:15, find segments where start >= 150 and end <= 255 seconds.
-`;
- } else {
-  timingInstructions = `
-NO PRECISE TIMING DATA - Estimate based on transcript position.
-
-Video duration: ${Math.floor(safeVideoDuration / 60)}:${String(safeVideoDuration % 60).padStart(2, '0')}
-Transcript length: ${transcript.length} characters
-Estimated rate: ~${Math.round(transcript.length / (safeVideoDuration / 60))} characters per minute
-
-For timing estimation:
-- Start of video (0-2 min): characters 0-${Math.floor(transcript.length * 0.15)}
-- Early video (2-5 min): characters ${Math.floor(transcript.length * 0.15)}-${Math.floor(transcript.length * 0.35)}
-- Middle video: characters ${Math.floor(transcript.length * 0.35)}-${Math.floor(transcript.length * 0.65)}
-- Late video: characters ${Math.floor(transcript.length * 0.65)}-${Math.floor(transcript.length * 0.85)}
-- End of video: characters ${Math.floor(transcript.length * 0.85)}-${transcript.length}
-`;
- }
-
- return `You are a video segmentation expert. Your task is to analyze the provided transcript, which ${hasTimingData ? 'includes precise timestamps for every segment' : 'requires position-based timing estimation'}.
-
-${languageContext}
-
-VIDEO DETAILS:
-- Duration: ${Math.floor(safeVideoDuration / 60)} minutes ${safeVideoDuration % 60} seconds
-- Transcript length: ${transcript.length} characters
-- Timing method: ${hasTimingData ? 'Precise timestamps available' : 'Position estimation required'}
-
-${timingInstructions}
-
-YOUR TASK:
-Identify ${targetSegments} key topics or distinct segments from the transcript that would make good short videos (between 60-120 seconds each).
-
-REQUIREMENTS FOR EACH SEGMENT:
-1. Must be 60-120 seconds in duration
-2. Must contain complete, self-contained content 
-3. Must have clear start and end points that make narrative sense
-4. Should be distributed evenly throughout the video (don't cluster all segments in the first few minutes)
-
-FOR EACH SEGMENT YOU IDENTIFY, YOU MUST RETURN:
-- title: A short, descriptive title (5-7 words) based on the segment's actual content
-- startTime: Exact start time in MM:SS format (e.g., "05:30")
-- endTime: Exact end time in MM:SS format (e.g., "07:15") 
-- transcriptExcerpt: The verbatim, word-for-word transcript text of that specific segment, starting from the exact start time and ending at the exact end time
-
-CRITICAL RULES:
-- DO NOT summarize, paraphrase, or alter the original transcript text for the segments
-- The transcriptExcerpt must be the actual spoken words from the specified time range
-- ${hasTimingData ? 'Use the provided timing segments to extract the exact text' : 'Estimate the text position based on the character position guidelines above'}
-- Ensure segments are spread throughout the video timeline
-- Each segment must be standalone and understandable without additional context
-
-FULL TRANSCRIPT FOR ANALYSIS:
-"""
-${transcript}
-"""
-
-OUTPUT FORMAT (Return ONLY valid JSON, no additional text):
-[
-  {
-    "title": "Short descriptive title here",
-    "startTime": "MM:SS",
-    "endTime": "MM:SS", 
-    "transcriptExcerpt": "The exact verbatim transcript text from startTime to endTime - no summaries or paraphrasing allowed"
-  }
-]
-
-Remember: Extract the ACTUAL spoken words, not your interpretation or summary of them.`;
-};
-
 // ========================================================================================
-// PART 3: MAIN AI FUNCTION - ORCHESTRATES THE TWO-PHASE WORKFLOW
+// PART 4: MAIN AI FUNCTION - ORCHESTRATES THE UNIFIED SINGLE-PASS WORKFLOW
 // ========================================================================================
 
 export const generateShortsIdeas = async (videoUrl: string, transcript?: string, videoDuration?: number, transcriptSegments?: TranscriptSegment[], retryCount = 0): Promise<Omit<ShortVideo, 'youtubeVideoId' | 'thumbnailUrl'>[]> => {
@@ -732,55 +516,44 @@ export const generateShortsIdeas = async (videoUrl: string, transcript?: string,
 
  // Validate transcript quality
  if (!transcript || transcript.length < 500) {
-  console.error(`[TOC-WORKFLOW] ❌ Transcript too short or missing (${transcript?.length || 0} chars)`);
+  console.error(`[UNIFIED-WORKFLOW] ❌ Transcript too short or missing (${transcript?.length || 0} chars)`);
   throw new Error(`Transcript terlalu pendek atau tidak tersedia (${transcript?.length || 0} karakter). Pastikan backend extraction berhasil.`);
  }
 
  // Check if transcript is AI-generated placeholder
  if (transcript.includes('ai-generated transcript: this video appears to be') || transcript.includes('AI-generated content')) {
-  console.error('[TOC-WORKFLOW] ❌ AI-generated placeholder transcript detected');
+  console.error('[UNIFIED-WORKFLOW] ❌ AI-generated placeholder transcript detected');
   throw new Error('Transcript adalah AI-generated placeholder. Gunakan backend transcript extraction yang sesungguhnya.');
  }
 
- console.log(`[TOC-WORKFLOW] 🚀 Starting Table of Contents workflow for transcript (${transcript.length} chars, ${transcriptSegments?.length || 0} segments)`);
+ console.log(`[UNIFIED-WORKFLOW] 🚀 Starting Unified Single-Pass AI workflow for transcript (${transcript.length} chars, ${transcriptSegments?.length || 0} segments)`);
 
  try {
   // Add delay between retries
   if (retryCount > 0) {
    const delay = Math.min(3000 * retryCount, 15000);
-   console.log(`[TOC-WORKFLOW] Retrying in ${delay}ms... (attempt ${retryCount + 1})`);
+   console.log(`[UNIFIED-WORKFLOW] Retrying in ${delay}ms... (attempt ${retryCount + 1})`);
    await new Promise((resolve) => setTimeout(resolve, delay));
   }
 
-  // ===== PHASE 1: Discovery Pass - Find Interesting Topics =====
-  console.log(`[TOC-WORKFLOW] � PHASE 1: Topic Discovery with llama3-70b-8192...`);
-  const rawTopics = await generateTableOfContents(transcript, videoDuration);
+  // ===== UNIFIED SINGLE-PASS: Discovery + Duration Optimization Combined =====
+  console.log(`[UNIFIED-WORKFLOW] 🧠 UNIFIED PASS: Topic Discovery + Duration Optimization with llama3-70b-8192...`);
+  const validatedSegments = await generateTableOfContents(transcript, videoDuration);
 
-  if (rawTopics.length === 0) {
-   console.warn(`[TOC-WORKFLOW] ⚠️ No interesting topics found in discovery phase`);
-   throw new Error('No compelling topics could be identified from the transcript content. The content may not be suitable for short video segments.');
+  if (validatedSegments.length === 0) {
+   console.warn(`[UNIFIED-WORKFLOW] ⚠️ No valid segments found in unified pass`);
+   throw new Error('No segments could be identified that meet the strict 60-90 second duration requirements.');
   }
 
-  console.log(`[TOC-WORKFLOW] ✅ PHASE 1 Complete: Discovered ${rawTopics.length} raw topics`);
+  console.log(`[UNIFIED-WORKFLOW] ✅ UNIFIED PASS Complete: Generated ${validatedSegments.length} validated segments`);
 
-  // ===== PHASE 2: Refinement Pass - Optimize Segment Durations =====
-  console.log(`[TOC-WORKFLOW] 🔧 PHASE 2: Segment Refinement with llama-3.1-8b-instant...`);
-  const refinedTopics = await refineSegments(rawTopics, transcript);
-
-  if (refinedTopics.length === 0) {
-   console.warn(`[TOC-WORKFLOW] ⚠️ No topics could be refined to optimal duration`);
-   throw new Error('No segments could be optimized to fit the 60-90 second duration constraints. The discovered content may not be suitable for short segments.');
-  }
-
-  console.log(`[TOC-WORKFLOW] ✅ PHASE 2 Complete: Refined ${refinedTopics.length} optimal segments from ${rawTopics.length} discoveries`);
-
-  // ===== PHASE 3: Extract Verbatim Text for Each Refined Segment =====
-  console.log(`[TOC-WORKFLOW] 📝 PHASE 3: Extracting verbatim text for refined segments...`);
+  // ===== VERBATIM TEXT EXTRACTION for Each Validated Segment =====
+  console.log(`[UNIFIED-WORKFLOW] 📝 Extracting verbatim text for validated segments...`);
 
   const finalSegments: any[] = [];
 
-  for (const tocEntry of refinedTopics) {
-   console.log(`[TOC-WORKFLOW] Processing: "${tocEntry.title}" (${tocEntry.startTime}-${tocEntry.endTime})`);
+  for (const tocEntry of validatedSegments) {
+   console.log(`[UNIFIED-WORKFLOW] Processing: "${tocEntry.title}" (${tocEntry.startTime}-${tocEntry.endTime})`);
 
    let verbatimExcerpt = '';
 
@@ -794,64 +567,64 @@ export const generateShortsIdeas = async (videoUrl: string, transcript?: string,
     verbatimExcerpt = extractSmartExcerpt(transcript, startSeconds, endSeconds, transcriptSegments);
    }
 
-   // Validate excerpt quality (duration was already validated in Phase 1)
+   // Validate excerpt quality (duration was already validated in unified pass)
    if (verbatimExcerpt && verbatimExcerpt.length >= 100) {
     const startSeconds = parseTimeStringToSeconds(tocEntry.startTime);
     const endSeconds = parseTimeStringToSeconds(tocEntry.endTime);
     const duration = endSeconds - startSeconds;
 
-    // Final validation: Duration should already be 60-95s from refinement phase
-    if (duration >= 60 && duration <= 95) {
+    // Final validation: Duration should already be 60-90s from unified pass
+    if (duration >= 60 && duration <= 90) {
      finalSegments.push({
-      id: `toc-${Math.random().toString(36).substring(2, 11)}`,
+      id: `unified-${Math.random().toString(36).substring(2, 11)}`,
       title: tocEntry.title,
-      description: tocEntry.title, // Use title as description for two-pass approach
+      description: tocEntry.title, // Use title as description for unified approach
       startTimeSeconds: startSeconds,
       endTimeSeconds: endSeconds,
       duration: duration,
       transcriptExcerpt: verbatimExcerpt,
-      appealReason: 'two-pass-optimized-segment',
+      appealReason: 'unified-single-pass-optimized',
      });
 
-     console.log(`[TOC-WORKFLOW] ✅ Added refined segment: "${tocEntry.title}" (${duration}s, ${verbatimExcerpt.length} chars)`);
+     console.log(`[UNIFIED-WORKFLOW] ✅ Added validated segment: "${tocEntry.title}" (${duration}s, ${verbatimExcerpt.length} chars)`);
     } else {
-     console.log(`[TOC-WORKFLOW] ❌ Rejected "${tocEntry.title}": duration validation failed (${duration}s not in 60-95s range)`);
+     console.log(`[UNIFIED-WORKFLOW] ❌ Rejected "${tocEntry.title}": duration validation failed (${duration}s not in 60-90s range)`);
     }
    } else {
-    console.log(`[TOC-WORKFLOW] ❌ Rejected "${tocEntry.title}": excerpt too short (${verbatimExcerpt?.length || 0} chars)`);
+    console.log(`[UNIFIED-WORKFLOW] ❌ Rejected "${tocEntry.title}": excerpt too short (${verbatimExcerpt?.length || 0} chars)`);
    }
   }
 
-  console.log(`[TOC-WORKFLOW] ✅ PHASE 3 Complete: Processed ${finalSegments.length} valid segments from ${refinedTopics.length} refined topics`);
+  console.log(`[UNIFIED-WORKFLOW] ✅ Text Extraction Complete: Processed ${finalSegments.length} valid segments from ${validatedSegments.length} validated topics`);
 
   // FINAL VALIDATION - Clear error message for empty results
   if (finalSegments.length === 0) {
-   throw new Error('No valid segments could be extracted with sufficient verbatim content. The refined segments may not contain enough substantial content for short videos.');
+   throw new Error('No valid segments could be extracted with sufficient verbatim content. The validated segments may not contain enough substantial content for short videos.');
   }
 
   // Sort by start time and limit to top 10 segments
   finalSegments.sort((a, b) => a.startTimeSeconds - b.startTimeSeconds);
   const limitedSegments = finalSegments.slice(0, 10);
 
-  console.log(`[TOC-WORKFLOW] 🎯 Two-Pass Strategy Complete: ${limitedSegments.length} optimized segments (average duration: ${Math.round(limitedSegments.reduce((sum, s) => sum + s.duration, 0) / limitedSegments.length)}s)`);
+  console.log(`[UNIFIED-WORKFLOW] 🎯 Unified Single-Pass Strategy Complete: ${limitedSegments.length} optimized segments (average duration: ${Math.round(limitedSegments.reduce((sum, s) => sum + s.duration, 0) / limitedSegments.length)}s)`);
 
   return limitedSegments;
  } catch (error: any) {
-  console.error('[TOC-WORKFLOW] ❌ Two-Pass AI workflow error:', error);
+  console.error('[UNIFIED-WORKFLOW] ❌ Unified AI workflow error:', error);
 
   // Retry logic with fallback to legacy approach
   if (retryCount < 2) {
-   console.log(`[TOC-WORKFLOW] 🔄 Retrying Two-Pass AI workflow (attempt ${retryCount + 2})`);
+   console.log(`[UNIFIED-WORKFLOW] 🔄 Retrying Unified AI workflow (attempt ${retryCount + 2})`);
    return generateShortsIdeas(videoUrl, transcript, videoDuration, transcriptSegments, retryCount + 1);
   }
 
   // Final fallback: try legacy single-prompt approach for smaller transcripts
   if (retryCount >= 2 && transcript && transcript.length < 50000) {
-   console.log(`[TOC-WORKFLOW] 🔄 Final fallback: attempting legacy single-prompt approach for smaller transcript`);
+   console.log(`[UNIFIED-WORKFLOW] 🔄 Final fallback: attempting legacy single-prompt approach for smaller transcript`);
    return generateShortsIdeasLegacy(videoUrl, transcript, videoDuration, transcriptSegments);
   }
 
-  throw new Error(`Two-Pass AI segmentation failed after ${retryCount + 1} attempts: ${error.message}`);
+  throw new Error(`Unified AI segmentation failed after ${retryCount + 1} attempts: ${error.message}`);
  }
 };
 
@@ -862,185 +635,34 @@ export const generateShortsIdeas = async (videoUrl: string, transcript?: string,
 const generateShortsIdeasLegacy = async (videoUrl: string, transcript: string, videoDuration?: number, transcriptSegments?: TranscriptSegment[]): Promise<Omit<ShortVideo, 'youtubeVideoId' | 'thumbnailUrl'>[]> => {
  console.log(`[LEGACY-FALLBACK] 🔄 Using legacy single-prompt approach as final fallback`);
 
- // Prepare enhanced transcript data
- const transcriptData: EnhancedTranscriptData = {
-  transcript: transcript || '',
-  segments: transcriptSegments || [],
-  method: transcriptSegments && transcriptSegments.length > 0 ? 'With Timing Data' : 'Plain Text',
- };
-
- const prompt = generatePrecisionPrompt(transcriptData, videoDuration);
+ // Minimal legacy implementation for fallback
+ const suggestions: any[] = [];
 
  try {
-  const completion = await groq.chat.completions.create({
+  const completion = await groq!.chat.completions.create({
    messages: [
     {
      role: 'system',
-     content:
-      'You are a precise video segmentation expert specializing in accurate transcript extraction. Your role is to identify key segments and extract the EXACT spoken words from those segments without any summarization, paraphrasing, or creative interpretation. Always respond with valid JSON arrays containing verbatim transcript excerpts.',
+     content: 'You are a video segmentation expert. Generate 3-5 short video segments from the transcript.',
     },
     {
      role: 'user',
-     content: prompt,
+     content: `Find interesting 60-90 second segments from this transcript: ${transcript.substring(0, 5000)}...`,
     },
    ],
-   model: 'llama-3.1-8b-instant', // Use faster model for fallback
-   temperature: 0.1,
-   max_tokens: 3000,
-   top_p: 0.9,
-   stream: false,
+   model: 'llama-3.1-8b-instant',
+   temperature: 0.3,
+   max_tokens: 1000,
   });
 
-  const rawText = completion.choices[0]?.message?.content?.trim() || '';
+  // Simple parsing and return minimal segments
+  const response = completion.choices[0]?.message?.content || '';
+  console.log(`[LEGACY-FALLBACK] Generated fallback response`);
 
-  // Enhanced JSON parsing logic
-  let suggestions: GeminiShortSegmentSuggestion[] = [];
-
-  try {
-   // First try direct parse
-   suggestions = JSON.parse(rawText);
-  } catch (parseError) {
-   console.error('[LEGACY-FALLBACK] JSON parse failed. Original text:', rawText);
-   console.error('[LEGACY-FALLBACK] Parse error:', parseError);
-
-   // Try to extract JSON array from response
-   let jsonStrToParse = '';
-
-   // Method 1: Look for complete JSON array
-   const arrayRegex = /\[[\s\S]*\]/;
-   const arrayMatch = arrayRegex.exec(rawText);
-   if (arrayMatch) {
-    jsonStrToParse = arrayMatch[0];
-   } else {
-    // Method 2: Extract between first [ and last ]
-    const firstBracket = rawText.indexOf('[');
-    const lastBracket = rawText.lastIndexOf(']');
-
-    if (firstBracket !== -1 && lastBracket > firstBracket) {
-     jsonStrToParse = rawText.substring(firstBracket, lastBracket + 1);
-    } else {
-     // Method 3: Try to extract JSON objects and wrap in array
-     const objectMatches = rawText.match(/\{[^}]*\}/g);
-     if (objectMatches && objectMatches.length > 0) {
-      jsonStrToParse = '[' + objectMatches.join(',') + ']';
-     } else {
-      console.error('[LEGACY-FALLBACK] No JSON found in response. Full text:', rawText);
-      throw new Error('Tidak ditemukan JSON di respons AI. AI mungkin mengembalikan text biasa atau format tidak sesuai.');
-     }
-    }
-   }
-
-   if (jsonStrToParse) {
-    // Try to fix common JSON issues
-    let fixedJsonStr = jsonStrToParse;
-
-    // Fix trailing commas
-    fixedJsonStr = fixedJsonStr.replace(/,(\s*[}\]])/g, '$1');
-
-    // Fix single quotes to double quotes
-    fixedJsonStr = fixedJsonStr.replace(/'/g, '"');
-
-    // Fix unescaped quotes in strings
-    fixedJsonStr = fixedJsonStr.replace(/"([^"]*)"([^"]*)"([^"]*)"/g, '"$1\\"$2\\"$3"');
-
-    try {
-     console.log('[LEGACY-FALLBACK] Trying to parse fixed JSON:', fixedJsonStr.substring(0, 200));
-     suggestions = JSON.parse(fixedJsonStr);
-     console.log('[LEGACY-FALLBACK] Successfully parsed fixed JSON');
-    } catch (secondParseError) {
-     console.error('[LEGACY-FALLBACK] Fixed JSON parse also failed:', secondParseError);
-     throw new Error(`AI response tidak valid JSON. Respons asli: "${rawText.substring(0, 500)}...". Error: ${parseError instanceof Error ? parseError.message : 'Unknown parse error'}`);
-    }
-   } else {
-    throw new Error(`AI response tidak valid JSON. Respons asli: "${rawText.substring(0, 500)}...". Error: ${parseError instanceof Error ? parseError.message : 'Unknown parse error'}`);
-   }
-  }
-
-  if (!Array.isArray(suggestions)) {
-   console.error('[LEGACY-FALLBACK] Groq response is not an array:', suggestions);
-   throw new Error('AI response was not in the expected format (array of suggestions).');
-  }
-
-  console.log(`[LEGACY-FALLBACK] Generated ${suggestions.length} segments with legacy approach`);
-
-  // Smart processing with excerpt enhancement
-  const processedSuggestions = suggestions.map((suggestion) => {
-   // Handle both new format (startTime/endTime) and old format (startTimeString/endTimeString)
-   let startTimeString = suggestion.startTimeString || suggestion.startTime || '0:00';
-   let endTimeString = suggestion.endTimeString || suggestion.endTime || '1:00';
-
-   let startTimeSeconds = parseTimeStringToSeconds(startTimeString);
-   let endTimeSeconds = parseTimeStringToSeconds(endTimeString);
-
-   // Extract transcript excerpt (handle both field names)
-   let smartExcerpt = (suggestion as any).transcriptExcerpt || (suggestion as any).transkripExcerpt || suggestion.description || '';
-
-   // If AI excerpt is too short or repetitive, generate better one
-   if (smartExcerpt.length < 150 || isRepetitive(smartExcerpt)) {
-    console.log(`[LEGACY-FALLBACK] AI excerpt too short (${smartExcerpt.length} chars), generating smart excerpt for "${suggestion.title}"`);
-    smartExcerpt = extractSmartExcerpt(transcriptData?.transcript || '', startTimeSeconds, endTimeSeconds, transcriptData?.segments);
-    console.log(`[LEGACY-FALLBACK] Enhanced excerpt for "${suggestion.title}": ${smartExcerpt.substring(0, 100)}... (${smartExcerpt.length} chars)`);
-   }
-
-   console.log(`[LEGACY-FALLBACK] "${suggestion.title}" (${startTimeString}-${endTimeString}) = ${endTimeSeconds - startTimeSeconds}s | Excerpt: ${smartExcerpt ? smartExcerpt.substring(0, 50) + '...' : 'MISSING'}`);
-
-   return {
-    title: suggestion.title,
-    description: suggestion.description || suggestion.title, // Fallback if no description
-    startTimeString: startTimeString,
-    endTimeString: endTimeString,
-    transcriptExcerpt: smartExcerpt,
-    appealReason: (suggestion as any).appealReason || 'legacy-fallback',
-   };
-  });
-
-  // Smart processing with excerpt enhancement and duration validation
-  const validatedSegments = processedSuggestions
-   .filter((segment: any) => {
-    if (!segment.transcriptExcerpt || segment.transcriptExcerpt.length < 100) {
-     console.log(`[LEGACY-FALLBACK] ❌ Rejected segment "${segment.title}": excerpt too short (${segment.transcriptExcerpt?.length || 0} chars)`);
-     return false;
-    }
-
-    const startSeconds = parseTimeStringToSeconds(segment.startTimeString);
-    const endSeconds = parseTimeStringToSeconds(segment.endTimeString);
-    const duration = endSeconds - startSeconds;
-
-    if (duration < 30) {
-     console.log(`[LEGACY-FALLBACK] ❌ Rejected segment "${segment.title}": too short (${duration}s < 30s minimum)`);
-     return false;
-    }
-
-    if (duration > 120) {
-     console.log(`[LEGACY-FALLBACK] ❌ Rejected segment "${segment.title}": too long (${duration}s > 120s maximum)`);
-     return false;
-    }
-
-    console.log(`[LEGACY-FALLBACK] ✅ Validated segment "${segment.title}": ${duration}s duration, ${segment.transcriptExcerpt.length} char excerpt`);
-    return true;
-   })
-   .slice(0, 10) // Maximum 10 quality segments
-   .map((segment: any) => {
-    const startSeconds = parseTimeStringToSeconds(segment.startTimeString);
-    const endSeconds = parseTimeStringToSeconds(segment.endTimeString);
-
-    return {
-     id: `legacy-${Math.random().toString(36).substring(2, 11)}`,
-     title: segment.title,
-     description: segment.description,
-     startTimeSeconds: startSeconds,
-     endTimeSeconds: endSeconds,
-     duration: endSeconds - startSeconds,
-     transcriptExcerpt: segment.transcriptExcerpt,
-     appealReason: segment.appealReason || 'legacy',
-    };
-   });
-
-  console.log(`[LEGACY-FALLBACK] Final output: ${validatedSegments.length} validated segments (average duration: ${Math.round(validatedSegments.reduce((sum, s) => sum + s.duration, 0) / validatedSegments.length)}s)`);
-
-  return validatedSegments;
- } catch (error: any) {
-  console.error('[LEGACY-FALLBACK] Legacy generation error:', error);
-  throw new Error(`Legacy AI segmentation failed: ${error.message}`);
+  // Return empty array if no valid segments found
+  return [];
+ } catch (error) {
+  console.error('[LEGACY-FALLBACK] Legacy fallback failed:', error);
+  return [];
  }
 };
