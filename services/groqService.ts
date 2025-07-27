@@ -83,7 +83,7 @@ const generateTableOfContents = async (fullTranscriptText: string, videoDuration
    const chunkEndTime = Math.floor(endTimeRatio * safeVideoDuration);
 
    // UNIFIED PROMPT: Discovery + Duration Optimization in One Call
-   const prompt = `Anda adalah ahli segmentasi video yang sangat cerdas. Tugas Anda adalah menganalisis bagian transkrip dari video Indonesia ini.
+   const prompt = `You are an expert video content analyst and producer. Your task is to analyze this transcript chunk from an Indonesian video and identify the most engaging, viral-worthy segments.
 
 ${languageInstruction}
 
@@ -92,22 +92,19 @@ INFO CHUNK:
 - Rentang waktu perkiraan: ${Math.floor(chunkStartTime / 60)}:${(chunkStartTime % 60).toString().padStart(2, '0')} sampai ${Math.floor(chunkEndTime / 60)}:${(chunkEndTime % 60).toString().padStart(2, '0')}
 - Durasi video: ${Math.floor(safeVideoDuration / 60)} menit ${safeVideoDuration % 60} detik
 
-TUGAS UTAMA:
-Identifikasi hingga 3 topik yang berbeda dan menarik yang akan membuat konten video pendek yang bagus.
+Your primary goal is to find distinct, compelling topics. For each topic you identify:
 
-**ATURAN WAJIB DAN KETAT:**
-1. **Untuk setiap topik, Anda HARUS menemukan segmen dialog berkelanjutan yang berdurasi antara 60 hingga 90 detik.**
-2. **Jika topik menarik tetapi durasi alaminya terlalu panjang, Anda HARUS menemukan sub-bagian 60-90 detik yang paling menarik dalam topik tersebut.**
-3. **JANGAN mengembalikan segmen lebih dari 90 detik.**
-4. **Setiap segmen harus unik dan berbeda - hindari overlap waktu.**
+1. **Find the natural start and end points.** A good segment should feel complete, with a clear beginning and end.
+2. **Target a duration between 30 and 120 seconds.** This is a flexible guideline. A fantastic 35-second clip is better than a mediocre 60-second one. A compelling 110-second story is also excellent. Use your judgment to find the best possible clip.
+3. **Provide the output in INDONESIAN.** This includes the title.
+4. For each segment you find, provide the following as a clean, parsable JSON array:
+   - A short, engaging title in Indonesian (\`title\`).
+   - The exact start time (\`startTime\`) in MM:SS format.
+   - The exact end time (\`endTime\`) in MM:SS format.
 
-PERSYARATAN UNTUK SETIAP SEGMEN:
-- Topik yang menarik secara alami, informatif, atau menghibur
-- Setiap topik harus berbeda dan mandiri
-- Cari momen dengan struktur naratif yang jelas (awal, tengah, akhir)
-- Temukan konten yang akan menarik perhatian penonton segera
-- Durasi HARUS 60-90 detik (wajib)
-- Waktu dalam format MM:SS relatif terhadap video penuh
+If you identify a great topic that is longer than 120 seconds, you are allowed to find the best, most impactful sub-section within it that fits the time guideline.
+
+Prioritize content quality and natural conversational flow above all else.
 
 OUTPUT FORMAT (Kembalikan HANYA JSON yang valid, tanpa teks tambahan):
 [
@@ -217,12 +214,12 @@ ${chunk.text}
       const endSeconds = parseTimeStringToSeconds(segment.endTime);
       const duration = endSeconds - startSeconds;
 
-      // STRICT DURATION VALIDATION: Only accept 60-90 second segments
-      if (duration >= 60 && duration <= 90) {
+      // STRICT DURATION VALIDATION: Only accept 30-120 second segments
+      if (duration >= 30 && duration <= 120) {
        allSegments.push(segment);
        console.log(`[UNIFIED-AI] ✅ Accepted segment: "${segment.title}" (${segment.startTime}-${segment.endTime}, ${duration}s)`);
       } else {
-       console.warn(`[UNIFIED-AI] ❌ Rejected segment "${segment.title}": duration ${duration}s outside 60-90s range`);
+       console.warn(`[UNIFIED-AI] ❌ Rejected segment "${segment.title}": duration ${duration}s outside 30-120s range`);
       }
      }
     });
@@ -246,7 +243,7 @@ ${chunk.text}
 
  if (deduplicatedSegments.length === 0) {
   console.warn(`[UNIFIED-AI] ⚠️ No valid segments could be generated with unified strategy`);
-  throw new Error('No suitable segments could be identified that meet the 60-90 second duration requirements.');
+  throw new Error('No suitable segments could be identified that meet the 30-120 second duration requirements.');
  }
 
  return deduplicatedSegments;
@@ -542,7 +539,7 @@ export const generateShortsIdeas = async (videoUrl: string, transcript?: string,
 
   if (validatedSegments.length === 0) {
    console.warn(`[UNIFIED-WORKFLOW] ⚠️ No valid segments found in unified pass`);
-   throw new Error('No segments could be identified that meet the strict 60-90 second duration requirements.');
+   throw new Error('No segments could be identified that meet the flexible 30-120 second duration requirements.');
   }
 
   console.log(`[UNIFIED-WORKFLOW] ✅ UNIFIED PASS Complete: Generated ${validatedSegments.length} validated segments`);
@@ -573,8 +570,8 @@ export const generateShortsIdeas = async (videoUrl: string, transcript?: string,
     const endSeconds = parseTimeStringToSeconds(tocEntry.endTime);
     const duration = endSeconds - startSeconds;
 
-    // Final validation: Duration should already be 60-90s from unified pass
-    if (duration >= 60 && duration <= 90) {
+    // Final validation: Duration should be 30-120s from unified pass
+    if (duration >= 30 && duration <= 120) {
      finalSegments.push({
       id: `unified-${Math.random().toString(36).substring(2, 11)}`,
       title: tocEntry.title,
@@ -588,7 +585,7 @@ export const generateShortsIdeas = async (videoUrl: string, transcript?: string,
 
      console.log(`[UNIFIED-WORKFLOW] ✅ Added validated segment: "${tocEntry.title}" (${duration}s, ${verbatimExcerpt.length} chars)`);
     } else {
-     console.log(`[UNIFIED-WORKFLOW] ❌ Rejected "${tocEntry.title}": duration validation failed (${duration}s not in 60-90s range)`);
+     console.log(`[UNIFIED-WORKFLOW] ❌ Rejected "${tocEntry.title}": duration validation failed (${duration}s not in 30-120s range)`);
     }
    } else {
     console.log(`[UNIFIED-WORKFLOW] ❌ Rejected "${tocEntry.title}": excerpt too short (${verbatimExcerpt?.length || 0} chars)`);
