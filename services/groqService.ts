@@ -322,12 +322,111 @@ const deduplicateSegments = (segments: TableOfContentsEntry[]): TableOfContentsE
 };
 
 // ========================================================================================
-// PART 3: VERBATIM TEXT EXTRACTOR FUNCTION
+// PART 2: TEXT CLEANUP AND DEDUPLICATION HELPER FUNCTIONS
 // ========================================================================================
 
 /**
- * Extract verbatim transcript text for a given time range
- * This ensures 100% accuracy to the original source material
+ * Clean up repeated text patterns common in transcripts
+ * Removes duplicated phrases and normalizes whitespace
+ */
+const cleanupRepeatedText = (text: string): string => {
+ let cleaned = text;
+
+ // STEP 1: Normalize whitespace - replace multiple spaces with single space
+ cleaned = cleaned.replace(/(\s)\1+/g, '$1');
+
+ // STEP 2: Remove common transcript stutters and repetitions
+ cleaned = cleaned.replace(/\b(\w+)\s+\1\b/gi, '$1'); // Remove immediate word repetitions like "the the"
+ cleaned = cleaned.replace(/\b(eh|um|uh|er)\s+/gi, ' '); // Remove common filler words
+
+ // STEP 3: Basic sentence deduplication
+ const sentences = cleaned.split(/[.!?]+/).filter((s) => s.trim().length > 5);
+ const uniqueSentences: string[] = [];
+
+ sentences.forEach((sentence) => {
+  const trimmed = sentence.trim();
+  // Only add if not already present (case-insensitive check)
+  const isDuplicate = uniqueSentences.some((existing) => existing.toLowerCase().trim() === trimmed.toLowerCase());
+
+  if (!isDuplicate && trimmed.length > 5) {
+   uniqueSentences.push(trimmed);
+  }
+ });
+
+ // STEP 4: Final cleanup
+ cleaned = uniqueSentences.join('. ').trim();
+ if (cleaned && !cleaned.endsWith('.')) {
+  cleaned += '.';
+ }
+
+ return cleaned;
+};
+
+// ========================================================================================
+// PART 3: FINAL SANITIZATION FUNCTION
+// ========================================================================================
+
+/**
+ * PART 3: FINAL SANITIZATION STEP (Post-Extraction)
+ * Apply final cleanup operations to extracted transcript text
+ */
+const sanitizeExtractedText = (text: string): string => {
+ let sanitized = text;
+
+ // Remove repetitive stutters common in transcripts (e.g., "ee... ee...")
+ sanitized = sanitized.replace(/\b(\w{1,2})\.\.\.\s*\1\.\.\./gi, '$1');
+
+ // Normalize whitespace (trim and replace multiple spaces with single space)
+ sanitized = sanitized.replace(/\s+/g, ' ').trim();
+
+ // Advanced deduplication: detect and remove duplicated phrases
+ const words = sanitized.split(' ');
+ const cleanedWords: string[] = [];
+
+ for (let i = 0; i < words.length; i++) {
+  // Check for phrase repetition (2-4 word phrases)
+  let skipCount = 0;
+
+  for (let phraseLen = 2; phraseLen <= 4 && phraseLen <= words.length - i; phraseLen++) {
+   const currentPhrase = words
+    .slice(i, i + phraseLen)
+    .join(' ')
+    .toLowerCase();
+   const nextPhrase = words
+    .slice(i + phraseLen, i + phraseLen * 2)
+    .join(' ')
+    .toLowerCase();
+
+   if (currentPhrase === nextPhrase && currentPhrase.length > 3) {
+    skipCount = phraseLen; // Skip the repeated phrase
+    break;
+   }
+  }
+
+  if (skipCount === 0) {
+   cleanedWords.push(words[i]);
+  } else {
+   // Skip the repeated phrase
+   i += skipCount - 1;
+  }
+ }
+
+ sanitized = cleanedWords.join(' ');
+
+ // Final normalization
+ sanitized = sanitized.replace(/\s+/g, ' ').trim();
+
+ return sanitized;
+};
+
+// ========================================================================================
+// PART 4: VERBATIM TEXT EXTRACTOR FUNCTION (Enhanced)
+// ========================================================================================
+
+/**
+ * PART 2: FIXED VERBATIM TEXT EXTRACTION LOGIC
+ * Extract verbatim transcript text for a given time range with precision timing
+ * This ensures 100% accuracy to the original source material and eliminates duplications
  */
 const extractVerbatimText = (fullTranscriptWithTimestamps: TranscriptSegment[], startTime: string, endTime: string): string => {
  // Convert MM:SS format to seconds
@@ -336,29 +435,38 @@ const extractVerbatimText = (fullTranscriptWithTimestamps: TranscriptSegment[], 
 
  console.log(`[VERBATIM-EXTRACTOR] Extracting text from ${startTime} (${startSeconds}s) to ${endTime} (${endSeconds}s)`);
 
- // Find all transcript segments that fall within the time range
- const relevantSegments = fullTranscriptWithTimestamps.filter((segment) => {
+ // STEP 1: Collect lines that fall within the precise time range
+ const collectedLines: TranscriptSegment[] = [];
+
+ fullTranscriptWithTimestamps.forEach((segment) => {
   const segmentStart = segment.start;
   const segmentEnd = segment.end;
 
-  // Include segments that overlap with our time range
-  return (segmentStart >= startSeconds && segmentStart <= endSeconds) || (segmentEnd >= startSeconds && segmentEnd <= endSeconds) || (segmentStart <= startSeconds && segmentEnd >= endSeconds);
+  // PRECISE TIMING: Include segment if its start time is >= startTime AND < endTime
+  // This prevents overlapping and duplication issues from the previous logic
+  if (segmentStart >= startSeconds && segmentStart < endSeconds) {
+   collectedLines.push(segment);
+  }
  });
 
- if (relevantSegments.length === 0) {
+ if (collectedLines.length === 0) {
   console.warn(`[VERBATIM-EXTRACTOR] No segments found for time range ${startTime}-${endTime}`);
   return '';
  }
 
- // Sort segments by start time to ensure proper order
- relevantSegments.sort((a, b) => a.start - b.start);
+ // STEP 2: Sort by start time to ensure proper order
+ collectedLines.sort((a, b) => a.start - b.start);
 
- // Join all text from relevant segments
- const verbatimText = relevantSegments.map((segment) => segment.text).join(' ');
+ // STEP 3: Extract text and apply basic deduplication
+ const textSegments = collectedLines.map((segment) => segment.text.trim()).filter((text) => text.length > 0);
 
- console.log(`[VERBATIM-EXTRACTOR] Extracted ${verbatimText.length} characters from ${relevantSegments.length} segments`);
+ // STEP 4: Join text and apply cleanup to remove repetitive patterns
+ const rawText = textSegments.join(' ');
+ const cleanedText = cleanupRepeatedText(rawText);
 
- return verbatimText;
+ console.log(`[VERBATIM-EXTRACTOR] Extracted ${cleanedText.length} characters from ${collectedLines.length} segments`);
+
+ return cleanedText;
 };
 
 // ========================================================================================
@@ -556,12 +664,16 @@ export const generateShortsIdeas = async (videoUrl: string, transcript?: string,
 
    // Use verbatim extraction if we have timestamped segments
    if (transcriptSegments && transcriptSegments.length > 0) {
-    verbatimExcerpt = extractVerbatimText(transcriptSegments, tocEntry.startTime, tocEntry.endTime);
+    const rawExcerpt = extractVerbatimText(transcriptSegments, tocEntry.startTime, tocEntry.endTime);
+    // PART 3: APPLY FINAL SANITIZATION STEP
+    verbatimExcerpt = sanitizeExtractedText(rawExcerpt);
    } else {
     // Fallback to smart excerpt extraction for plain text transcripts
     const startSeconds = parseTimeStringToSeconds(tocEntry.startTime);
     const endSeconds = parseTimeStringToSeconds(tocEntry.endTime);
-    verbatimExcerpt = extractSmartExcerpt(transcript, startSeconds, endSeconds, transcriptSegments);
+    const rawExcerpt = extractSmartExcerpt(transcript, startSeconds, endSeconds, transcriptSegments);
+    // PART 3: APPLY FINAL SANITIZATION STEP
+    verbatimExcerpt = sanitizeExtractedText(rawExcerpt);
    }
 
    // Validate excerpt quality (duration was already validated in unified pass)

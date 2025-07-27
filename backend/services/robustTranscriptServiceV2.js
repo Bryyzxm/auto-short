@@ -217,9 +217,11 @@ class RobustYouTubeTranscriptV2 {
   // Check if cookies are available
   const hasCookies = this.validateCookiesFile();
   const baseArgs = {
-   writeAutoSubs: true,
-   writeSubs: true,
-   subLang: ['id', 'en'],
+   // PART 1: IMPROVED TRANSCRIPT SOURCE QUALITY
+   writeSubs: true, // Prioritize manual subtitles
+   writeAutoSubs: true, // Fallback to auto-generated
+   subLang: ['id', 'en'], // Indonesian first, then English
+   subFormat: 'srv3/ttml/vtt', // High-quality subtitle formats
    skipDownload: true,
    output: path.join(tempDir, `${videoId}-${timestamp}-%(title)s.%(ext)s`),
   };
@@ -492,14 +494,53 @@ class RobustYouTubeTranscriptV2 {
  }
 
  selectBestSubtitleFile(files) {
-  // Prefer Indonesian, then English, then auto-generated
-  const priorities = ['.id.', '.en.', '.auto.', '.'];
+  // PART 1: IMPROVED SUBTITLE SELECTION - Prioritize manual over auto-generated
+  // Preference order: Manual Indonesian > Manual English > Auto Indonesian > Auto English > Others
 
-  for (const priority of priorities) {
-   const found = files.find((file) => file.includes(priority));
-   if (found) return found;
+  console.log(`[ROBUST-V2] Selecting best from ${files.length} subtitle files:`, files);
+
+  // First, try to find manual subtitles (non-auto)
+  const manualSubtitles = files.filter((file) => !file.includes('.auto.') && !file.includes('-auto.'));
+  const autoSubtitles = files.filter((file) => file.includes('.auto.') || file.includes('-auto.'));
+
+  console.log(`[ROBUST-V2] Found ${manualSubtitles.length} manual and ${autoSubtitles.length} auto-generated files`);
+
+  // Priority 1: Manual Indonesian subtitles
+  const manualId = manualSubtitles.find((file) => file.includes('.id.') || file.includes('-id.'));
+  if (manualId) {
+   console.log(`[ROBUST-V2] ✅ Selected manual Indonesian: ${manualId}`);
+   return manualId;
   }
 
+  // Priority 2: Manual English subtitles
+  const manualEn = manualSubtitles.find((file) => file.includes('.en.') || file.includes('-en.'));
+  if (manualEn) {
+   console.log(`[ROBUST-V2] ✅ Selected manual English: ${manualEn}`);
+   return manualEn;
+  }
+
+  // Priority 3: Any other manual subtitles
+  if (manualSubtitles.length > 0) {
+   console.log(`[ROBUST-V2] ✅ Selected manual (other language): ${manualSubtitles[0]}`);
+   return manualSubtitles[0];
+  }
+
+  // Priority 4: Auto-generated Indonesian
+  const autoId = autoSubtitles.find((file) => file.includes('.id.') || file.includes('-id.'));
+  if (autoId) {
+   console.log(`[ROBUST-V2] ⚠️ Selected auto-generated Indonesian: ${autoId}`);
+   return autoId;
+  }
+
+  // Priority 5: Auto-generated English
+  const autoEn = autoSubtitles.find((file) => file.includes('.en.') || file.includes('-en.'));
+  if (autoEn) {
+   console.log(`[ROBUST-V2] ⚠️ Selected auto-generated English: ${autoEn}`);
+   return autoEn;
+  }
+
+  // Priority 6: Any remaining file
+  console.log(`[ROBUST-V2] ⚠️ Selected fallback: ${files[0]}`);
   return files[0];
  }
 

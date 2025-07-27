@@ -189,9 +189,12 @@ class AntiDetectionTranscriptExtractor {
 
  async extractWithCookiesAndSession(videoId, session, options) {
   const ytdlOptions = {
-   writeAutoSubs: true,
-   writeSubs: true,
-   subLang: options.lang || ['id', 'en', 'auto'],
+   // PART 1: IMPROVED TRANSCRIPT SOURCE QUALITY
+   // Prioritize manual subtitles over auto-generated ones
+   writeSubs: true, // Download manual subtitles first
+   writeAutoSubs: true, // Fallback to auto-generated if manual not available
+   subLang: ['id', 'en'], // Indonesian first, then English (removed 'auto' for better quality)
+   subFormat: 'srv3/ttml/vtt', // High-quality subtitle formats
    skipDownload: true,
    cookies: this.cookiePath,
    userAgent: session.userAgent,
@@ -243,9 +246,11 @@ class AntiDetectionTranscriptExtractor {
   const mobileUA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
 
   const ytdlOptions = {
-   writeAutoSubs: true,
-   writeSubs: true,
-   subLang: options.lang || ['id', 'en'],
+   // PART 1: IMPROVED TRANSCRIPT SOURCE QUALITY
+   writeSubs: true, // Prioritize manual subtitles
+   writeAutoSubs: true, // Fallback to auto-generated
+   subLang: ['id', 'en'], // Indonesian first, then English
+   subFormat: 'srv3/ttml/vtt', // High-quality subtitle formats
    skipDownload: true,
    userAgent: mobileUA,
 
@@ -262,9 +267,11 @@ class AntiDetectionTranscriptExtractor {
 
  async extractWithEmbeddedClient(videoId, session, options) {
   const ytdlOptions = {
-   writeAutoSubs: true,
-   writeSubs: true,
-   subLang: options.lang || ['id', 'en'],
+   // PART 1: IMPROVED TRANSCRIPT SOURCE QUALITY
+   writeSubs: true, // Prioritize manual subtitles
+   writeAutoSubs: true, // Fallback to auto-generated
+   subLang: ['id', 'en'], // Indonesian first, then English
+   subFormat: 'srv3/ttml/vtt', // High-quality subtitle formats
    skipDownload: true,
    cookies: this.cookiePath,
    userAgent: session.userAgent,
@@ -285,9 +292,11 @@ class AntiDetectionTranscriptExtractor {
 
  async extractWithTvClient(videoId, session, options) {
   const ytdlOptions = {
-   writeAutoSubs: true,
-   writeSubs: true,
-   subLang: options.lang || ['id', 'en'],
+   // PART 1: IMPROVED TRANSCRIPT SOURCE QUALITY
+   writeSubs: true, // Prioritize manual subtitles
+   writeAutoSubs: true, // Fallback to auto-generated
+   subLang: ['id', 'en'], // Indonesian first, then English
+   subFormat: 'srv3/ttml/vtt', // High-quality subtitle formats
    skipDownload: true,
    userAgent: 'Mozilla/5.0 (SMART-TV; Linux; Tizen 6.0) AppleWebKit/538.1 (KHTML, like Gecko) Version/6.0 TV Safari/538.1',
 
@@ -307,9 +316,11 @@ class AntiDetectionTranscriptExtractor {
 
  async extractWithAndroidClient(videoId, session, options) {
   const ytdlOptions = {
-   writeAutoSubs: true,
-   writeSubs: true,
-   subLang: options.lang || ['id', 'en'],
+   // PART 1: IMPROVED TRANSCRIPT SOURCE QUALITY
+   writeSubs: true, // Prioritize manual subtitles
+   writeAutoSubs: true, // Fallback to auto-generated
+   subLang: ['id', 'en'], // Indonesian first, then English
+   subFormat: 'srv3/ttml/vtt', // High-quality subtitle formats
    skipDownload: true,
    userAgent: 'com.google.android.youtube/17.36.4 (Linux; U; Android 11; SM-G973F Build/RP1A.200720.012) gzip',
 
@@ -384,15 +395,53 @@ class AntiDetectionTranscriptExtractor {
  }
 
  selectBestSubtitleFile(files) {
-  // Preference order: Indonesian (id) > English (en) > Auto-generated > Others
-  const preferences = ['id', 'en', 'auto'];
+  // PART 1: IMPROVED SUBTITLE SELECTION - Prioritize manual over auto-generated
+  // Preference order: Manual Indonesian > Manual English > Auto Indonesian > Auto English > Others
 
-  for (const pref of preferences) {
-   const matching = files.find((file) => file.includes(`.${pref}.`));
-   if (matching) return matching;
+  console.log(`[SUBTITLE-SELECTOR] Selecting best from ${files.length} subtitle files:`, files);
+
+  // First, try to find manual subtitles (non-auto)
+  const manualSubtitles = files.filter((file) => !file.includes('.auto.') && !file.includes('-auto.'));
+  const autoSubtitles = files.filter((file) => file.includes('.auto.') || file.includes('-auto.'));
+
+  console.log(`[SUBTITLE-SELECTOR] Found ${manualSubtitles.length} manual and ${autoSubtitles.length} auto-generated files`);
+
+  // Priority 1: Manual Indonesian subtitles
+  const manualId = manualSubtitles.find((file) => file.includes('.id.') || file.includes('-id.'));
+  if (manualId) {
+   console.log(`[SUBTITLE-SELECTOR] ✅ Selected manual Indonesian: ${manualId}`);
+   return manualId;
   }
 
-  // If no preferred language found, return first file
+  // Priority 2: Manual English subtitles
+  const manualEn = manualSubtitles.find((file) => file.includes('.en.') || file.includes('-en.'));
+  if (manualEn) {
+   console.log(`[SUBTITLE-SELECTOR] ✅ Selected manual English: ${manualEn}`);
+   return manualEn;
+  }
+
+  // Priority 3: Any other manual subtitles
+  if (manualSubtitles.length > 0) {
+   console.log(`[SUBTITLE-SELECTOR] ✅ Selected manual (other language): ${manualSubtitles[0]}`);
+   return manualSubtitles[0];
+  }
+
+  // Priority 4: Auto-generated Indonesian
+  const autoId = autoSubtitles.find((file) => file.includes('.id.') || file.includes('-id.'));
+  if (autoId) {
+   console.log(`[SUBTITLE-SELECTOR] ⚠️ Selected auto-generated Indonesian: ${autoId}`);
+   return autoId;
+  }
+
+  // Priority 5: Auto-generated English
+  const autoEn = autoSubtitles.find((file) => file.includes('.en.') || file.includes('-en.'));
+  if (autoEn) {
+   console.log(`[SUBTITLE-SELECTOR] ⚠️ Selected auto-generated English: ${autoEn}`);
+   return autoEn;
+  }
+
+  // Priority 6: Any remaining file
+  console.log(`[SUBTITLE-SELECTOR] ⚠️ Selected fallback: ${files[0]}`);
   return files[0];
  }
 
@@ -645,9 +694,11 @@ class AntiDetectionTranscriptExtractor {
   const timestamp = Date.now();
 
   let ytdlOptions = {
-   writeAutoSubs: true,
-   writeSubs: true,
-   subLang: options.lang || ['id', 'en', 'auto'],
+   // PART 1: IMPROVED TRANSCRIPT SOURCE QUALITY WITH TIMING
+   writeSubs: true, // Prioritize manual subtitles
+   writeAutoSubs: true, // Fallback to auto-generated
+   subLang: ['id', 'en'], // Indonesian first, then English (removed 'auto' for better quality)
+   subFormat: 'srv3/ttml/vtt', // High-quality subtitle formats with timing
    skipDownload: true,
    userAgent: session.userAgent,
    addHeader: [
