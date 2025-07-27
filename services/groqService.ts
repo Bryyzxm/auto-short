@@ -65,9 +65,12 @@ const generateTableOfContents = async (fullTranscriptText: string, videoDuration
  const allTopics: TableOfContentsEntry[] = [];
  const safeVideoDuration = videoDuration || Math.ceil((fullTranscriptText.length / 2500) * 60);
 
- // Process each chunk with AI to identify topics
+ // PART 1: SEQUENTIAL PROCESSING TO AVOID RATE LIMITS
+ // Process each chunk SEQUENTIALLY (not in parallel) to respect API rate limits
  for (const chunk of chunks) {
   try {
+   console.log(`[TOC-GENERATOR] Processing chunk ${chunk.chunkNumber}/${chunk.totalChunks} sequentially...`);
+
    // Calculate approximate time range for this chunk
    const startTimeRatio = chunk.startCharPosition / fullTranscriptText.length;
    const endTimeRatio = chunk.endCharPosition / fullTranscriptText.length;
@@ -75,7 +78,8 @@ const generateTableOfContents = async (fullTranscriptText: string, videoDuration
    const chunkStartTime = Math.floor(startTimeRatio * safeVideoDuration);
    const chunkEndTime = Math.floor(endTimeRatio * safeVideoDuration);
 
-   const prompt = `You are a topic spotter. Analyze this chunk of a video transcript.
+   // PART 2: IMPROVED AI PROMPT FOR BETTER DURATION CONTROL
+   const prompt = `You are a precise video segmenter. Your task is to analyze this transcript chunk.
 
 CHUNK INFO:
 - Chunk ${chunk.chunkNumber} of ${chunk.totalChunks}
@@ -83,14 +87,20 @@ CHUNK INFO:
 - Video duration: ${Math.floor(safeVideoDuration / 60)} minutes ${safeVideoDuration % 60} seconds
 
 TASK:
-Identify up to 3 key, distinct topics discussed in this text chunk.
+Identify up to 3 key topics that would make good short videos.
+
+**CRUCIAL DURATION CONSTRAINT:**
+- The duration of each segment (end time minus start time) MUST be between 60 and 90 seconds.
+- Do NOT generate segments longer than 90 seconds.
+- Do NOT generate segments shorter than 60 seconds.
+- If you cannot find any topics that fit within this duration constraint, return an empty array.
 
 REQUIREMENTS:
-- Each topic should be 60-120 seconds in duration
+- For each topic, provide a short title, a start time, and an end time
 - Topics should be substantial and interesting for short videos
-- Provide ONLY a short descriptive title and approximate timing
-- DO NOT provide summaries or transcript text
+- Provide ONLY timing information, NO summaries or transcript text
 - Times should be in MM:SS format relative to the full video
+- Each segment must be exactly 60-90 seconds long
 
 OUTPUT FORMAT (Return ONLY valid JSON, no additional text):
 [
@@ -101,16 +111,21 @@ OUTPUT FORMAT (Return ONLY valid JSON, no additional text):
   }
 ]
 
+If no suitable 60-90 second segments can be identified, return: []
+
 TRANSCRIPT CHUNK:
 """
 ${chunk.text}
 """`;
 
+   // Make API call with rate limit awareness
+   console.log(`[TOC-GENERATOR] Making API call for chunk ${chunk.chunkNumber}...`);
    const completion = await groq.chat.completions.create({
     messages: [
      {
       role: 'system',
-      content: 'You are a topic identification expert. Analyze transcript chunks and identify key topics with precise timing. Always respond with valid JSON arrays only.',
+      content:
+       'You are a precise video segmentation expert. Analyze transcript chunks and identify key topics with exact 60-90 second durations. Always respond with valid JSON arrays only. If no suitable segments can be found within the duration constraints, return an empty array.',
      },
      {
       role: 'user',
@@ -118,13 +133,14 @@ ${chunk.text}
      },
     ],
     model: 'llama-3.1-8b-instant', // Use faster model for topic spotting
-    temperature: 0.2,
-    max_tokens: 800, // Keep response small
-    top_p: 0.9,
+    temperature: 0.1, // Lower temperature for more precise duration control
+    max_tokens: 600, // Reduced tokens for more focused responses
+    top_p: 0.8,
     stream: false,
    });
 
    const response = completion.choices[0]?.message?.content?.trim() || '';
+   console.log(`[TOC-GENERATOR] Received response for chunk ${chunk.chunkNumber}: ${response.substring(0, 100)}...`);
 
    // Parse AI response
    let chunkTopics: TableOfContentsEntry[] = [];
@@ -136,32 +152,63 @@ ${chunk.text}
      chunkTopics = JSON.parse(jsonMatch[0]);
     } else {
      console.warn(`[TOC-GENERATOR] No valid JSON found in chunk ${chunk.chunkNumber} response`);
+     // Continue to next chunk instead of stopping
+     await new Promise((resolve) => setTimeout(resolve, 1000)); // Longer delay on parse failure
      continue;
     }
    } catch (parseError) {
     console.warn(`[TOC-GENERATOR] Failed to parse JSON for chunk ${chunk.chunkNumber}:`, parseError);
+    // Continue to next chunk instead of stopping
+    await new Promise((resolve) => setTimeout(resolve, 1000)); // Longer delay on parse failure
     continue;
    }
 
-   // Validate and add topics
+   // Validate topics with duration constraints
    if (Array.isArray(chunkTopics)) {
     chunkTopics.forEach((topic) => {
      if (topic.title && topic.startTime && topic.endTime) {
-      allTopics.push(topic);
-      console.log(`[TOC-GENERATOR] Found topic: "${topic.title}" (${topic.startTime}-${topic.endTime})`);
+      // Pre-validate duration to catch AI errors early
+      const startSeconds = parseTimeStringToSeconds(topic.startTime);
+      const endSeconds = parseTimeStringToSeconds(topic.endTime);
+      const duration = endSeconds - startSeconds;
+
+      if (duration >= 60 && duration <= 90) {
+       allTopics.push(topic);
+       console.log(`[TOC-GENERATOR] ✅ Found valid topic: "${topic.title}" (${topic.startTime}-${topic.endTime}, ${duration}s)`);
+      } else {
+       console.warn(`[TOC-GENERATOR] ⚠️ Rejected topic "${topic.title}": duration ${duration}s not in 60-90s range`);
+      }
      }
     });
    }
 
-   // Small delay to respect API rate limits
-   await new Promise((resolve) => setTimeout(resolve, 500));
-  } catch (error) {
-   console.error(`[TOC-GENERATOR] Error processing chunk ${chunk.chunkNumber}:`, error);
-   continue; // Continue with other chunks
+   // DELIBERATE DELAY to respect API rate limits (sequential processing)
+   console.log(`[TOC-GENERATOR] Chunk ${chunk.chunkNumber} complete. Waiting 1000ms before next request...`);
+   await new Promise((resolve) => setTimeout(resolve, 1000)); // Conservative delay for rate limit compliance
+  } catch (error: any) {
+   console.error(`[TOC-GENERATOR] Error processing chunk ${chunk.chunkNumber}:`, error.message);
+
+   // Handle rate limit errors specifically
+   if (error.message?.includes('429') || error.message?.includes('rate limit')) {
+    console.warn(`[TOC-GENERATOR] Rate limit detected. Waiting 2 seconds before continuing...`);
+    await new Promise((resolve) => setTimeout(resolve, 2000)); // Longer delay for rate limits
+   } else {
+    await new Promise((resolve) => setTimeout(resolve, 1000)); // Standard delay for other errors
+   }
+
+   // Continue with other chunks even if one fails
+   continue;
   }
  }
 
  console.log(`[TOC-GENERATOR] Generated Table of Contents with ${allTopics.length} topics`);
+
+ // PART 3: REFINED VALIDATION - Final check for empty results
+ if (allTopics.length === 0) {
+  console.warn(`[TOC-GENERATOR] ⚠️ No suitable segments could be identified within the 60-90 second duration constraints`);
+  throw new Error('No suitable segments could be identified within the given constraints. The transcript may not contain content suitable for 60-90 second segments.');
+ }
+
  return allTopics;
 };
 
@@ -498,15 +545,15 @@ export const generateShortsIdeas = async (videoUrl: string, transcript?: string,
   }
 
   // ===== PHASE 1: Generate Table of Contents =====
-  console.log(`[TOC-WORKFLOW] 📋 PHASE 1: Generating Table of Contents...`);
+  console.log(`[TOC-WORKFLOW] 📋 PHASE 1: Generating Table of Contents with sequential processing...`);
   const tableOfContents = await generateTableOfContents(transcript, videoDuration);
 
   if (tableOfContents.length === 0) {
    console.warn(`[TOC-WORKFLOW] ⚠️ No topics found in Table of Contents generation`);
-   throw new Error('No suitable topics identified in the transcript for segmentation');
+   throw new Error('No suitable segments could be identified within the 60-90 second duration constraints. The transcript may not contain content suitable for short video segments.');
   }
 
-  console.log(`[TOC-WORKFLOW] ✅ PHASE 1 Complete: Generated ${tableOfContents.length} potential segments`);
+  console.log(`[TOC-WORKFLOW] ✅ PHASE 1 Complete: Generated ${tableOfContents.length} potential segments (all pre-validated for 60-90s duration)`);
 
   // ===== PHASE 2: Extract Verbatim Text for Each Segment =====
   console.log(`[TOC-WORKFLOW] 📝 PHASE 2: Extracting verbatim text for each segment...`);
@@ -528,14 +575,14 @@ export const generateShortsIdeas = async (videoUrl: string, transcript?: string,
     verbatimExcerpt = extractSmartExcerpt(transcript, startSeconds, endSeconds, transcriptSegments);
    }
 
-   // Validate excerpt quality
+   // Validate excerpt quality (duration was already validated in Phase 1)
    if (verbatimExcerpt && verbatimExcerpt.length >= 100) {
     const startSeconds = parseTimeStringToSeconds(tocEntry.startTime);
     const endSeconds = parseTimeStringToSeconds(tocEntry.endTime);
     const duration = endSeconds - startSeconds;
 
-    // Validate duration constraints
-    if (duration >= 30 && duration <= 120) {
+    // Final validation: Duration should already be 60-90s from Phase 1, but double-check
+    if (duration >= 60 && duration <= 90) {
      finalSegments.push({
       id: `toc-${Math.random().toString(36).substring(2, 11)}`,
       title: tocEntry.title,
@@ -549,7 +596,7 @@ export const generateShortsIdeas = async (videoUrl: string, transcript?: string,
 
      console.log(`[TOC-WORKFLOW] ✅ Added segment: "${tocEntry.title}" (${duration}s, ${verbatimExcerpt.length} chars)`);
     } else {
-     console.log(`[TOC-WORKFLOW] ❌ Rejected "${tocEntry.title}": invalid duration (${duration}s)`);
+     console.log(`[TOC-WORKFLOW] ❌ Rejected "${tocEntry.title}": duration validation failed (${duration}s not in 60-90s range)`);
     }
    } else {
     console.log(`[TOC-WORKFLOW] ❌ Rejected "${tocEntry.title}": excerpt too short (${verbatimExcerpt?.length || 0} chars)`);
@@ -558,8 +605,9 @@ export const generateShortsIdeas = async (videoUrl: string, transcript?: string,
 
   console.log(`[TOC-WORKFLOW] ✅ PHASE 2 Complete: Processed ${finalSegments.length} valid segments from ${tableOfContents.length} candidates`);
 
+  // PART 3: REFINED VALIDATION - Clear error message for empty results
   if (finalSegments.length === 0) {
-   throw new Error('No valid segments could be extracted with sufficient verbatim content');
+   throw new Error('No valid segments could be extracted with sufficient verbatim content within the 60-90 second duration constraints. Please try a different video or check if the transcript contains substantial content.');
   }
 
   // Sort by start time and limit to top 10 segments
