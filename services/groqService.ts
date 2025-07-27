@@ -88,10 +88,81 @@ const isRepetitive = (text: string): boolean => {
  return uniqueSentences.size < sentences.length * 0.7; // 70% threshold
 };
 
-// Enhanced prompt generator with timing awareness
-const generateEnhancedPrompt = (videoUrl?: string, transcriptData?: EnhancedTranscriptData, videoDuration?: number, isRetry = false): string => {
- const videoContext = videoUrl ? `Video URL: ${videoUrl}` : 'Video YouTube dengan konten menarik';
+// Language detection helper function
+const detectLanguage = (transcript: string): {language: string; confidence: number} => {
+ const text = transcript.toLowerCase();
 
+ // Indonesian language indicators
+ const indonesianIndicators = [
+  'yang',
+  'dan',
+  'ini',
+  'itu',
+  'untuk',
+  'dengan',
+  'adalah',
+  'tidak',
+  'juga',
+  'akan',
+  'sudah',
+  'atau',
+  'ada',
+  'dari',
+  'ke',
+  'di',
+  'pada',
+  'dalam',
+  'seperti',
+  'bisa',
+  'gua',
+  'gue',
+  'nih',
+  'sih',
+  'kan',
+  'dong',
+  'ya',
+  'lah',
+  'banget',
+  'gimana',
+ ];
+
+ // English language indicators
+ const englishIndicators = ['the', 'and', 'this', 'that', 'for', 'with', 'is', 'not', 'also', 'will', 'have', 'or', 'there', 'from', 'to', 'in', 'on', 'like', 'can', 'would'];
+
+ let indonesianScore = 0;
+ let englishScore = 0;
+
+ // Count occurrences of language indicators
+ indonesianIndicators.forEach((indicator) => {
+  const matches = text.match(new RegExp(`\\b${indicator}\\b`, 'g'));
+  if (matches) indonesianScore += matches.length;
+ });
+
+ englishIndicators.forEach((indicator) => {
+  const matches = text.match(new RegExp(`\\b${indicator}\\b`, 'g'));
+  if (matches) englishScore += matches.length;
+ });
+
+ const totalScore = indonesianScore + englishScore;
+ if (totalScore === 0) {
+  return {language: 'unknown', confidence: 0};
+ }
+
+ if (indonesianScore > englishScore) {
+  return {
+   language: 'indonesian',
+   confidence: Math.min(0.95, indonesianScore / totalScore),
+  };
+ } else {
+  return {
+   language: 'english',
+   confidence: Math.min(0.95, englishScore / totalScore),
+  };
+ }
+};
+
+// Precision-focused prompt generator for accurate transcript extraction
+const generatePrecisionPrompt = (transcriptData: EnhancedTranscriptData, videoDuration?: number): string => {
  if (!transcriptData?.transcript) {
   return 'Error: No transcript data provided';
  }
@@ -99,224 +170,112 @@ const generateEnhancedPrompt = (videoUrl?: string, transcriptData?: EnhancedTran
  const transcript = transcriptData.transcript;
  const segments = transcriptData.segments || [];
  const hasTimingData = segments.length > 0;
-
  const safeVideoDuration = videoDuration || Math.ceil((transcript.length / 2500) * 60);
 
- // Only log if transcript is suspiciously short (AI generated)
- if (transcript.length < 1000) {
-  console.warn(`[GROQ] ⚠️ Short transcript detected (${transcript.length} chars) - may be AI generated`);
- }
+ // Detect language for better AI understanding
+ const languageDetection = detectLanguage(transcript);
+ const languageContext =
+  languageDetection.language === 'indonesian'
+   ? 'The provided transcript is in Indonesian language.'
+   : languageDetection.language === 'english'
+   ? 'The provided transcript is in English language.'
+   : 'The transcript language could not be determined reliably.';
 
- // Calculate target segments based on video duration - more conservative for quality
- let targetSegments = 8;
- if (safeVideoDuration > 3600) targetSegments = 12; // 60+ menit: max 12 segmen (5+ menit per segmen)
- else if (safeVideoDuration > 2400) targetSegments = 10; // 40+ menit: max 10 segmen (4+ menit per segmen)
- else if (safeVideoDuration > 1800) targetSegments = 9; // 30+ menit: max 9 segmen (3+ menit per segmen)
- else if (safeVideoDuration > 1200) targetSegments = 8; // 20+ menit: max 8 segmen (2.5+ menit per segmen)
- else if (safeVideoDuration > 900) targetSegments = 7; // 15+ menit: max 7 segmen (2+ menit per segmen)
- else if (safeVideoDuration > 600) targetSegments = 6; // 10+ menit: max 6 segmen (90+ detik per segmen)
- else if (safeVideoDuration > 300) targetSegments = 4; // 5+ menit: max 4 segmen (75+ detik per segmen)
- else targetSegments = 3; // Video pendek: max 3 segmen (60+ detik per segmen) // Only show targeting info for significant videos
- if (transcript.length >= 1000) {
-  console.log(`[GROQ] Video ${Math.floor(safeVideoDuration / 60)}m${safeVideoDuration % 60}s -> targeting ${targetSegments} segments`);
- }
+ // Calculate target segments based on video duration
+ let targetSegments = Math.min(8, Math.max(3, Math.floor(safeVideoDuration / 180))); // 1 segment per 3 minutes
 
- const maxLength = isRetry ? 8000 : 15000;
- const transcriptForAI = transcript.length > maxLength ? transcript.slice(0, maxLength) + '... (transkrip dipotong untuk efisiensi)' : transcript;
-
- let timingInfo = '';
+ // Prepare timing information for the AI
+ let timingInstructions = '';
  if (hasTimingData) {
-  // Show first 15 segments as examples for AI
+  // Show sample segments to demonstrate the timing format
   const sampleSegments = segments
-   .slice(0, 15)
-   .map((seg) => {
-    const startMin = Math.floor(seg.start / 60);
-    const startSec = Math.floor(seg.start % 60);
-    const endMin = Math.floor(seg.end / 60);
-    const endSec = Math.floor(seg.end % 60);
-    return `[${startMin}:${String(startSec).padStart(2, '0')} - ${endMin}:${String(endSec).padStart(2, '0')}] ${seg.text.substring(0, 120)}...`;
+   .slice(0, 10)
+   .map((seg, idx) => {
+    const startTime = new Date(seg.start * 1000).toISOString().substr(14, 5); // MM:SS format
+    const endTime = new Date(seg.end * 1000).toISOString().substr(14, 5);
+    return `Segment ${idx + 1}: [${startTime} - ${endTime}] "${seg.text.substring(0, 80)}..."`;
    })
    .join('\n');
 
-  timingInfo = `
-TIMING SEGMENTS TERSEDIA (${segments.length} total segments):
+  timingInstructions = `
+TIMING DATA AVAILABLE - ${segments.length} timestamped segments provided.
+
+Sample timing segments for reference:
 ${sampleSegments}
 
-PENTING: Gunakan timing data yang akurat di atas! Jangan gunakan timing default 0-1 menit untuk semua segmen.
-Distribusikan segmen secara merata dari menit 0 hingga menit ${Math.floor(safeVideoDuration / 60)}.
+CRITICAL: Use the exact timing data from the segments above. Each segment contains:
+- start: timestamp in seconds
+- end: timestamp in seconds  
+- text: the exact spoken words at that time
+
+To extract a segment from 2:30 to 4:15, find segments where start >= 150 and end <= 255 seconds.
 `;
  } else {
-  // When no timing data, provide transcript position estimation
-  const charsPerMinute = transcript.length / (safeVideoDuration / 60);
-  const samplePositions = [];
-  for (let i = 0; i < Math.min(10, Math.floor(safeVideoDuration / 180)); i++) {
-   const timePos = (i + 1) * (safeVideoDuration / 10);
-   const charPos = Math.floor((timePos * charsPerMinute) / 60);
-   const textSample = transcript.substring(charPos, charPos + 100);
-   const timeMin = Math.floor(timePos / 60);
-   const timeSec = Math.floor(timePos % 60);
-   samplePositions.push(`[≈${timeMin}:${String(timeSec).padStart(2, '0')}] ${textSample}...`);
-  }
+  timingInstructions = `
+NO PRECISE TIMING DATA - Estimate based on transcript position.
 
-  timingInfo = `
-ESTIMASI TIMING BERDASARKAN POSISI TEKS (${Math.floor(charsPerMinute)} chars/min):
-${samplePositions.join('\n')}
+Video duration: ${Math.floor(safeVideoDuration / 60)}:${String(safeVideoDuration % 60).padStart(2, '0')}
+Transcript length: ${transcript.length} characters
+Estimated rate: ~${Math.round(transcript.length / (safeVideoDuration / 60))} characters per minute
 
-PENTING: Karena tidak ada data timing tepat, gunakan posisi dalam transkrip untuk estimasi timing.
-Transkrip awal = menit 0-5, transkrip tengah = menit ${Math.floor(safeVideoDuration / 4 / 60)}-${Math.floor((3 * safeVideoDuration) / 4 / 60)}, transkrip akhir = menit ${Math.floor(safeVideoDuration / 60) - 5}-${Math.floor(
-   safeVideoDuration / 60
-  )}.
+For timing estimation:
+- Start of video (0-2 min): characters 0-${Math.floor(transcript.length * 0.15)}
+- Early video (2-5 min): characters ${Math.floor(transcript.length * 0.15)}-${Math.floor(transcript.length * 0.35)}
+- Middle video: characters ${Math.floor(transcript.length * 0.35)}-${Math.floor(transcript.length * 0.65)}
+- Late video: characters ${Math.floor(transcript.length * 0.65)}-${Math.floor(transcript.length * 0.85)}
+- End of video: characters ${Math.floor(transcript.length * 0.85)}-${transcript.length}
 `;
  }
 
- return `Anda adalah expert video content analyst yang mengidentifikasi momen viral untuk YouTube Shorts.
+ return `You are a video segmentation expert. Your task is to analyze the provided transcript, which ${hasTimingData ? 'includes precise timestamps for every segment' : 'requires position-based timing estimation'}.
 
-${videoContext}
-Durasi video: ${Math.floor(safeVideoDuration / 60)} menit ${safeVideoDuration % 60} detik
-Transkrip: ${transcript.length} karakter
-Timing data: ${hasTimingData ? 'TERSEDIA' : 'ESTIMASI'}
+${languageContext}
 
-${timingInfo}
+VIDEO DETAILS:
+- Duration: ${Math.floor(safeVideoDuration / 60)} minutes ${safeVideoDuration % 60} seconds
+- Transcript length: ${transcript.length} characters
+- Timing method: ${hasTimingData ? 'Precise timestamps available' : 'Position estimation required'}
 
-ANALISIS TRANSCRIPT PER SECTION (untuk membantu ekstraksi yang akurat):
+${timingInstructions}
 
-SECTION 1 (0-${Math.floor(safeVideoDuration / 5 / 60)}m): ${transcript
-  .substring(0, Math.floor(transcript.length / 5))
-  .replace(/\n/g, ' ')
-  .substring(0, 200)}...
+YOUR TASK:
+Identify ${targetSegments} key topics or distinct segments from the transcript that would make good short videos (between 60-120 seconds each).
 
-SECTION 2 (${Math.floor(safeVideoDuration / 5 / 60)}m-${Math.floor((2 * safeVideoDuration) / 5 / 60)}m): ${transcript
-  .substring(Math.floor(transcript.length / 5), Math.floor((2 * transcript.length) / 5))
-  .replace(/\n/g, ' ')
-  .substring(0, 200)}...
+REQUIREMENTS FOR EACH SEGMENT:
+1. Must be 60-120 seconds in duration
+2. Must contain complete, self-contained content 
+3. Must have clear start and end points that make narrative sense
+4. Should be distributed evenly throughout the video (don't cluster all segments in the first few minutes)
 
-SECTION 3 (${Math.floor((2 * safeVideoDuration) / 5 / 60)}m-${Math.floor((3 * safeVideoDuration) / 5 / 60)}m): ${transcript
-  .substring(Math.floor((2 * transcript.length) / 5), Math.floor((3 * transcript.length) / 5))
-  .replace(/\n/g, ' ')
-  .substring(0, 200)}...
+FOR EACH SEGMENT YOU IDENTIFY, YOU MUST RETURN:
+- title: A short, descriptive title (5-7 words) based on the segment's actual content
+- startTime: Exact start time in MM:SS format (e.g., "05:30")
+- endTime: Exact end time in MM:SS format (e.g., "07:15") 
+- transcriptExcerpt: The verbatim, word-for-word transcript text of that specific segment, starting from the exact start time and ending at the exact end time
 
-SECTION 4 (${Math.floor((3 * safeVideoDuration) / 5 / 60)}m-${Math.floor((4 * safeVideoDuration) / 5 / 60)}m): ${transcript
-  .substring(Math.floor((3 * transcript.length) / 5), Math.floor((4 * transcript.length) / 5))
-  .replace(/\n/g, ' ')
-  .substring(0, 200)}...
+CRITICAL RULES:
+- DO NOT summarize, paraphrase, or alter the original transcript text for the segments
+- The transcriptExcerpt must be the actual spoken words from the specified time range
+- ${hasTimingData ? 'Use the provided timing segments to extract the exact text' : 'Estimate the text position based on the character position guidelines above'}
+- Ensure segments are spread throughout the video timeline
+- Each segment must be standalone and understandable without additional context
 
-SECTION 5 (${Math.floor((4 * safeVideoDuration) / 5 / 60)}m-${Math.floor(safeVideoDuration / 60)}m): ${transcript
-  .substring(Math.floor((4 * transcript.length) / 5))
-  .replace(/\n/g, ' ')
-  .substring(0, 200)}...
-
-INSTRUKSI EKSTRAKSI TRANSCRIPT EXCERPT (CRITICAL):
-REQUIREMENTS:
-- MINIMUM 200 karakter, MAXIMUM 500 karakter per excerpt
-- HARUS natural dan lengkap - JANGAN potong di tengah kalimat  
-- AMBIL konteks penuh dari timing yang diminta
-- JANGAN ulangi kalimat yang sama - cari variasi dalam konten
-- SERTAKAN konteks sebelum dan sesudah untuk pemahaman lengkap
-
-CONTOH EXCERPT YANG BAIK (200-500 karakter):
-"Gua yakin hidup itu seperti matahari ya. Kadang terbit, kadang juga terbenam. Kadang ada pagi, kadang ada malam. Dan dalam perjalanan hidup ini, kita akan menghadapi berbagai macam tantangan. Ada kalanya kita merasakan kebahagiaan seperti saat matahari terbit, tapi ada kalanya juga kita merasakan kesedihan seperti saat matahari terbenam. Yang penting adalah bagaimana kita bisa tetap kuat dan terus berjuang menghadapi semua itu."
-
-CONTOH EXCERPT YANG BURUK:
-"Gua yakin hidup itu seperti matahari ya. Gua yakin hidup itu seperti matahari ya." (terlalu repetitif dan pendek)
-
-EXTRACTION METHOD:
-${
- hasTimingData
-  ? `
-1. Gunakan timing segments yang tersedia untuk lokasi yang tepat
-2. Cari dalam segments array untuk timing yang sesuai
-3. Ambil text dari beberapa segments berurutan untuk konteks lengkap (200-500 karakter)
-`
-  : `
-1. Estimasi posisi dalam transcript berdasarkan timing
-2. Video ${Math.floor(safeVideoDuration / 60)} menit = ${transcript.length} karakter  
-3. Timing 2m30s ≈ karakter ${Math.floor(((transcript.length * 2.5) / safeVideoDuration) * 60)}
-4. Ambil ±300 karakter dari posisi estimasi untuk konteks lengkap
-`
-}
-
-FULL TRANSCRIPT UNTUK ANALISIS:
+FULL TRANSCRIPT FOR ANALYSIS:
 """
-${transcriptForAI}
+${transcript}
 """
 
-TUGAS ANDA:
-Analisis konten dan identifikasi maksimal ${targetSegments} segmen video pendek yang paling menarik untuk YouTube Shorts.
-
-KRITERIA SEGMEN MENARIK:
-1. EMOTIONAL PEAKS: Momen lucu, mengejutkan, menginspirasi, atau emosional tinggi
-2. VALUABLE INFO: Fakta menarik, tips berguna, insight berharga
-3. CLIMAX MOMENTS: Puncak cerita, reveal, plot twist, breakthrough
-4. QUOTABLE LINES: Kutipan viral, one-liner memorable
-5. VISUAL HIGHLIGHTS: Demonstrasi, aksi menarik, showcase
-
-REQUIREMENTS:
-- Pilih ${Math.max(3, Math.floor(targetSegments * 0.8))} segmen TERBAIK dan TERSEBAR merata sepanjang video
-- JANGAN semua segmen di 0-2 menit pertama! 
-- DURASI MINIMUM KETAT: 30-90 detik per segmen (ideal 45-75 detik):
-  * Insight/tips: 35-60 detik (actionable dengan konteks)
-  * Penjelasan penting: 45-75 detik (comprehensive)
-  * Cerita/pengalaman: 50-90 detik (full narrative)
-  * Demonstrasi: 40-70 detik (step by step complete)
-  * Momen viral: 30-50 detik (complete joke/reaction)
-- WAJIB minimum 30 detik - JANGAN buat segmen < 30 detik
-- HINDARI > 90 detik kecuali benar-benar exceptional content
-- Self-contained (bisa dipahami tanpa konteks)
-- High viral potential dengan durasi yang cukup untuk engagement
-- Timing AKURAT ${hasTimingData ? 'berdasarkan data timing' : 'berdasarkan posisi dalam transkrip'}
-
-CONTOH DURASI YANG DIINGINKAN:
-- Segment 1: 42 detik (momen lucu dengan setup+punchline+reaction)
-- Segment 2: 58 detik (penjelasan tips lengkap dengan contoh)
-- Segment 3: 65 detik (cerita menarik dengan beginning-middle-end)
-- Segment 4: 38 detik (fakta mengejutkan dengan elaborasi)
-
-KUALITAS > KUANTITAS: Lebih baik ${Math.max(3, Math.floor(targetSegments * 0.7))} segmen berkualitas tinggi 45+ detik daripada ${targetSegments} segmen biasa 20-30 detik. 
-- Segment 3: 23 detik (highlight singkat tapi impactful)
-- Segment 4: 89 detik (cerita dengan natural conclusion)
-- Segment 5: 52 detik (tips dengan natural flow)
-- Segment 6: 31 detik (punchline dengan perfect timing)
-
-PENTING: IKUTI natural flow konten! Jangan potong di tengah kalimat atau paksa ke durasi bulat.
-
-PENTING: VARIASIKAN durasi berdasarkan tipe konten! Jangan gunakan 45 detik untuk semua segmen.
-
-CRITICAL: TRANSCRIPT EXCERPT HARUS AKURAT!
-- Untuk setiap segmen yang Anda pilih (mis: 10m40s-12m10s), Anda HARUS mengambil teks yang BENAR-BENAR ada pada posisi waktu tersebut dalam transkrip
-- ${
-  hasTimingData
-   ? 'Gunakan timing segments di atas untuk mencari teks yang tepat'
-   : 'Estimasi posisi teks: awal video = karakter 0-' +
-     Math.floor(transcript.length * 0.2) +
-     ', tengah = karakter ' +
-     Math.floor(transcript.length * 0.3) +
-     '-' +
-     Math.floor(transcript.length * 0.7) +
-     ', akhir = karakter ' +
-     Math.floor(transcript.length * 0.8) +
-     '-' +
-     transcript.length
- }
-- Jangan asal copy text dari bagian lain transkrip - harus sesuai timing!
-- Excerpt minimum 50 kata, jelaskan konteks dengan lengkap
-
-OUTPUT FORMAT JSON (WAJIB):
+OUTPUT FORMAT (Return ONLY valid JSON, no additional text):
 [
   {
-    "title": "Judul Clickbait Menarik (max 60 karakter)",
-    "description": "Deskripsi engaging yang menjelaskan mengapa menarik",
-    "startTimeString": "2m15s",
-    "endTimeString": "3m45s", 
-    "transcriptExcerpt": "WAJIB 200-500 karakter! Ambil EXACT teks yang diucapkan pada timing 2m15s-3m45s. ${
-     hasTimingData ? 'Gunakan timing segments untuk mencari teks yang tepat pada menit tersebut' : 'Estimasi posisi: 2m15s ≈ 4% dari transcript, 3m45s ≈ 7% dari transcript'
-    }. Pastikan natural, lengkap, tidak repetitif, dan ada konteks yang cukup untuk dipahami standalone.",
-    "appealReason": "lucu/mengejutkan/edukatif/inspiratif/viral"
+    "title": "Short descriptive title here",
+    "startTime": "MM:SS",
+    "endTime": "MM:SS", 
+    "transcriptExcerpt": "The exact verbatim transcript text from startTime to endTime - no summaries or paraphrasing allowed"
   }
 ]
 
-${hasTimingData ? 'GUNAKAN TIMING YANG AKURAT dari data timing segments di atas!' : 'ESTIMASI timing berdasarkan posisi konten dalam transkrip, distribusikan merata dari 0 hingga ' + Math.floor(safeVideoDuration / 60) + ' menit'}
-
-PENTING: Berikan HANYA array JSON, tanpa penjelasan tambahan!`;
+Remember: Extract the ACTUAL spoken words, not your interpretation or summary of them.`;
 };
 
 export const generateShortsIdeas = async (videoUrl: string, transcript?: string, videoDuration?: number, transcriptSegments?: TranscriptSegment[], retryCount = 0): Promise<Omit<ShortVideo, 'youtubeVideoId' | 'thumbnailUrl'>[]> => {
@@ -343,7 +302,7 @@ export const generateShortsIdeas = async (videoUrl: string, transcript?: string,
   method: transcriptSegments && transcriptSegments.length > 0 ? 'With Timing Data' : 'Plain Text',
  };
 
- const prompt = generateEnhancedPrompt(videoUrl, transcriptData, videoDuration, retryCount > 0);
+ const prompt = generatePrecisionPrompt(transcriptData, videoDuration);
 
  try {
   console.log(`[GROQ] Generating segments (attempt ${retryCount + 1})`);
@@ -359,15 +318,15 @@ export const generateShortsIdeas = async (videoUrl: string, transcript?: string,
     {
      role: 'system',
      content:
-      'You are an expert video content analyst specializing in identifying viral moments for YouTube Shorts. You understand Indonesian content and can identify emotionally engaging, surprising, funny, and valuable moments that would perform well as short-form content. Always respond with valid JSON arrays only.',
+      'You are a precise video segmentation expert specializing in accurate transcript extraction. Your role is to identify key segments and extract the EXACT spoken words from those segments without any summarization, paraphrasing, or creative interpretation. Always respond with valid JSON arrays containing verbatim transcript excerpts.',
     },
     {
      role: 'user',
      content: prompt,
     },
    ],
-   model: retryCount > 1 ? 'llama-3.1-8b-instant' : 'llama-3.3-70b-versatile', // Fallback to faster model on retry
-   temperature: retryCount > 0 ? 0.3 : 0.7,
+   model: retryCount > 1 ? 'llama-3.1-8b-instant' : 'llama-3.3-70b-versatile',
+   temperature: 0.1, // Very low temperature for precision
    max_tokens: retryCount > 0 ? 3000 : 4000,
    top_p: 0.9,
    stream: false,
@@ -446,11 +405,15 @@ export const generateShortsIdeas = async (videoUrl: string, transcript?: string,
 
   // Smart processing with excerpt enhancement
   const processedSuggestions = suggestions.map((suggestion) => {
-   let startTimeSeconds = parseTimeStringToSeconds(suggestion.startTimeString);
-   let endTimeSeconds = parseTimeStringToSeconds(suggestion.endTimeString);
+   // Handle both new format (startTime/endTime) and old format (startTimeString/endTimeString)
+   let startTimeString = suggestion.startTimeString || suggestion.startTime || '0:00';
+   let endTimeString = suggestion.endTimeString || suggestion.endTime || '1:00';
+
+   let startTimeSeconds = parseTimeStringToSeconds(startTimeString);
+   let endTimeSeconds = parseTimeStringToSeconds(endTimeString);
 
    // Extract transcript excerpt (handle both field names)
-   let smartExcerpt = (suggestion as any).transcriptExcerpt || (suggestion as any).transkripExcerpt || '';
+   let smartExcerpt = (suggestion as any).transcriptExcerpt || (suggestion as any).transkripExcerpt || suggestion.description || '';
 
    // If AI excerpt is too short or repetitive, generate better one
    if (smartExcerpt.length < 150 || isRepetitive(smartExcerpt)) {
@@ -459,13 +422,13 @@ export const generateShortsIdeas = async (videoUrl: string, transcript?: string,
     console.log(`[GROQ] Enhanced excerpt for "${suggestion.title}": ${smartExcerpt.substring(0, 100)}... (${smartExcerpt.length} chars)`);
    }
 
-   console.log(`[GROQ] "${suggestion.title}" (${suggestion.startTimeString}-${suggestion.endTimeString}) = ${endTimeSeconds - startTimeSeconds}s | Excerpt: ${smartExcerpt ? smartExcerpt.substring(0, 50) + '...' : 'MISSING'}`);
+   console.log(`[GROQ] "${suggestion.title}" (${startTimeString}-${endTimeString}) = ${endTimeSeconds - startTimeSeconds}s | Excerpt: ${smartExcerpt ? smartExcerpt.substring(0, 50) + '...' : 'MISSING'}`);
 
    return {
     title: suggestion.title,
-    description: suggestion.description,
-    startTimeString: suggestion.startTimeString,
-    endTimeString: suggestion.endTimeString,
+    description: suggestion.description || suggestion.title, // Fallback if no description
+    startTimeString: startTimeString,
+    endTimeString: endTimeString,
     transcriptExcerpt: smartExcerpt,
     appealReason: (suggestion as any).appealReason || 'viral',
    };
