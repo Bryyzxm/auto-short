@@ -23,7 +23,192 @@ interface EnhancedTranscriptData {
  method: string;
 }
 
-// Smart Excerpt Extraction Function
+// ========================================================================================
+// PART 1: "TABLE OF CONTENTS" GENERATOR FUNCTION
+// ========================================================================================
+
+interface TableOfContentsEntry {
+ title: string;
+ startTime: string; // MM:SS format
+ endTime: string; // MM:SS format
+}
+
+/**
+ * PHASE 1: Generate a "Table of Contents" by analyzing transcript chunks with AI
+ * This identifies potential segments without needing the full verbatim text
+ */
+const generateTableOfContents = async (fullTranscriptText: string, videoDuration?: number): Promise<TableOfContentsEntry[]> => {
+ if (!groq) {
+  throw new Error('Groq API client is not initialized');
+ }
+
+ const CHUNK_SIZE = 15000; // 15K characters per chunk to stay within token limits
+ const chunks = [];
+
+ // Split transcript into manageable chunks
+ for (let i = 0; i < fullTranscriptText.length; i += CHUNK_SIZE) {
+  const chunk = fullTranscriptText.substring(i, i + CHUNK_SIZE);
+  const chunkNumber = Math.floor(i / CHUNK_SIZE) + 1;
+  const totalChunks = Math.ceil(fullTranscriptText.length / CHUNK_SIZE);
+
+  chunks.push({
+   text: chunk,
+   chunkNumber,
+   totalChunks,
+   startCharPosition: i,
+   endCharPosition: Math.min(i + CHUNK_SIZE, fullTranscriptText.length),
+  });
+ }
+
+ console.log(`[TOC-GENERATOR] Processing ${chunks.length} chunks for Table of Contents generation`);
+
+ const allTopics: TableOfContentsEntry[] = [];
+ const safeVideoDuration = videoDuration || Math.ceil((fullTranscriptText.length / 2500) * 60);
+
+ // Process each chunk with AI to identify topics
+ for (const chunk of chunks) {
+  try {
+   // Calculate approximate time range for this chunk
+   const startTimeRatio = chunk.startCharPosition / fullTranscriptText.length;
+   const endTimeRatio = chunk.endCharPosition / fullTranscriptText.length;
+
+   const chunkStartTime = Math.floor(startTimeRatio * safeVideoDuration);
+   const chunkEndTime = Math.floor(endTimeRatio * safeVideoDuration);
+
+   const prompt = `You are a topic spotter. Analyze this chunk of a video transcript.
+
+CHUNK INFO:
+- Chunk ${chunk.chunkNumber} of ${chunk.totalChunks}
+- Approximate time range: ${Math.floor(chunkStartTime / 60)}:${(chunkStartTime % 60).toString().padStart(2, '0')} to ${Math.floor(chunkEndTime / 60)}:${(chunkEndTime % 60).toString().padStart(2, '0')}
+- Video duration: ${Math.floor(safeVideoDuration / 60)} minutes ${safeVideoDuration % 60} seconds
+
+TASK:
+Identify up to 3 key, distinct topics discussed in this text chunk.
+
+REQUIREMENTS:
+- Each topic should be 60-120 seconds in duration
+- Topics should be substantial and interesting for short videos
+- Provide ONLY a short descriptive title and approximate timing
+- DO NOT provide summaries or transcript text
+- Times should be in MM:SS format relative to the full video
+
+OUTPUT FORMAT (Return ONLY valid JSON, no additional text):
+[
+  {
+    "title": "Short descriptive title (5-7 words)",
+    "startTime": "MM:SS",
+    "endTime": "MM:SS"
+  }
+]
+
+TRANSCRIPT CHUNK:
+"""
+${chunk.text}
+"""`;
+
+   const completion = await groq.chat.completions.create({
+    messages: [
+     {
+      role: 'system',
+      content: 'You are a topic identification expert. Analyze transcript chunks and identify key topics with precise timing. Always respond with valid JSON arrays only.',
+     },
+     {
+      role: 'user',
+      content: prompt,
+     },
+    ],
+    model: 'llama-3.1-8b-instant', // Use faster model for topic spotting
+    temperature: 0.2,
+    max_tokens: 800, // Keep response small
+    top_p: 0.9,
+    stream: false,
+   });
+
+   const response = completion.choices[0]?.message?.content?.trim() || '';
+
+   // Parse AI response
+   let chunkTopics: TableOfContentsEntry[] = [];
+   try {
+    // Extract JSON from response
+    const jsonRegex = /\[[\s\S]*\]/;
+    const jsonMatch = jsonRegex.exec(response);
+    if (jsonMatch) {
+     chunkTopics = JSON.parse(jsonMatch[0]);
+    } else {
+     console.warn(`[TOC-GENERATOR] No valid JSON found in chunk ${chunk.chunkNumber} response`);
+     continue;
+    }
+   } catch (parseError) {
+    console.warn(`[TOC-GENERATOR] Failed to parse JSON for chunk ${chunk.chunkNumber}:`, parseError);
+    continue;
+   }
+
+   // Validate and add topics
+   if (Array.isArray(chunkTopics)) {
+    chunkTopics.forEach((topic) => {
+     if (topic.title && topic.startTime && topic.endTime) {
+      allTopics.push(topic);
+      console.log(`[TOC-GENERATOR] Found topic: "${topic.title}" (${topic.startTime}-${topic.endTime})`);
+     }
+    });
+   }
+
+   // Small delay to respect API rate limits
+   await new Promise((resolve) => setTimeout(resolve, 500));
+  } catch (error) {
+   console.error(`[TOC-GENERATOR] Error processing chunk ${chunk.chunkNumber}:`, error);
+   continue; // Continue with other chunks
+  }
+ }
+
+ console.log(`[TOC-GENERATOR] Generated Table of Contents with ${allTopics.length} topics`);
+ return allTopics;
+};
+
+// ========================================================================================
+// PART 2: VERBATIM TEXT EXTRACTOR FUNCTION
+// ========================================================================================
+
+/**
+ * PHASE 2: Extract verbatim transcript text for a given time range
+ * This ensures 100% accuracy to the original source material
+ */
+const extractVerbatimText = (fullTranscriptWithTimestamps: TranscriptSegment[], startTime: string, endTime: string): string => {
+ // Convert MM:SS format to seconds
+ const startSeconds = parseTimeStringToSeconds(startTime);
+ const endSeconds = parseTimeStringToSeconds(endTime);
+
+ console.log(`[VERBATIM-EXTRACTOR] Extracting text from ${startTime} (${startSeconds}s) to ${endTime} (${endSeconds}s)`);
+
+ // Find all transcript segments that fall within the time range
+ const relevantSegments = fullTranscriptWithTimestamps.filter((segment) => {
+  const segmentStart = segment.start;
+  const segmentEnd = segment.end;
+
+  // Include segments that overlap with our time range
+  return (segmentStart >= startSeconds && segmentStart <= endSeconds) || (segmentEnd >= startSeconds && segmentEnd <= endSeconds) || (segmentStart <= startSeconds && segmentEnd >= endSeconds);
+ });
+
+ if (relevantSegments.length === 0) {
+  console.warn(`[VERBATIM-EXTRACTOR] No segments found for time range ${startTime}-${endTime}`);
+  return '';
+ }
+
+ // Sort segments by start time to ensure proper order
+ relevantSegments.sort((a, b) => a.start - b.start);
+
+ // Join all text from relevant segments
+ const verbatimText = relevantSegments.map((segment) => segment.text).join(' ');
+
+ console.log(`[VERBATIM-EXTRACTOR] Extracted ${verbatimText.length} characters from ${relevantSegments.length} segments`);
+
+ return verbatimText;
+};
+
+// ========================================================================================
+// LEGACY SMART EXCERPT FUNCTION (kept for backward compatibility)
+// ========================================================================================
+
 const extractSmartExcerpt = (fullTranscript: string, startTime: number, endTime: number, segments?: TranscriptSegment[]): string => {
  if (segments && segments.length > 0) {
   // Use actual timing data
@@ -174,12 +359,15 @@ const generatePrecisionPrompt = (transcriptData: EnhancedTranscriptData, videoDu
 
  // Detect language for better AI understanding
  const languageDetection = detectLanguage(transcript);
- const languageContext =
-  languageDetection.language === 'indonesian'
-   ? 'The provided transcript is in Indonesian language.'
-   : languageDetection.language === 'english'
-   ? 'The provided transcript is in English language.'
-   : 'The transcript language could not be determined reliably.';
+
+ let languageContext: string;
+ if (languageDetection.language === 'indonesian') {
+  languageContext = 'The provided transcript is in Indonesian language.';
+ } else if (languageDetection.language === 'english') {
+  languageContext = 'The provided transcript is in English language.';
+ } else {
+  languageContext = 'The transcript language could not be determined reliably.';
+ }
 
  // Calculate target segments based on video duration
  let targetSegments = Math.min(8, Math.max(3, Math.floor(safeVideoDuration / 180))); // 1 segment per 3 minutes
@@ -191,8 +379,8 @@ const generatePrecisionPrompt = (transcriptData: EnhancedTranscriptData, videoDu
   const sampleSegments = segments
    .slice(0, 10)
    .map((seg, idx) => {
-    const startTime = new Date(seg.start * 1000).toISOString().substr(14, 5); // MM:SS format
-    const endTime = new Date(seg.end * 1000).toISOString().substr(14, 5);
+    const startTime = new Date(seg.start * 1000).toISOString().substring(14, 19); // MM:SS format
+    const endTime = new Date(seg.end * 1000).toISOString().substring(14, 19);
     return `Segment ${idx + 1}: [${startTime} - ${endTime}] "${seg.text.substring(0, 80)}..."`;
    })
    .join('\n');
@@ -278,6 +466,10 @@ OUTPUT FORMAT (Return ONLY valid JSON, no additional text):
 Remember: Extract the ACTUAL spoken words, not your interpretation or summary of them.`;
 };
 
+// ========================================================================================
+// PART 3: MAIN AI FUNCTION - ORCHESTRATES THE TWO-PHASE WORKFLOW
+// ========================================================================================
+
 export const generateShortsIdeas = async (videoUrl: string, transcript?: string, videoDuration?: number, transcriptSegments?: TranscriptSegment[], retryCount = 0): Promise<Omit<ShortVideo, 'youtubeVideoId' | 'thumbnailUrl'>[]> => {
  if (!groq) {
   throw new Error('Groq API client is not initialized. GROQ_API_KEY might be missing.');
@@ -285,15 +477,123 @@ export const generateShortsIdeas = async (videoUrl: string, transcript?: string,
 
  // Validate transcript quality
  if (!transcript || transcript.length < 500) {
-  console.error(`[GROQ] ❌ Transcript too short or missing (${transcript?.length || 0} chars)`);
+  console.error(`[TOC-WORKFLOW] ❌ Transcript too short or missing (${transcript?.length || 0} chars)`);
   throw new Error(`Transcript terlalu pendek atau tidak tersedia (${transcript?.length || 0} karakter). Pastikan backend extraction berhasil.`);
  }
 
  // Check if transcript is AI-generated placeholder
  if (transcript.includes('ai-generated transcript: this video appears to be') || transcript.includes('AI-generated content')) {
-  console.error('[GROQ] ❌ AI-generated placeholder transcript detected');
+  console.error('[TOC-WORKFLOW] ❌ AI-generated placeholder transcript detected');
   throw new Error('Transcript adalah AI-generated placeholder. Gunakan backend transcript extraction yang sesungguhnya.');
  }
+
+ console.log(`[TOC-WORKFLOW] 🚀 Starting Table of Contents workflow for transcript (${transcript.length} chars, ${transcriptSegments?.length || 0} segments)`);
+
+ try {
+  // Add delay between retries
+  if (retryCount > 0) {
+   const delay = Math.min(3000 * retryCount, 15000);
+   console.log(`[TOC-WORKFLOW] Retrying in ${delay}ms... (attempt ${retryCount + 1})`);
+   await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+
+  // ===== PHASE 1: Generate Table of Contents =====
+  console.log(`[TOC-WORKFLOW] 📋 PHASE 1: Generating Table of Contents...`);
+  const tableOfContents = await generateTableOfContents(transcript, videoDuration);
+
+  if (tableOfContents.length === 0) {
+   console.warn(`[TOC-WORKFLOW] ⚠️ No topics found in Table of Contents generation`);
+   throw new Error('No suitable topics identified in the transcript for segmentation');
+  }
+
+  console.log(`[TOC-WORKFLOW] ✅ PHASE 1 Complete: Generated ${tableOfContents.length} potential segments`);
+
+  // ===== PHASE 2: Extract Verbatim Text for Each Segment =====
+  console.log(`[TOC-WORKFLOW] 📝 PHASE 2: Extracting verbatim text for each segment...`);
+
+  const finalSegments: any[] = [];
+
+  for (const tocEntry of tableOfContents) {
+   console.log(`[TOC-WORKFLOW] Processing: "${tocEntry.title}" (${tocEntry.startTime}-${tocEntry.endTime})`);
+
+   let verbatimExcerpt = '';
+
+   // Use verbatim extraction if we have timestamped segments
+   if (transcriptSegments && transcriptSegments.length > 0) {
+    verbatimExcerpt = extractVerbatimText(transcriptSegments, tocEntry.startTime, tocEntry.endTime);
+   } else {
+    // Fallback to smart excerpt extraction for plain text transcripts
+    const startSeconds = parseTimeStringToSeconds(tocEntry.startTime);
+    const endSeconds = parseTimeStringToSeconds(tocEntry.endTime);
+    verbatimExcerpt = extractSmartExcerpt(transcript, startSeconds, endSeconds, transcriptSegments);
+   }
+
+   // Validate excerpt quality
+   if (verbatimExcerpt && verbatimExcerpt.length >= 100) {
+    const startSeconds = parseTimeStringToSeconds(tocEntry.startTime);
+    const endSeconds = parseTimeStringToSeconds(tocEntry.endTime);
+    const duration = endSeconds - startSeconds;
+
+    // Validate duration constraints
+    if (duration >= 30 && duration <= 120) {
+     finalSegments.push({
+      id: `toc-${Math.random().toString(36).substring(2, 11)}`,
+      title: tocEntry.title,
+      description: tocEntry.title, // Use title as description for Table of Contents approach
+      startTimeSeconds: startSeconds,
+      endTimeSeconds: endSeconds,
+      duration: duration,
+      transcriptExcerpt: verbatimExcerpt,
+      appealReason: 'table-of-contents-segment',
+     });
+
+     console.log(`[TOC-WORKFLOW] ✅ Added segment: "${tocEntry.title}" (${duration}s, ${verbatimExcerpt.length} chars)`);
+    } else {
+     console.log(`[TOC-WORKFLOW] ❌ Rejected "${tocEntry.title}": invalid duration (${duration}s)`);
+    }
+   } else {
+    console.log(`[TOC-WORKFLOW] ❌ Rejected "${tocEntry.title}": excerpt too short (${verbatimExcerpt?.length || 0} chars)`);
+   }
+  }
+
+  console.log(`[TOC-WORKFLOW] ✅ PHASE 2 Complete: Processed ${finalSegments.length} valid segments from ${tableOfContents.length} candidates`);
+
+  if (finalSegments.length === 0) {
+   throw new Error('No valid segments could be extracted with sufficient verbatim content');
+  }
+
+  // Sort by start time and limit to top 10 segments
+  finalSegments.sort((a, b) => a.startTimeSeconds - b.startTimeSeconds);
+  const limitedSegments = finalSegments.slice(0, 10);
+
+  console.log(`[TOC-WORKFLOW] 🎯 Final output: ${limitedSegments.length} segments (average duration: ${Math.round(limitedSegments.reduce((sum, s) => sum + s.duration, 0) / limitedSegments.length)}s)`);
+
+  return limitedSegments;
+ } catch (error: any) {
+  console.error('[TOC-WORKFLOW] ❌ Table of Contents workflow error:', error);
+
+  // Retry logic with fallback to legacy approach
+  if (retryCount < 2) {
+   console.log(`[TOC-WORKFLOW] 🔄 Retrying Table of Contents workflow (attempt ${retryCount + 2})`);
+   return generateShortsIdeas(videoUrl, transcript, videoDuration, transcriptSegments, retryCount + 1);
+  }
+
+  // Final fallback: try legacy single-prompt approach for smaller transcripts
+  if (retryCount >= 2 && transcript && transcript.length < 50000) {
+   console.log(`[TOC-WORKFLOW] 🔄 Final fallback: attempting legacy single-prompt approach for smaller transcript`);
+   return generateShortsIdeasLegacy(videoUrl, transcript, videoDuration, transcriptSegments);
+  }
+
+  throw new Error(`Table of Contents AI segmentation failed after ${retryCount + 1} attempts: ${error.message}`);
+ }
+};
+
+// ========================================================================================
+// LEGACY SINGLE-PROMPT APPROACH (fallback for smaller transcripts)
+// ========================================================================================
+
+const generateShortsIdeasLegacy = async (videoUrl: string, transcript: string, videoDuration?: number, transcriptSegments?: TranscriptSegment[]): Promise<Omit<ShortVideo, 'youtubeVideoId' | 'thumbnailUrl'>[]> => {
+ console.log(`[LEGACY-FALLBACK] 🔄 Using legacy single-prompt approach as final fallback`);
 
  // Prepare enhanced transcript data
  const transcriptData: EnhancedTranscriptData = {
@@ -305,14 +605,6 @@ export const generateShortsIdeas = async (videoUrl: string, transcript?: string,
  const prompt = generatePrecisionPrompt(transcriptData, videoDuration);
 
  try {
-  console.log(`[GROQ] Generating segments (attempt ${retryCount + 1})`);
-
-  // Add delay between retries
-  if (retryCount > 0) {
-   const delay = Math.min(3000 * retryCount, 15000);
-   console.log(`[GROQ] Retrying in ${delay}ms...`);
-   await new Promise((resolve) => setTimeout(resolve, delay));
-  }
   const completion = await groq.chat.completions.create({
    messages: [
     {
@@ -325,9 +617,9 @@ export const generateShortsIdeas = async (videoUrl: string, transcript?: string,
      content: prompt,
     },
    ],
-   model: retryCount > 1 ? 'llama-3.1-8b-instant' : 'llama-3.3-70b-versatile',
-   temperature: 0.1, // Very low temperature for precision
-   max_tokens: retryCount > 0 ? 3000 : 4000,
+   model: 'llama-3.1-8b-instant', // Use faster model for fallback
+   temperature: 0.1,
+   max_tokens: 3000,
    top_p: 0.9,
    stream: false,
   });
@@ -341,14 +633,15 @@ export const generateShortsIdeas = async (videoUrl: string, transcript?: string,
    // First try direct parse
    suggestions = JSON.parse(rawText);
   } catch (parseError) {
-   console.error('[GROQ DEBUG] JSON parse failed. Original text:', rawText);
-   console.error('[GROQ DEBUG] Parse error:', parseError);
+   console.error('[LEGACY-FALLBACK] JSON parse failed. Original text:', rawText);
+   console.error('[LEGACY-FALLBACK] Parse error:', parseError);
 
    // Try to extract JSON array from response
    let jsonStrToParse = '';
 
    // Method 1: Look for complete JSON array
-   const arrayMatch = rawText.match(/\[[\s\S]*\]/);
+   const arrayRegex = /\[[\s\S]*\]/;
+   const arrayMatch = arrayRegex.exec(rawText);
    if (arrayMatch) {
     jsonStrToParse = arrayMatch[0];
    } else {
@@ -364,7 +657,7 @@ export const generateShortsIdeas = async (videoUrl: string, transcript?: string,
      if (objectMatches && objectMatches.length > 0) {
       jsonStrToParse = '[' + objectMatches.join(',') + ']';
      } else {
-      console.error('[GROQ DEBUG] No JSON found in response. Full text:', rawText);
+      console.error('[LEGACY-FALLBACK] No JSON found in response. Full text:', rawText);
       throw new Error('Tidak ditemukan JSON di respons AI. AI mungkin mengembalikan text biasa atau format tidak sesuai.');
      }
     }
@@ -384,11 +677,11 @@ export const generateShortsIdeas = async (videoUrl: string, transcript?: string,
     fixedJsonStr = fixedJsonStr.replace(/"([^"]*)"([^"]*)"([^"]*)"/g, '"$1\\"$2\\"$3"');
 
     try {
-     console.log('[GROQ DEBUG] Trying to parse fixed JSON:', fixedJsonStr.substring(0, 200));
+     console.log('[LEGACY-FALLBACK] Trying to parse fixed JSON:', fixedJsonStr.substring(0, 200));
      suggestions = JSON.parse(fixedJsonStr);
-     console.log('[GROQ DEBUG] Successfully parsed fixed JSON');
+     console.log('[LEGACY-FALLBACK] Successfully parsed fixed JSON');
     } catch (secondParseError) {
-     console.error('[GROQ DEBUG] Fixed JSON parse also failed:', secondParseError);
+     console.error('[LEGACY-FALLBACK] Fixed JSON parse also failed:', secondParseError);
      throw new Error(`AI response tidak valid JSON. Respons asli: "${rawText.substring(0, 500)}...". Error: ${parseError instanceof Error ? parseError.message : 'Unknown parse error'}`);
     }
    } else {
@@ -397,11 +690,11 @@ export const generateShortsIdeas = async (videoUrl: string, transcript?: string,
   }
 
   if (!Array.isArray(suggestions)) {
-   console.error('Groq response is not an array:', suggestions);
+   console.error('[LEGACY-FALLBACK] Groq response is not an array:', suggestions);
    throw new Error('AI response was not in the expected format (array of suggestions).');
   }
 
-  console.log(`[GROQ] Generated ${suggestions.length} segments with natural durations`);
+  console.log(`[LEGACY-FALLBACK] Generated ${suggestions.length} segments with legacy approach`);
 
   // Smart processing with excerpt enhancement
   const processedSuggestions = suggestions.map((suggestion) => {
@@ -417,12 +710,12 @@ export const generateShortsIdeas = async (videoUrl: string, transcript?: string,
 
    // If AI excerpt is too short or repetitive, generate better one
    if (smartExcerpt.length < 150 || isRepetitive(smartExcerpt)) {
-    console.log(`[GROQ] AI excerpt too short (${smartExcerpt.length} chars), generating smart excerpt for "${suggestion.title}"`);
+    console.log(`[LEGACY-FALLBACK] AI excerpt too short (${smartExcerpt.length} chars), generating smart excerpt for "${suggestion.title}"`);
     smartExcerpt = extractSmartExcerpt(transcriptData?.transcript || '', startTimeSeconds, endTimeSeconds, transcriptData?.segments);
-    console.log(`[GROQ] Enhanced excerpt for "${suggestion.title}": ${smartExcerpt.substring(0, 100)}... (${smartExcerpt.length} chars)`);
+    console.log(`[LEGACY-FALLBACK] Enhanced excerpt for "${suggestion.title}": ${smartExcerpt.substring(0, 100)}... (${smartExcerpt.length} chars)`);
    }
 
-   console.log(`[GROQ] "${suggestion.title}" (${startTimeString}-${endTimeString}) = ${endTimeSeconds - startTimeSeconds}s | Excerpt: ${smartExcerpt ? smartExcerpt.substring(0, 50) + '...' : 'MISSING'}`);
+   console.log(`[LEGACY-FALLBACK] "${suggestion.title}" (${startTimeString}-${endTimeString}) = ${endTimeSeconds - startTimeSeconds}s | Excerpt: ${smartExcerpt ? smartExcerpt.substring(0, 50) + '...' : 'MISSING'}`);
 
    return {
     title: suggestion.title,
@@ -430,7 +723,7 @@ export const generateShortsIdeas = async (videoUrl: string, transcript?: string,
     startTimeString: startTimeString,
     endTimeString: endTimeString,
     transcriptExcerpt: smartExcerpt,
-    appealReason: (suggestion as any).appealReason || 'viral',
+    appealReason: (suggestion as any).appealReason || 'legacy-fallback',
    };
   });
 
@@ -438,7 +731,7 @@ export const generateShortsIdeas = async (videoUrl: string, transcript?: string,
   const validatedSegments = processedSuggestions
    .filter((segment: any) => {
     if (!segment.transcriptExcerpt || segment.transcriptExcerpt.length < 100) {
-     console.log(`[GROQ] ❌ Rejected segment "${segment.title}": excerpt too short (${segment.transcriptExcerpt?.length || 0} chars)`);
+     console.log(`[LEGACY-FALLBACK] ❌ Rejected segment "${segment.title}": excerpt too short (${segment.transcriptExcerpt?.length || 0} chars)`);
      return false;
     }
 
@@ -447,16 +740,16 @@ export const generateShortsIdeas = async (videoUrl: string, transcript?: string,
     const duration = endSeconds - startSeconds;
 
     if (duration < 30) {
-     console.log(`[GROQ] ❌ Rejected segment "${segment.title}": too short (${duration}s < 30s minimum)`);
+     console.log(`[LEGACY-FALLBACK] ❌ Rejected segment "${segment.title}": too short (${duration}s < 30s minimum)`);
      return false;
     }
 
     if (duration > 120) {
-     console.log(`[GROQ] ❌ Rejected segment "${segment.title}": too long (${duration}s > 120s maximum)`);
+     console.log(`[LEGACY-FALLBACK] ❌ Rejected segment "${segment.title}": too long (${duration}s > 120s maximum)`);
      return false;
     }
 
-    console.log(`[GROQ] ✅ Validated segment "${segment.title}": ${duration}s duration, ${segment.transcriptExcerpt.length} char excerpt`);
+    console.log(`[LEGACY-FALLBACK] ✅ Validated segment "${segment.title}": ${duration}s duration, ${segment.transcriptExcerpt.length} char excerpt`);
     return true;
    })
    .slice(0, 10) // Maximum 10 quality segments
@@ -465,29 +758,22 @@ export const generateShortsIdeas = async (videoUrl: string, transcript?: string,
     const endSeconds = parseTimeStringToSeconds(segment.endTimeString);
 
     return {
-     id: `enhanced-${Math.random().toString(36).substr(2, 9)}`,
+     id: `legacy-${Math.random().toString(36).substring(2, 11)}`,
      title: segment.title,
      description: segment.description,
      startTimeSeconds: startSeconds,
      endTimeSeconds: endSeconds,
      duration: endSeconds - startSeconds,
      transcriptExcerpt: segment.transcriptExcerpt,
-     appealReason: segment.appealReason || 'viral',
+     appealReason: segment.appealReason || 'legacy',
     };
    });
 
-  console.log(`[GROQ] Final output: ${validatedSegments.length} validated segments (average duration: ${Math.round(validatedSegments.reduce((sum, s) => sum + s.duration, 0) / validatedSegments.length)}s)`);
+  console.log(`[LEGACY-FALLBACK] Final output: ${validatedSegments.length} validated segments (average duration: ${Math.round(validatedSegments.reduce((sum, s) => sum + s.duration, 0) / validatedSegments.length)}s)`);
 
   return validatedSegments;
  } catch (error: any) {
-  console.error('[GROQ] Enhanced generation error:', error);
-
-  // Retry logic
-  if (retryCount < 2) {
-   console.log(`[GROQ] Retrying enhanced generation (attempt ${retryCount + 1})`);
-   return generateShortsIdeas(videoUrl, transcript, videoDuration, transcriptSegments, retryCount + 1);
-  }
-
-  throw new Error(`Enhanced AI segmentation failed after ${retryCount + 1} attempts: ${error.message}`);
+  console.error('[LEGACY-FALLBACK] Legacy generation error:', error);
+  throw new Error(`Legacy AI segmentation failed: ${error.message}`);
  }
 };
