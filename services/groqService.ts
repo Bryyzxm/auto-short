@@ -79,7 +79,7 @@ const generateTableOfContents = async (fullTranscriptText: string, videoDuration
    const chunkEndTime = Math.floor(endTimeRatio * safeVideoDuration);
 
    // PART 2: IMPROVED AI PROMPT FOR BETTER DURATION CONTROL
-   const prompt = `You are a precise video segmenter. Your task is to analyze this transcript chunk.
+   const prompt = `You are a precise video segmentation expert. Your task is to analyze this transcript chunk.
 
 CHUNK INFO:
 - Chunk ${chunk.chunkNumber} of ${chunk.totalChunks}
@@ -89,11 +89,16 @@ CHUNK INFO:
 TASK:
 Identify up to 3 key topics that would make good short videos.
 
-**CRUCIAL DURATION CONSTRAINT:**
-- The duration of each segment (end time minus start time) MUST be between 60 and 90 seconds.
-- Do NOT generate segments longer than 90 seconds.
-- Do NOT generate segments shorter than 60 seconds.
-- If you cannot find any topics that fit within this duration constraint, return an empty array.
+**THIS IS A STRICT AND MANDATORY RULE: The duration of each segment MUST be between 60 and 90 seconds.**
+
+**If a topic is naturally longer than 90 seconds, you MUST break it down into a smaller, more focused sub-topic that fits the 60-90 second range.**
+
+**CRUCIAL DURATION CONSTRAINTS:**
+- MINIMUM duration: 60 seconds (anything shorter will be rejected)
+- MAXIMUM duration: 90 seconds (anything longer will be rejected)
+- Do NOT generate segments longer than 90 seconds under any circumstances
+- Do NOT generate segments shorter than 60 seconds under any circumstances
+- **Do not return segments outside of this duration range.** If no topics fit, return an empty array.
 
 REQUIREMENTS:
 - For each topic, provide a short title, a start time, and an end time
@@ -101,6 +106,7 @@ REQUIREMENTS:
 - Provide ONLY timing information, NO summaries or transcript text
 - Times should be in MM:SS format relative to the full video
 - Each segment must be exactly 60-90 seconds long
+- If you identify a topic longer than 90 seconds, break it into smaller focused sub-topics
 
 OUTPUT FORMAT (Return ONLY valid JSON, no additional text):
 [
@@ -111,59 +117,104 @@ OUTPUT FORMAT (Return ONLY valid JSON, no additional text):
   }
 ]
 
-If no suitable 60-90 second segments can be identified, return: []
+**REMINDER: Only return segments that are between 60-90 seconds. If no suitable segments can be identified, return: []**
 
 TRANSCRIPT CHUNK:
 """
 ${chunk.text}
 """`;
 
-   // Make API call with rate limit awareness
+   // Make API call with intelligent retry logic for rate limits
    console.log(`[TOC-GENERATOR] Making API call for chunk ${chunk.chunkNumber}...`);
-   const completion = await groq.chat.completions.create({
-    messages: [
-     {
-      role: 'system',
-      content:
-       'You are a precise video segmentation expert. Analyze transcript chunks and identify key topics with exact 60-90 second durations. Always respond with valid JSON arrays only. If no suitable segments can be found within the duration constraints, return an empty array.',
-     },
-     {
-      role: 'user',
-      content: prompt,
-     },
-    ],
-    model: 'llama-3.1-8b-instant', // Use faster model for topic spotting
-    temperature: 0.1, // Lower temperature for more precise duration control
-    max_tokens: 600, // Reduced tokens for more focused responses
-    top_p: 0.8,
-    stream: false,
-   });
 
-   const response = completion.choices[0]?.message?.content?.trim() || '';
-   console.log(`[TOC-GENERATOR] Received response for chunk ${chunk.chunkNumber}: ${response.substring(0, 100)}...`);
-
-   // Parse AI response
+   let chunkAttempts = 0;
+   const maxChunkRetries = 3;
    let chunkTopics: TableOfContentsEntry[] = [];
-   try {
-    // Extract JSON from response
-    const jsonRegex = /\[[\s\S]*\]/;
-    const jsonMatch = jsonRegex.exec(response);
-    if (jsonMatch) {
-     chunkTopics = JSON.parse(jsonMatch[0]);
-    } else {
-     console.warn(`[TOC-GENERATOR] No valid JSON found in chunk ${chunk.chunkNumber} response`);
-     // Continue to next chunk instead of stopping
-     await new Promise((resolve) => setTimeout(resolve, 1000)); // Longer delay on parse failure
-     continue;
+
+   while (chunkAttempts < maxChunkRetries) {
+    try {
+     const completion = await groq.chat.completions.create({
+      messages: [
+       {
+        role: 'system',
+        content:
+         'You are a precise video segmentation expert. Analyze transcript chunks and identify key topics with exact 60-90 second durations. STRICTLY enforce the duration constraints - reject any segment outside 60-90 seconds. Always respond with valid JSON arrays only. If no suitable segments can be found within the duration constraints, return an empty array.',
+       },
+       {
+        role: 'user',
+        content: prompt,
+       },
+      ],
+      model: 'llama-3.1-8b-instant', // Use faster model for topic spotting
+      temperature: 0.1, // Lower temperature for more precise duration control
+      max_tokens: 600, // Reduced tokens for more focused responses
+      top_p: 0.8,
+      stream: false,
+     });
+
+     const response = completion.choices[0]?.message?.content?.trim() || '';
+     console.log(`[TOC-GENERATOR] Received response for chunk ${chunk.chunkNumber}: ${response.substring(0, 100)}...`);
+
+     // Parse AI response
+     try {
+      // Extract JSON from response
+      const jsonRegex = /\[[\s\S]*\]/;
+      const jsonMatch = jsonRegex.exec(response);
+      if (jsonMatch) {
+       chunkTopics = JSON.parse(jsonMatch[0]);
+       console.log(`[TOC-GENERATOR] Successfully parsed ${chunkTopics.length} topics for chunk ${chunk.chunkNumber}`);
+       break; // Success - exit retry loop
+      } else {
+       console.warn(`[TOC-GENERATOR] No valid JSON found in chunk ${chunk.chunkNumber} response`);
+       // Don't retry for parse errors - continue to next chunk
+       break;
+      }
+     } catch (parseError) {
+      console.warn(`[TOC-GENERATOR] Failed to parse JSON for chunk ${chunk.chunkNumber}:`, parseError);
+      // Don't retry for parse errors - continue to next chunk
+      break;
+     }
+    } catch (error: any) {
+     chunkAttempts++;
+     console.error(`[TOC-GENERATOR] Error processing chunk ${chunk.chunkNumber} (attempt ${chunkAttempts}/${maxChunkRetries}):`, error.message);
+
+     // PART 1: INTELLIGENT DYNAMIC RATE LIMIT HANDLING
+     if (error.response?.status === 429 || error.message?.includes('429') || error.message?.includes('rate limit')) {
+      console.warn(`[TOC-GENERATOR] 🚦 Rate limit hit for chunk ${chunk.chunkNumber} (attempt ${chunkAttempts})`);
+
+      // Parse the suggested wait time from error message
+      let waitTimeInSeconds = 5; // Default fallback
+      const waitTimeMatch = error.message?.match(/try again in (\d+(?:\.\d+)?)s/i);
+      if (waitTimeMatch) {
+       waitTimeInSeconds = parseFloat(waitTimeMatch[1]);
+       console.log(`[TOC-GENERATOR] Extracted wait time: ${waitTimeInSeconds} seconds from error message`);
+      } else {
+       console.log(`[TOC-GENERATOR] No wait time found in error message, using default ${waitTimeInSeconds}s`);
+      }
+
+      // Implement dynamic delay with buffer
+      const dynamicDelayMs = (waitTimeInSeconds + 1) * 1000; // Add 1 second buffer
+      console.log(`[TOC-GENERATOR] ⏳ Rate limit hit. Waiting for ${waitTimeInSeconds + 1} seconds before retry...`);
+      await new Promise((resolve) => setTimeout(resolve, dynamicDelayMs));
+
+      // Retry the same chunk
+      if (chunkAttempts < maxChunkRetries) {
+       console.log(`[TOC-GENERATOR] 🔄 Retrying chunk ${chunk.chunkNumber} (attempt ${chunkAttempts + 1}/${maxChunkRetries})`);
+       continue; // Continue to next iteration of retry loop
+      } else {
+       console.error(`[TOC-GENERATOR] ❌ Max retries reached for chunk ${chunk.chunkNumber}, skipping...`);
+       break; // Exit retry loop and continue to next chunk
+      }
+     } else {
+      // For non-rate-limit errors, don't retry
+      console.error(`[TOC-GENERATOR] Non-rate-limit error for chunk ${chunk.chunkNumber}, skipping retries`);
+      await new Promise((resolve) => setTimeout(resolve, 1000)); // Standard delay for other errors
+      break; // Exit retry loop and continue to next chunk
+     }
     }
-   } catch (parseError) {
-    console.warn(`[TOC-GENERATOR] Failed to parse JSON for chunk ${chunk.chunkNumber}:`, parseError);
-    // Continue to next chunk instead of stopping
-    await new Promise((resolve) => setTimeout(resolve, 1000)); // Longer delay on parse failure
-    continue;
    }
 
-   // Validate topics with duration constraints
+   // Validate topics with improved duration constraints (Part 3: More flexible validation)
    if (Array.isArray(chunkTopics)) {
     chunkTopics.forEach((topic) => {
      if (topic.title && topic.startTime && topic.endTime) {
@@ -172,32 +223,25 @@ ${chunk.text}
       const endSeconds = parseTimeStringToSeconds(topic.endTime);
       const duration = endSeconds - startSeconds;
 
-      if (duration >= 60 && duration <= 90) {
+      // Part 3: Add small grace period (60-95 seconds instead of 60-90)
+      if (duration >= 60 && duration <= 95) {
        allTopics.push(topic);
        console.log(`[TOC-GENERATOR] ✅ Found valid topic: "${topic.title}" (${topic.startTime}-${topic.endTime}, ${duration}s)`);
       } else {
-       console.warn(`[TOC-GENERATOR] ⚠️ Rejected topic "${topic.title}": duration ${duration}s not in 60-90s range`);
+       console.warn(`[TOC-GENERATOR] ⚠️ Rejected topic "${topic.title}": duration ${duration}s not in 60-95s range`);
       }
      }
     });
    }
 
    // DELIBERATE DELAY to respect API rate limits (sequential processing)
-   console.log(`[TOC-GENERATOR] Chunk ${chunk.chunkNumber} complete. Waiting 1000ms before next request...`);
-   await new Promise((resolve) => setTimeout(resolve, 1000)); // Conservative delay for rate limit compliance
-  } catch (error: any) {
-   console.error(`[TOC-GENERATOR] Error processing chunk ${chunk.chunkNumber}:`, error.message);
-
-   // Handle rate limit errors specifically
-   if (error.message?.includes('429') || error.message?.includes('rate limit')) {
-    console.warn(`[TOC-GENERATOR] Rate limit detected. Waiting 2 seconds before continuing...`);
-    await new Promise((resolve) => setTimeout(resolve, 2000)); // Longer delay for rate limits
-   } else {
-    await new Promise((resolve) => setTimeout(resolve, 1000)); // Standard delay for other errors
+   if (chunk.chunkNumber < chunk.totalChunks) {
+    console.log(`[TOC-GENERATOR] Chunk ${chunk.chunkNumber} complete. Waiting 1000ms before next request...`);
+    await new Promise((resolve) => setTimeout(resolve, 1000)); // Conservative delay for rate limit compliance
    }
-
-   // Continue with other chunks even if one fails
-   continue;
+  } catch (finalError: any) {
+   console.error(`[TOC-GENERATOR] Final error for chunk ${chunk.chunkNumber}:`, finalError.message);
+   // Continue with other chunks even if one fails completely
   }
  }
 
@@ -205,8 +249,8 @@ ${chunk.text}
 
  // PART 3: REFINED VALIDATION - Final check for empty results
  if (allTopics.length === 0) {
-  console.warn(`[TOC-GENERATOR] ⚠️ No suitable segments could be identified within the 60-90 second duration constraints`);
-  throw new Error('No suitable segments could be identified within the given constraints. The transcript may not contain content suitable for 60-90 second segments.');
+  console.warn(`[TOC-GENERATOR] ⚠️ No suitable segments could be identified within the 60-95 second duration constraints`);
+  throw new Error('No suitable segments could be identified within the given constraints. The transcript may not contain content suitable for 60-95 second segments.');
  }
 
  return allTopics;
@@ -581,8 +625,8 @@ export const generateShortsIdeas = async (videoUrl: string, transcript?: string,
     const endSeconds = parseTimeStringToSeconds(tocEntry.endTime);
     const duration = endSeconds - startSeconds;
 
-    // Final validation: Duration should already be 60-90s from Phase 1, but double-check
-    if (duration >= 60 && duration <= 90) {
+    // Final validation: Duration should already be 60-95s from Phase 1, but double-check with grace period
+    if (duration >= 60 && duration <= 95) {
      finalSegments.push({
       id: `toc-${Math.random().toString(36).substring(2, 11)}`,
       title: tocEntry.title,
