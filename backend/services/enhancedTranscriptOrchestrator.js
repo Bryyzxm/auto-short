@@ -60,7 +60,7 @@ class EnhancedTranscriptOrchestrator {
    isDisabledByOwner: false,
    sessionId,
    minLength,
-   videoId
+   videoId,
   };
 
   const result = await this.tryAllServices(extractionContext, options);
@@ -83,7 +83,7 @@ class EnhancedTranscriptOrchestrator {
    if (result) {
     return result;
    }
-   
+
    if (context.isDisabledByOwner || context.lastError instanceof NoValidTranscriptError) {
     break;
    }
@@ -122,7 +122,7 @@ class EnhancedTranscriptOrchestrator {
   }
 
   const result = await service[method](videoId, {...serviceOptions, ...options});
-  
+
   if (!result || !result.segments || !Array.isArray(result.segments) || result.segments.length === 0) {
    throw new Error(`Service ${name} returned invalid or empty segments`);
   }
@@ -162,9 +162,16 @@ class EnhancedTranscriptOrchestrator {
  handleServiceError(error, serviceName, extractionTime, context) {
   context.lastError = error;
   console.log(`[TRANSCRIPT-ORCHESTRATOR] ❌ ${serviceName} service failed: ${error.message}`);
+  console.log(`[TRANSCRIPT-ORCHESTRATOR] 🔍 Error analysis for ${serviceName}:`);
+  console.log(`[TRANSCRIPT-ORCHESTRATOR] - Error type: ${error.constructor.name}`);
+  console.log(`[TRANSCRIPT-ORCHESTRATOR] - Error message: "${error.message}"`);
+  console.log(`[TRANSCRIPT-ORCHESTRATOR] - isDisabledError check: ${TranscriptValidator.isDisabledError(error)}`);
+  console.log(`[TRANSCRIPT-ORCHESTRATOR] - Current isDisabledByOwner: ${context.isDisabledByOwner}`);
 
-  if (TranscriptValidator.isDisabledError(error)) {
+  // Once we detect a disabled transcript, preserve this flag
+  if (TranscriptValidator.isDisabledError(error) || context.isDisabledByOwner) {
    console.log(`[TRANSCRIPT-ORCHESTRATOR] ⚠️ Video ${context.videoId} has transcripts disabled by owner - stopping service attempts`);
+   console.log(`[TRANSCRIPT-ORCHESTRATOR] 🔧 Setting isDisabledByOwner = true for ${context.videoId}`);
    context.isDisabledByOwner = true;
    this.updateServiceStats(serviceName, false, extractionTime);
    return;
@@ -174,6 +181,14 @@ class EnhancedTranscriptOrchestrator {
    console.log(`[TRANSCRIPT-ORCHESTRATOR] ⚠️ Validation failed: ${error.message}`);
    this.updateServiceStats(serviceName, false, extractionTime);
    return;
+  }
+
+  // Additional check: if error message contains just video ID, check if previous errors indicated disabled
+  if (error.message === context.videoId && context.servicesAttempted.length > 1) {
+   console.log(`[TRANSCRIPT-ORCHESTRATOR] 🔍 Generic error detected, checking if previous services indicated disabled transcript`);
+   // This could indicate a fallback error after disabled transcript detection
+   context.isDisabledByOwner = true;
+   console.log(`[TRANSCRIPT-ORCHESTRATOR] 🔧 Setting isDisabledByOwner = true based on error pattern`);
   }
 
   this.updateServiceStats(serviceName, false, extractionTime);
@@ -191,28 +206,42 @@ class EnhancedTranscriptOrchestrator {
   * Throw the most appropriate error based on context
   */
  throwAppropriateError(context) {
-  if (context.isDisabledByOwner) {
+  console.log(`[TRANSCRIPT-ORCHESTRATOR] 🔍 Error context analysis for ${context.videoId}:`);
+  console.log(`[TRANSCRIPT-ORCHESTRATOR] - isDisabledByOwner: ${context.isDisabledByOwner}`);
+  console.log(`[TRANSCRIPT-ORCHESTRATOR] - lastError type: ${context.lastError?.constructor?.name}`);
+  console.log(`[TRANSCRIPT-ORCHESTRATOR] - lastError message: ${context.lastError?.message}`);
+  console.log(`[TRANSCRIPT-ORCHESTRATOR] - servicesAttempted: ${context.servicesAttempted.join(', ')}`);
+
+  // Enhanced disabled transcript detection
+  const isDisabledByFlag = context.isDisabledByOwner;
+  const isDisabledByLastError = context.lastError && TranscriptValidator.isDisabledError(context.lastError);
+  const isGenericVideoIdError = context.lastError?.message === context.videoId;
+
+  console.log(`[TRANSCRIPT-ORCHESTRATOR] - isDisabledByFlag: ${isDisabledByFlag}`);
+  console.log(`[TRANSCRIPT-ORCHESTRATOR] - isDisabledByLastError: ${isDisabledByLastError}`);
+  console.log(`[TRANSCRIPT-ORCHESTRATOR] - isGenericVideoIdError: ${isGenericVideoIdError}`);
+
+  if (isDisabledByFlag || isDisabledByLastError) {
+   console.log(`[TRANSCRIPT-ORCHESTRATOR] 🚫 Throwing TranscriptDisabledError for ${context.videoId}`);
    throw new TranscriptDisabledError(context.videoId);
   }
 
   if (context.lastError instanceof NoValidTranscriptError) {
+   console.log(`[TRANSCRIPT-ORCHESTRATOR] ♻️ Re-throwing existing NoValidTranscriptError for ${context.videoId}`);
    throw context.lastError;
   }
 
-  const comprehensiveError = new NoValidTranscriptError(
-   context.videoId,
-   'extraction_failed',
-   context.lastError?.message || 'All transcript extraction methods failed',
-   {
-    actualLength: 0,
-    minRequired: context.minLength,
-    servicesAttempted: context.servicesAttempted,
-    lastError: context.lastError?.message || 'Unknown error',
-    sessionId: context.sessionId,
-    totalAttempts: this.stats.totalAttempts,
-    timestamp: new Date().toISOString(),
-   }
-  );
+  console.log(`[TRANSCRIPT-ORCHESTRATOR] 💥 Throwing new NoValidTranscriptError for ${context.videoId}`);
+  const comprehensiveError = new NoValidTranscriptError(context.lastError?.message || 'All transcript extraction methods failed', context.videoId, {
+   actualLength: 0,
+   minRequired: context.minLength,
+   servicesAttempted: context.servicesAttempted,
+   lastError: context.lastError?.message || 'Unknown error',
+   sessionId: context.sessionId,
+   totalAttempts: this.stats.totalAttempts,
+   timestamp: new Date().toISOString(),
+   reason: 'extraction_failed',
+  });
 
   throw comprehensiveError;
  }

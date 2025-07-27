@@ -108,7 +108,25 @@ export class TranscriptValidator {
 
  static isDisabledError(error) {
   const message = error.message.toLowerCase();
-  return message.includes('transcript is disabled') || message.includes('no transcript available') || message.includes('no captions available') || message.includes('disabled by owner') || message.includes('captions disabled');
+  const disabledPatterns = [
+   'transcript is disabled',
+   'transcripts disabled',
+   'captions disabled',
+   'no transcript available',
+   'no captions available',
+   'disabled by owner',
+   'captions disabled',
+   'subtitles disabled',
+   'transcript disabled on this video',
+   'transcript is disabled on this video',
+   '🚨 transcript is disabled',
+   'disabled on this video',
+   'no transcript available - all extraction methods failed',
+   'may not have captions or may be restricted',
+   'this video may not have captions',
+  ];
+
+  return disabledPatterns.some((pattern) => message.includes(pattern));
  }
 
  static isNotFoundError(error) {
