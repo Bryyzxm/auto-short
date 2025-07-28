@@ -6,10 +6,9 @@
  "scripts": {
   "start": "NODE_ENV=production node server.js",
   "dev": "NODE_ENV=development nodemon server.js",
-  "postinstall": "echo '🔧 Verifying production environment...' && command -v yt-dlp >/dev/null 2>&1 && echo '✅ yt-dlp found in system PATH' || echo '⚠️  yt-dlp not found - will be installed via Docker'",
+  "postinstall": "pip install --upgrade yt-dlp",
   "verify-ytdlp": "yt-dlp --version && echo '✅ yt-dlp verified' || echo '❌ yt-dlp verification failed'",
-  "health-check": "curl -f http://localhost:${PORT:-5001}/health || exit 1",
-  "prestart": "echo '🚀 Starting AI YouTube to Shorts Backend...'"
+  "health-check": "curl -f http://localhost:${PORT:-5001}/health || exit 1"
  },
  "dependencies": {
   "axios": "^1.11.0",

@@ -22,7 +22,7 @@ const __dirname = path.dirname(__filename);
 
 // Path ke yt-dlp executable - FIXED VERSION 2025.07.21
 // Cross-platform compatibility: use .exe on Windows, system yt-dlp on Linux
-const YT_DLP_PATH = process.platform === 'win32' ? path.join(__dirname, 'yt-dlp.exe') : 'yt-dlp'; // Railway Linux will use system yt-dlp
+const YT_DLP_PATH = process.platform === 'win32' ? path.join(__dirname, 'yt-dlp.exe') : 'yt-dlp'; // Azure Linux will use system yt-dlp
 
 // Configurable cookies path for bypassing YouTube bot detection
 let YTDLP_COOKIES_PATH = process.env.YTDLP_COOKIES_PATH || path.join(__dirname, 'cookies', 'cookies.txt');
@@ -209,7 +209,7 @@ async function executeFfprobeSecurely(filePath, options = {}) {
 }
 
 const app = express();
-const PORT = process.env.PORT || 5001;
+const PORT = process.env.PORT || 8080;
 
 // Helper function to parse time string to seconds
 function parseTimeToSeconds(timeString) {
