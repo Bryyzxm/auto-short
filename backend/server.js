@@ -266,6 +266,11 @@ app.use(express.json({limit: '10mb'}));
 
 app.use(express.urlencoded({extended: true, limit: '10mb'}));
 
+// Log CORS configuration on startup
+console.log('🌐 CORS Configuration:');
+console.log('📋 Allowed Origins:', whitelist);
+console.log('✅ CORS middleware applied');
+
 // 🔧 STARTUP VALIDATION: Verify yt-dlp is available
 async function validateStartup() {
  console.log('🔧 Performing startup validation...');
@@ -330,6 +335,21 @@ app.get('/health', async (req, res) => {
   status: 'healthy',
   uptime: process.uptime(),
   memory: process.memoryUsage(),
+  timestamp: new Date().toISOString(),
+ });
+});
+
+// Root endpoint for basic connectivity test
+app.get('/', (req, res) => {
+ res.json({
+  message: 'AI YouTube to Shorts Backend API',
+  status: 'running',
+  version: '1.0.0',
+  endpoints: ['/health', '/api/intelligent-segments', '/api/enhanced-transcript/:videoId', '/api/shorts', '/api/transcript'],
+  cors: {
+   enabled: true,
+   allowedOrigins: whitelist,
+  },
   timestamp: new Date().toISOString(),
  });
 });
@@ -1684,6 +1704,84 @@ app.get('/api/transcript-health', (req, res) => {
   emergency: emergencyTranscriptService.getStats(),
   timestamp: new Date().toISOString(),
  });
+});
+
+// Missing endpoint: Intelligent segments with AI-powered chunking
+app.post('/api/intelligent-segments', async (req, res) => {
+ const {videoId, targetSegmentCount = 8} = req.body;
+
+ if (!videoId) {
+  return res.status(400).json({error: 'Video ID is required'});
+ }
+
+ try {
+  console.log(`[INTELLIGENT-SEGMENTS] Starting intelligent segmentation for ${videoId}`);
+
+  // Step 1: Get transcript with real timing using enhanced orchestrator
+  const transcriptData = await enhancedTranscriptOrchestrator.extractWithRealTiming(videoId, {
+   lang: ['id', 'en'],
+  });
+
+  if (!transcriptData.hasRealTiming) {
+   throw new Error('Real timing data required for intelligent segmentation');
+  }
+
+  console.log(`[INTELLIGENT-SEGMENTS] Got transcript: ${transcriptData.segments.length} timed segments, ${Math.floor(transcriptData.totalDuration / 60)}m${Math.floor(transcriptData.totalDuration % 60)}s`);
+
+  // Step 2: Create basic intelligent segments (simplified version)
+  const segmentDuration = Math.max(30, Math.min(120, Math.floor(transcriptData.totalDuration / targetSegmentCount)));
+  const segments = [];
+
+  for (let i = 0; i < transcriptData.segments.length; i += Math.ceil(segmentDuration / 5)) {
+   const start = transcriptData.segments[i];
+   const endIndex = Math.min(i + Math.ceil(segmentDuration / 5), transcriptData.segments.length - 1);
+   const end = transcriptData.segments[endIndex];
+
+   if (start && end && end.start - start.start >= 30 && end.start - start.start <= 120) {
+    const segmentText = transcriptData.segments
+     .slice(i, endIndex + 1)
+     .map((s) => s.text)
+     .join(' ');
+
+    segments.push({
+     id: `intelligent-${videoId}-${segments.length + 1}`,
+     title: `Pembahasan Bagian ${segments.length + 1}`,
+     description: `Segmen menarik dengan durasi ${Math.round(end.start - start.start)} detik`,
+     startTimeSeconds: start.start,
+     endTimeSeconds: end.start,
+     duration: Math.round(end.start - start.start),
+     transcriptExcerpt: segmentText,
+     transcriptFull: segmentText,
+     youtubeVideoId: videoId,
+     thumbnailUrl: `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
+     hasRealTiming: true,
+     excerptLength: segmentText.length,
+     fullTextLength: segmentText.length,
+    });
+   }
+  }
+
+  const result = {
+   segments: segments,
+   videoId: videoId,
+   totalSegments: segments.length,
+   averageDuration: Math.round(segments.reduce((sum, s) => sum + s.duration, 0) / segments.length),
+   method: 'Intelligent Chunking (Simplified)',
+   hasRealTiming: true,
+   transcriptQuality: 'HIGH',
+   extractedAt: new Date().toISOString(),
+  };
+
+  console.log(`[INTELLIGENT-SEGMENTS] ✅ Created ${segments.length} intelligent segments (avg: ${result.averageDuration}s)`);
+  res.json(result);
+ } catch (error) {
+  console.error(`[INTELLIGENT-SEGMENTS] ❌ Error for ${videoId}:`, error);
+  res.status(500).json({
+   error: 'Intelligent segmentation failed',
+   message: error.message,
+   videoId: videoId,
+  });
+ }
 });
 
 // Cleanup old files on server start
