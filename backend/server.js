@@ -229,36 +229,19 @@ function parseTimeToSeconds(timeString) {
 // Whitelist of allowed origins
 const whitelist = [
  'https://auto-short.vercel.app', // Production frontend URL
- 'https://auto-short-git-main-bryyzxms-projects.vercel.app', // Vercel preview deployments
  'http://localhost:5173', // Vite dev server
  'http://localhost:3000', // React dev server
- 'http://localhost:8080', // Alternative dev server
- 'http://127.0.0.1:5173', // Alternative localhost
- 'http://127.0.0.1:3000', // Alternative localhost
- 'http://127.0.0.1:8080', // Alternative localhost
 ];
 
 const corsOptions = {
  origin: function (origin, callback) {
-  // Allow requests with no origin (server-to-server requests, mobile apps, etc.)
-  if (!origin) return callback(null, true);
-
-  console.log(`[CORS] Request from origin: ${origin}`);
-  console.log(`[CORS] Allowed origins: ${whitelist.join(', ')}`);
-
-  // Check if the origin is in the whitelist
-  if (whitelist.includes(origin)) {
-   console.log(`[CORS] ✅ Allowed origin: ${origin}`);
+  // Izinkan jika origin ada di whitelist, atau jika permintaan tidak memiliki origin (misal: Postman)
+  if (whitelist.indexOf(origin) !== -1 || !origin) {
    callback(null, true);
   } else {
-   console.warn(`[CORS] ❌ Blocked origin: ${origin}`);
-   callback(new Error('Not allowed by CORS'));
+   callback(new Error('Origin ini tidak diizinkan oleh kebijakan CORS'));
   }
  },
- credentials: true,
- methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
- allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Origin', 'Accept', 'User-Agent', 'Cache-Control', 'Pragma', 'Expires', 'Accept-Language', 'Accept-Encoding', 'Connection', 'Referer'],
- optionsSuccessStatus: 200, // Legacy browser support
 };
 
 app.use(cors(corsOptions));
