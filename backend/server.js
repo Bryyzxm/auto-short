@@ -225,72 +225,40 @@ function parseTimeToSeconds(timeString) {
  }
 }
 
-// Enhanced CORS configuration untuk production
+// Robust CORS configuration for Azure deployment
+// Whitelist of allowed origins
+const whitelist = [
+ 'https://auto-short.vercel.app', // Production frontend URL
+ 'https://auto-short-git-main-bryyzxms-projects.vercel.app', // Vercel preview deployments
+ 'http://localhost:5173', // Vite dev server
+ 'http://localhost:3000', // React dev server
+ 'http://localhost:8080', // Alternative dev server
+ 'http://127.0.0.1:5173', // Alternative localhost
+ 'http://127.0.0.1:3000', // Alternative localhost
+ 'http://127.0.0.1:8080', // Alternative localhost
+];
+
 const corsOptions = {
  origin: function (origin, callback) {
-  // Allow requests with no origin (mobile apps, curl, Postman, etc.)
+  // Allow requests with no origin (server-to-server requests, mobile apps, etc.)
   if (!origin) return callback(null, true);
 
-  // Parse CORS_ORIGINS from environment variable
-  const allowedOrigins = process.env.CORS_ORIGINS
-   ? process.env.CORS_ORIGINS.split(',').map((url) => url.trim())
-   : [
-      'http://localhost:5173', // Vite dev server
-      'http://localhost:3000', // React dev server
-      'https://auto-short.vercel.app', // Production Vercel
-      'https://auto-short-git-main-bryyzxms-projects.vercel.app', // Preview deployments
-      'https://*.vercel.app', // All Vercel domains
-      'http://localhost:*', // All localhost ports
-     ];
-
   console.log(`[CORS] Request from origin: ${origin}`);
-  console.log(`[CORS] Allowed origins: ${allowedOrigins.join(', ')}`);
+  console.log(`[CORS] Allowed origins: ${whitelist.join(', ')}`);
 
-  // More permissive origin checking
-  const isAllowed = allowedOrigins.some((allowedOrigin) => {
-   // Exact match
-   if (origin === allowedOrigin) return true;
-   // Wildcard matching for vercel and localhost
-   if (allowedOrigin.includes('*')) {
-    const regex = new RegExp(allowedOrigin.replace(/\*/g, '.*'));
-    return regex.test(origin);
-   }
-   // Contains check for common domains
-   return origin.includes('.vercel.app') || origin.includes('localhost') || origin.includes('127.0.0.1');
-  });
-
-  if (isAllowed) {
+  // Check if the origin is in the whitelist
+  if (whitelist.includes(origin)) {
+   console.log(`[CORS] ✅ Allowed origin: ${origin}`);
    callback(null, true);
   } else {
-   console.warn(`[CORS] Blocked origin: ${origin}`);
-   // Don't block the request, just log it for now
-   callback(null, true);
+   console.warn(`[CORS] ❌ Blocked origin: ${origin}`);
+   callback(new Error('Not allowed by CORS'));
   }
  },
  credentials: true,
  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
- allowedHeaders: [
-  'Content-Type',
-  'Authorization',
-  'X-Requested-With',
-  'Origin',
-  'Accept',
-  'User-Agent',
-  'user-agent',
-  'Cache-Control',
-  'cache-control',
-  'Pragma',
-  'Expires',
-  'Accept-Language',
-  'accept-language',
-  'Accept-Encoding',
-  'accept-encoding',
-  'Connection',
-  'connection',
-  'Referer',
-  'referer',
- ],
- optionsSuccessStatus: 200, // some legacy browsers (IE11, various SmartTVs) choke on 204
+ allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Origin', 'Accept', 'User-Agent', 'Cache-Control', 'Pragma', 'Expires', 'Accept-Language', 'Accept-Encoding', 'Connection', 'Referer'],
+ optionsSuccessStatus: 200, // Legacy browser support
 };
 
 app.use(cors(corsOptions));
