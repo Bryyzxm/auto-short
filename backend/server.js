@@ -27,7 +27,7 @@ const YT_DLP_PATH = process.platform === 'win32' ? path.join(__dirname, 'yt-dlp.
 // Configurable cookies path for bypassing YouTube bot detection
 let YTDLP_COOKIES_PATH = process.env.YTDLP_COOKIES_PATH || path.join(__dirname, 'cookies', 'cookies.txt');
 
-// Check for cookies content in environment variable and create file if needed
+// Check for cookies content in environment variable and create file if needed too
 const checkAndCreateCookiesFromEnv = () => {
  const cookiesContent = process.env.YTDLP_COOKIES_CONTENT;
 
