@@ -1,28 +1,39 @@
 #!/bin/bash
 
-# Startup script for Node.js application with yt-dlp dependency
-# This script prepares the environment and starts the application on Azure App Service
+# Exit immediately if a command exits with a non-zero status.
+set -e
 
-set -e  # Exit immediately if a command exits with a non-zero status
+# Define the path to the backend directory within the Azure App Service environment.
+# /home/site/wwwroot is the root of your deployed application.
+BACKEND_DIR="/home/site/wwwroot/backend"
 
-echo "Starting application setup..."
+# Check if the backend directory exists
+if [ ! -d "$BACKEND_DIR" ]; then
+  echo "Error: Backend directory not found at $BACKEND_DIR!"
+  exit 1
+fi
 
-# Step 1: Update the system package list
-echo "Updating system package list..."
-apt-get update
+# Navigate to the backend directory.
+cd "$BACKEND_DIR"
 
-# Step 2: Install Python3 and pip (required for yt-dlp)
-echo "Installing Python3 and pip..."
-apt-get install -y python3-pip
+echo "Successfully changed directory to $(pwd)"
 
-# Step 3: Install/upgrade yt-dlp to the latest version
-echo "Installing/upgrading yt-dlp..."
-pip3 install --upgrade yt-dlp
+# Define paths to the vendored yt-dlp binaries
+YT_DLP_LINUX_BINARY="$BACKEND_DIR/vendor/yt-dlp-exec/bin/yt-dlp"
 
-# Step 4: Install Node.js project dependencies
+# Grant execute permissions to the Linux binary. This is crucial for it to run.
+if [ -f "$YT_DLP_LINUX_BINARY" ]; then
+  echo "Found Linux binary, setting execute permissions..."
+  chmod +x "$YT_DLP_LINUX_BINARY"
+  echo "Permissions set for yt-dlp Linux binary."
+else
+    echo "Warning: yt-dlp Linux binary not found at $YT_DLP_LINUX_BINARY"
+fi
+
+# Install project dependencies
 echo "Installing Node.js dependencies..."
 npm install
 
-# Step 5: Start the Node.js application
-echo "Starting the application..."
+# Start the Node.js application
+echo "Starting the Node.js server..."
 npm start
