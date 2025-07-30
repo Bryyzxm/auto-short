@@ -226,12 +226,15 @@ function parseTimeToSeconds(timeString) {
 }
 
 // Robust CORS configuration for Azure deployment
-// Whitelist of allowed origins
-const whitelist = [
- 'https://auto-short.vercel.app', // Production frontend URL
- 'http://localhost:5173', // Vite dev server
- 'http://localhost:3000', // React dev server
+// Dynamic whitelist from environment variables for production flexibility
+const productionOrigins = (process.env.CORS_ORIGINS || 'https://auto-short.vercel.app').split(',').map(origin => origin.trim());
+
+const developmentOrigins = [
+  'http://localhost:5173', // Vite dev server
+  'http://localhost:3000', // React dev server
 ];
+
+const whitelist = [...productionOrigins, ...developmentOrigins];
 
 const corsOptions = {
  origin: function (origin, callback) {
