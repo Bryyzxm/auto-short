@@ -3,7 +3,7 @@
  * Advanced strategies to bypass YouTube bot detection
  */
 
-import youtubedl from 'youtube-dl-exec';
+import youtubedl from 'yt-dlp-exec';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';

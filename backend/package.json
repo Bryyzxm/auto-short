@@ -18,7 +18,7 @@
   "node-fetch": "^3.3.2",
   "uuid": "^9.0.0",
   "youtube-transcript": "^1.0.6",
-  "yt-dlp-exec": "^3.0.0",
+     "yt-dlp-exec": "file:./vendor/yt-dlp-exec",
   "youtubei.js": "^15.0.1"
  },
  "devDependencies": {

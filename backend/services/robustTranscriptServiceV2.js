@@ -7,7 +7,7 @@ import {YoutubeTranscript} from 'youtube-transcript';
 import fetch from 'node-fetch';
 import fs from 'fs';
 import path from 'path';
-import youtubedl from 'youtube-dl-exec';
+import youtubedl from 'yt-dlp-exec';
 import {fileURLToPath} from 'url';
 
 // ES Module compatibility
