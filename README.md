@@ -14,7 +14,7 @@ AI-powered tool untuk mengidentifikasi dan membuat segmen pendek dari video YouT
 ## 🌐 Live Demo
 
 - **Frontend**: https://auto-short.vercel.app
-- **Backend**: https://auto-short-production.up.railway.app
+- **Backend**: https://auto-short.azurewebsites.net
 
 ## 🚀 Quick Start
 
@@ -52,7 +52,7 @@ AI-powered tool untuk mengidentifikasi dan membuat segmen pendek dari video YouT
 VITE_GROQ_API_KEY=your_groq_api_key_here
 
 # Backend URL (untuk production)
-VITE_BACKEND_URL=https://auto-short-production.up.railway.app
+VITE_BACKEND_URL=https://auto-short.azurewebsites.net
 ```
 
 ## 🏗️ Tech Stack
@@ -64,7 +64,7 @@ VITE_BACKEND_URL=https://auto-short-production.up.railway.app
 - Tailwind CSS
 - Groq SDK
 
-### **Backend (Railway)**
+### **Backend (Azure)**
 
 - Node.js + Express
 - yt-dlp (Video processing)
@@ -88,13 +88,9 @@ vercel --prod
 - `VITE_GROQ_API_KEY`
 - `VITE_BACKEND_URL`
 
-### **Railway (Backend)**
+### **Azure (Backend)**
 
-1. Connect GitHub repository
-2. Set environment variables:
-   - `PORT=5001`
-   - `NODE_ENV=production`
-   - `CORS_ORIGINS=https://auto-short.vercel.app`
+Deployment to Azure can be done via the Azure portal or the Azure CLI. You will need to configure the App Service to run a Node.js application and set the necessary environment variables in the configuration settings.
 
 ## 🔧 Configuration
 
@@ -151,7 +147,7 @@ Application menggunakan multi-backend fallback:
 **CORS Errors**:
 
 ```bash
-# Set CORS_ORIGINS di Railway
+# Set CORS_ORIGINS di Azure
 CORS_ORIGINS=https://your-vercel-domain.vercel.app
 ```
 
@@ -164,7 +160,7 @@ VITE_GROQ_API_KEY=your_actual_key
 
 **Backend Not Found**:
 
-- Check Railway deployment status
+- Check Azure deployment status
 - Verify `VITE_BACKEND_URL` di Vercel
 
 ## 📊 Performance

@@ -20,7 +20,7 @@ const getBackendUrl = () => {
  // Smart backend selection:
  // 1. Development: use localhost only if no env var is set
  // 2. If environment variable is set, always use it (for both dev and prod)
- // 3. If no env var, fallback to Railway production
+ // 3. If no env var, fallback to Azure production
 
  if (isDev && !envUrl) {
   // Development without explicit env var: use localhost
@@ -29,7 +29,7 @@ const getBackendUrl = () => {
   return localhostUrl;
  }
 
- const backendUrl = envUrl || 'https://auto-short-production.up.railway.app';
+  const backendUrl = envUrl || 'https://auto-short.azurewebsites.net';
 
  return backendUrl;
 };
