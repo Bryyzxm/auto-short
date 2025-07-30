@@ -5,7 +5,7 @@ import {execFile, execSync, spawn} from 'child_process';
 import {v4 as uuidv4} from 'uuid';
 import path from 'path';
 import fs from 'fs';
-import fetch from 'node-fetch';
+import ytdlp from 'yt-dlp-exec';
 import {fileURLToPath} from 'url';
 import {YoutubeTranscript} from 'youtube-transcript';
 import antiDetectionTranscript from './services/antiDetectionTranscript.js';
@@ -112,61 +112,43 @@ function getRandomUserAgent() {
 
 // Secure yt-dlp execution helper using spawn to prevent shell injection
 async function executeYtDlpSecurely(args, options = {}) {
- return new Promise((resolve, reject) => {
-  const ytdlpPath = process.platform === 'win32' ? YT_DLP_PATH : 'yt-dlp';
+  // Build the command arguments for yt-dlp-exec
+  const finalArgs = {};
+  const commandArray = [];
 
-  // Add cookies support if available and not already in args
-  let finalArgs = [...args];
-
-  // Check if cookies are already specified in the args
-  const hasCookiesArg = args.some((arg) => arg === '--cookies' || arg.startsWith('--cookies='));
-
-  // Add cookies if available and not already specified
-  if (!hasCookiesArg && options.useCookies !== false) {
-   const cookiesPath = options.cookiesPath || YTDLP_COOKIES_PATH;
-   if (validateCookiesFile(cookiesPath)) {
-    console.log(`[SECURE-YTDLP] Adding cookies from: ${cookiesPath}`);
-    finalArgs = ['--cookies', cookiesPath, ...finalArgs];
-   } else {
-    console.log(`[SECURE-YTDLP] No valid cookies file found, proceeding without cookies`);
-   }
+  // Add cookies if available
+  if (options.useCookies !== false) {
+    const cookiesPath = options.cookiesPath || YTDLP_COOKIES_PATH;
+    if (validateCookiesFile(cookiesPath)) {
+      console.log(`[SECURE-YTDLP] Using cookies from: ${cookiesPath}`);
+      finalArgs.cookies = cookiesPath;
+    }
   }
 
-  // Ensure all arguments are strings and properly escaped
-  const sanitizedArgs = finalArgs.map((arg) => String(arg).trim());
-
-  console.log(`[SECURE-YTDLP] Executing: ${ytdlpPath} ${sanitizedArgs.join(' ')}`);
-
-  const child = spawn(ytdlpPath, sanitizedArgs, {
-   stdio: ['pipe', 'pipe', 'pipe'],
-   timeout: options.timeout || 60000,
-   maxBuffer: options.maxBuffer || 1024 * 1024 * 10, // 10MB
-   ...options,
+  // The first argument is the URL, the rest are flags.
+  // yt-dlp-exec takes flags as properties on an options object.
+  // We will separate the URL from the flags.
+  const url = args.find(arg => arg.startsWith('http'));
+  args.forEach(arg => {
+    if (arg.startsWith('--')) {
+      const [key, value] = arg.substring(2).split('=');
+      if (value) {
+        finalArgs[key] = value;
+      } else {
+        finalArgs[key] = true;
+      }
+    } else if (!arg.startsWith('http')) {
+        commandArray.push(arg); // For commands like --version
+    }
   });
 
-  let stdout = '';
-  let stderr = '';
-
-  child.stdout.on('data', (data) => {
-   stdout += data.toString();
-  });
-
-  child.stderr.on('data', (data) => {
-   stderr += data.toString();
-  });
-
-  child.on('close', (code) => {
-   if (code === 0) {
-    resolve(stdout);
-   } else {
-    reject(new Error(`yt-dlp failed with code ${code}: ${stderr}`));
-   }
-  });
-
-  child.on('error', (error) => {
-   reject(new Error(`Failed to start yt-dlp process: ${error.message}`));
-  });
- });
+  console.log(`[SECURE-YTDLP] Executing yt-dlp with URL: ${url || 'N/A'} and args: ${JSON.stringify(finalArgs)}`);
+  
+  // The main argument for yt-dlp is the URL, which is passed as the first argument to the function.
+  // Other arguments are passed in the options object.
+  const promise = ytdlp(url || commandArray[0], finalArgs);
+  
+  return promise;
 }
 
 // Secure ffprobe execution helper using spawn to prevent shell injection
@@ -363,8 +345,9 @@ app.get('/api/debug/environment', async (req, res) => {
   // Test yt-dlp availability
   try {
    const versionArgs = ['--version'];
-   const version = await executeYtDlpSecurely(versionArgs, {timeout: 5000, useCookies: false});
-   debugInfo.ytdlp_version = version.trim();
+   const testResult = await executeYtDlpSecurely(versionArgs, {timeout: 5000, useCookies: false});
+
+   debugInfo.ytdlp_version = testResult.trim();
    debugInfo.ytdlp_status = 'available';
   } catch (e) {
    debugInfo.ytdlp_status = 'error';
@@ -1156,7 +1139,7 @@ async function tryAntiDetectionExtraction(videoId, lang) {
 async function tryYouTubeTranscriptAPI(videoId, langCode, countryCode) {
  const transcript = await YoutubeTranscript.fetchTranscript(videoId, {
   lang: langCode,
-  country: countryCode,
+  country: langCode === 'id' ? 'ID' : 'US',
  });
 
  if (!transcript || transcript.length === 0) {

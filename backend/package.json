@@ -4,9 +4,8 @@
  "main": "server.js",
  "type": "module",
  "scripts": {
-  "start": "NODE_ENV=production node server.js",
+  "start": "node server.js",
   "dev": "NODE_ENV=development nodemon server.js",
-  "postinstall": "pip install --upgrade yt-dlp",
   "verify-ytdlp": "yt-dlp --version && echo '✅ yt-dlp verified' || echo '❌ yt-dlp verification failed'",
   "health-check": "curl -f http://localhost:${PORT:-5001}/health || exit 1"
  },
@@ -19,7 +18,8 @@
   "node-fetch": "^3.3.2",
   "uuid": "^9.0.0",
   "youtube-dl-exec": "^2.2.6",
-  "youtube-transcript": "^1.2.1",
+  "youtube-transcript": "^1.0.6",
+  "yt-dlp-exec": "^3.0.2",
   "youtubei.js": "^15.0.1"
  },
  "devDependencies": {
