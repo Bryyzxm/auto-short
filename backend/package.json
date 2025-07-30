@@ -17,9 +17,8 @@
   "groq-sdk": "^0.27.0",
   "node-fetch": "^3.3.2",
   "uuid": "^9.0.0",
-  "youtube-dl-exec": "^2.2.6",
   "youtube-transcript": "^1.0.6",
-  "yt-dlp-exec": "^3.0.2",
+  "yt-dlp-exec": "^3.0.0",
   "youtubei.js": "^15.0.1"
  },
  "devDependencies": {
