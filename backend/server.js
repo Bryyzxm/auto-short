@@ -1266,15 +1266,24 @@ app.get('/api/video-metadata', async (req, res) => {
 
   console.log(`[video-metadata] Using yt-dlp at: ${YT_DLP_PATH}`);
 
-  // Enhanced yt-dlp command with better reliability
-  const ytDlpMetadataArgs = ['--dump-json', '--no-check-certificate', '--no-warnings', '--user-agent', getRandomUserAgent(), '--extractor-args', 'youtube:player_client=web,android', '--retries', '3', '--socket-timeout', '30', videoUrl];
+  const args = [
+        '--cookies', YTDLP_COOKIES_PATH,
+        '--dump-json',
+        '--no-check-certificate',
+        '--no-warnings',
+        '--user-agent', getRandomUserAgent(),
+        '--extractor-args', 'youtube:player_client=web,android',
+        '--retries', '3',
+        '--socket-timeout', '30',
+        videoUrl // Add videoUrl to the arguments array
+      ];
 
-  console.log(`[video-metadata] yt-dlp command: ${process.platform === 'win32' ? YT_DLP_PATH : 'yt-dlp'} ${ytDlpMetadataArgs.join(' ')}`);
+  console.log(`[video-metadata] yt-dlp command: ${process.platform === 'win32' ? YT_DLP_PATH : 'yt-dlp'} ${args.join(' ')}`);
 
   // Gunakan yt-dlp untuk mendapatkan metadata tanpa download
-  const result = await executeYtDlpSecurely(ytDlpMetadataArgs, {
-   timeout: 60000, // Increase timeout to 60 seconds
-   maxBuffer: 1024 * 1024 * 10, // 10MB buffer
+  const result = await executeYtDlpSecurely(args, {
+    timeout: 60000, // Increase timeout to 60 seconds
+    maxBuffer: 1024 * 1024 * 10, // 10MB buffer
   });
 
   if (!result || result.trim().length === 0) {
