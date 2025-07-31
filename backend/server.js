@@ -1687,7 +1687,7 @@ app.post('/api/intelligent-segments', async (req, res) => {
   console.log(`[INTELLIGENT-SEGMENTS] Starting intelligent segmentation for ${videoId}`);
 
   // Step 1: Get transcript with real timing using enhanced orchestrator
-  const transcriptData = await enhancedTranscriptOrchestrator.extractWithRealTiming(videoId, {
+    const transcriptData = await enhancedTranscriptOrchestrator.extract(videoId, {
    lang: ['id', 'en'],
   });
 
