@@ -1,4 +1,4 @@
-import axios from 'axios';
+const axios = require('axios');
 
 /**
  * Fetches and filters healthy Invidious instances from the official API
@@ -93,7 +93,7 @@ function shuffleArray(array) {
  */
 function selectBestCaptions(captions) {
  const preferredLanguages = ['en', 'id'];
- 
+
  for (const lang of preferredLanguages) {
   const caption = captions.find((caption) => caption.language_code === lang);
   if (caption) {
@@ -145,7 +145,7 @@ async function fetchFromInstance(hostname, videoId) {
   return null;
  }
 
- const { captions } = response.data;
+ const {captions} = response.data;
  if (!captions || !Array.isArray(captions)) {
   console.warn(`Invalid captions format from ${hostname}`);
   return null;
@@ -197,4 +197,4 @@ async function fetchTranscriptViaInvidious(videoId) {
  throw new Error('Failed to fetch transcript from all available Invidious instances');
 }
 
-export {getHealthyInvidiousInstances, fetchTranscriptViaInvidious};
+module.exports = {getHealthyInvidiousInstances, fetchTranscriptViaInvidious};

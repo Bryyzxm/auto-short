@@ -4,7 +4,7 @@
  */
 
 // Base error class for all transcript-related errors
-export class NoValidTranscriptError extends Error {
+class NoValidTranscriptError extends Error {
  constructor(message, videoId, details = {}) {
   super(message);
   this.name = 'NoValidTranscriptError';
@@ -16,7 +16,7 @@ export class NoValidTranscriptError extends Error {
 }
 
 // Specific error when transcript is too short to be useful
-export class TranscriptTooShortError extends NoValidTranscriptError {
+class TranscriptTooShortError extends NoValidTranscriptError {
  constructor(videoId, actualLength, minRequired = 250) {
   const message = `A valid transcript is not available for this video. The extracted transcript is too short (${actualLength} characters, minimum required: ${minRequired}).`;
   super(message, videoId, {
@@ -29,7 +29,7 @@ export class TranscriptTooShortError extends NoValidTranscriptError {
 }
 
 // Specific error when video owner has disabled transcripts/captions
-export class TranscriptDisabledError extends NoValidTranscriptError {
+class TranscriptDisabledError extends NoValidTranscriptError {
  constructor(videoId) {
   const message = 'A valid transcript is not available for this video. The video owner has disabled captions/transcripts.';
   super(message, videoId, {
@@ -40,7 +40,7 @@ export class TranscriptDisabledError extends NoValidTranscriptError {
 }
 
 // Specific error when no transcript can be found despite trying multiple methods
-export class TranscriptNotFoundError extends NoValidTranscriptError {
+class TranscriptNotFoundError extends NoValidTranscriptError {
  constructor(videoId, servicesAttempted = []) {
   const message = 'A valid transcript is not available for this video. No captions were found despite trying multiple extraction methods.';
   super(message, videoId, {
@@ -51,7 +51,7 @@ export class TranscriptNotFoundError extends NoValidTranscriptError {
  }
 }
 
-export class TranscriptExtractionError extends Error {
+class TranscriptExtractionError extends Error {
  constructor(message, videoId, details = {}) {
   super(message);
   this.name = 'TranscriptExtractionError';
@@ -66,7 +66,7 @@ export class TranscriptExtractionError extends Error {
  * ENHANCED TRANSCRIPT VALIDATOR
  * Validates transcript quality and length before processing
  */
-export class TranscriptValidator {
+class TranscriptValidator {
  static validate(transcriptData, videoId, minLength = 250) {
   // Check if transcript data exists
   if (!transcriptData) {
@@ -134,3 +134,12 @@ export class TranscriptValidator {
   return message.includes('not found') || message.includes('unavailable') || message.includes('no subtitles') || message.includes('no caption');
  }
 }
+
+module.exports = {
+    NoValidTranscriptError,
+    TranscriptTooShortError,
+    TranscriptDisabledError,
+    TranscriptNotFoundError,
+    TranscriptExtractionError,
+    TranscriptValidator,
+};

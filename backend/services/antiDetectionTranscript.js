@@ -3,14 +3,10 @@
  * Advanced strategies to bypass YouTube bot detection
  */
 
-import youtubedl from 'yt-dlp-exec';
-import fs from 'fs';
-import path from 'path';
-import crypto from 'crypto';
-import {fileURLToPath} from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const youtubedl = require('yt-dlp-exec');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
 
 class AntiDetectionTranscriptExtractor {
  constructor() {
@@ -126,6 +122,11 @@ class AntiDetectionTranscriptExtractor {
   }
 
   return sessions;
+ }
+
+ // Alias for compatibility with orchestrator
+ async extract(videoId, options = {}) {
+  return this.extractTranscript(videoId, options);
  }
 
  async extractTranscript(videoId, options = {}) {
@@ -924,4 +925,4 @@ class AntiDetectionTranscriptExtractor {
  }
 }
 
-export default new AntiDetectionTranscriptExtractor();
+module.exports = new AntiDetectionTranscriptExtractor();

@@ -1,24 +1,19 @@
-import 'dotenv/config';
-import express from 'express';
-import cors from 'cors';
-import {execFile, execSync, spawn} from 'child_process';
-import {v4 as uuidv4} from 'uuid';
-import path from 'path';
-import fs from 'fs';
-import ytdlp from 'yt-dlp-exec';
-import {fileURLToPath} from 'url';
-import {YoutubeTranscript} from 'youtube-transcript';
-import antiDetectionTranscript from './services/antiDetectionTranscript.js';
-import robustTranscriptServiceV2 from './services/robustTranscriptServiceV2.js';
-import alternativeTranscriptService from './services/alternativeTranscriptService.js';
-import emergencyTranscriptService from './services/emergencyTranscriptService.js';
-import enhancedTranscriptOrchestrator from './services/enhancedTranscriptOrchestrator.js';
-import {fetchTranscriptViaInvidious} from './services/invidious.service.js';
-import {TranscriptDisabledError, TranscriptTooShortError, TranscriptNotFoundError} from './services/transcriptErrors.js';
-
-// Polyfill __dirname for ES module
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const {execFile, execSync, spawn} = require('child_process');
+const {v4: uuidv4} = require('uuid');
+const path = require('path');
+const fs = require('fs');
+const ytdlp = require('yt-dlp-exec');
+const {YoutubeTranscript} = require('youtube-transcript');
+const antiDetectionTranscript = require('./services/antiDetectionTranscript.js');
+const robustTranscriptServiceV2 = require('./services/robustTranscriptServiceV2.js');
+const alternativeTranscriptService = require('./services/alternativeTranscriptService.js');
+const emergencyTranscriptService = require('./services/emergencyTranscriptService.js');
+const enhancedTranscriptOrchestrator = require('./services/enhancedTranscriptOrchestrator.js');
+const {fetchTranscriptViaInvidious} = require('./services/invidious.service.js');
+const {TranscriptDisabledError, TranscriptTooShortError, TranscriptNotFoundError} = require('./services/transcriptErrors.js');
 
 // Path ke yt-dlp executable - FIXED VERSION 2025.07.21
 // Cross-platform compatibility: use .exe on Windows, system yt-dlp on Linux
@@ -112,43 +107,87 @@ function getRandomUserAgent() {
 
 // Secure yt-dlp execution helper using spawn to prevent shell injection
 async function executeYtDlpSecurely(args, options = {}) {
-  // Build the command arguments for yt-dlp-exec
-  const finalArgs = {};
-  const commandArray = [];
+ // Build the command arguments for yt-dlp-exec
+ const finalArgs = {};
+ let url = null;
 
-  // Add cookies if available
-  if (options.useCookies !== false) {
-    const cookiesPath = options.cookiesPath || YTDLP_COOKIES_PATH;
-    if (validateCookiesFile(cookiesPath)) {
-      console.log(`[SECURE-YTDLP] Using cookies from: ${cookiesPath}`);
-      finalArgs.cookies = cookiesPath;
-    }
+ // Add cookies if available
+ if (options.useCookies !== false) {
+  const cookiesPath = options.cookiesPath || YTDLP_COOKIES_PATH;
+  if (validateCookiesFile(cookiesPath)) {
+   console.log(`[SECURE-YTDLP] Using cookies from: ${cookiesPath}`);
+   finalArgs.cookies = cookiesPath;
+  }
+ }
+
+ // Parse arguments properly
+ for (let i = 0; i < args.length; i++) {
+  const arg = args[i];
+
+  // Detect URL
+  if (arg.startsWith('http')) {
+   url = arg;
+   continue;
   }
 
-  // The first argument is the URL, the rest are flags.
-  // yt-dlp-exec takes flags as properties on an options object.
-  // We will separate the URL from the flags.
-  const url = args.find(arg => arg.startsWith('http'));
-  args.forEach(arg => {
-    if (arg.startsWith('--')) {
-      const [key, value] = arg.substring(2).split('=');
-      if (value) {
-        finalArgs[key] = value;
-      } else {
-        finalArgs[key] = true;
-      }
-    } else if (!arg.startsWith('http')) {
-        commandArray.push(arg); // For commands like --version
-    }
-  });
+  // Handle flags
+  if (arg.startsWith('--')) {
+   const flagName = arg.substring(2);
 
-  console.log(`[SECURE-YTDLP] Executing yt-dlp with URL: ${url || 'N/A'} and args: ${JSON.stringify(finalArgs)}`);
-  
-  // The main argument for yt-dlp is the URL, which is passed as the first argument to the function.
-  // Other arguments are passed in the options object.
-  const promise = ytdlp(url || commandArray[0], finalArgs);
-  
-  return promise;
+   // Handle flags with values
+   if (i + 1 < args.length && !args[i + 1].startsWith('--') && !args[i + 1].startsWith('http')) {
+    const value = args[i + 1];
+
+    // Convert kebab-case to camelCase for yt-dlp-exec
+    const camelKey = flagName.replace(/-([a-z])/g, (g) => g[1].toUpperCase());
+
+    // Special handling for specific flags
+    if (flagName === 'user-agent') {
+     finalArgs.userAgent = value;
+    } else if (flagName === 'extractor-args') {
+     finalArgs.extractorArgs = value;
+    } else if (flagName === 'sub-lang') {
+     finalArgs.subLang = value;
+    } else if (flagName === 'sub-format') {
+     finalArgs.subFormat = value;
+    } else if (flagName === 'socket-timeout') {
+     finalArgs.socketTimeout = parseInt(value);
+    } else {
+     finalArgs[camelKey] = value;
+    }
+    i++; // Skip next argument as it's the value
+   } else {
+    // Boolean flags
+    const camelKey = flagName.replace(/-([a-z])/g, (g) => g[1].toUpperCase());
+
+    // Special handling for boolean flags
+    if (flagName === 'dump-json') {
+     finalArgs.dumpJson = true;
+    } else if (flagName === 'no-check-certificate') {
+     finalArgs.noCheckCertificate = true;
+    } else if (flagName === 'no-warnings') {
+     finalArgs.noWarnings = true;
+    } else if (flagName === 'write-subs') {
+     finalArgs.writeSubs = true;
+    } else if (flagName === 'write-auto-subs') {
+     finalArgs.writeAutoSubs = true;
+    } else if (flagName === 'skip-download') {
+     finalArgs.skipDownload = true;
+    } else {
+     finalArgs[camelKey] = true;
+    }
+   }
+  }
+ }
+
+ console.log(`[SECURE-YTDLP] Executing yt-dlp with URL: ${url} and args: ${JSON.stringify(finalArgs)}`);
+
+ try {
+  const result = await ytdlp(url, finalArgs);
+  return result;
+ } catch (error) {
+  throw new Error(`yt-dlp failed: ${error.message}`);
+ }
 }
 
 // Secure ffprobe execution helper using spawn to prevent shell injection
@@ -209,11 +248,11 @@ function parseTimeToSeconds(timeString) {
 
 // Robust CORS configuration for Azure deployment
 // Dynamic whitelist from environment variables for production flexibility
-const productionOrigins = (process.env.CORS_ORIGINS || 'https://auto-short.vercel.app').split(',').map(origin => origin.trim());
+const productionOrigins = (process.env.CORS_ORIGINS || 'https://auto-short.vercel.app').split(',').map((origin) => origin.trim());
 
 const developmentOrigins = [
-  'http://localhost:5173', // Vite dev server
-  'http://localhost:3000', // React dev server
+ 'http://localhost:5173', // Vite dev server
+ 'http://localhost:3000', // React dev server
 ];
 
 const whitelist = [...productionOrigins, ...developmentOrigins];
@@ -1267,23 +1306,28 @@ app.get('/api/video-metadata', async (req, res) => {
   console.log(`[video-metadata] Using yt-dlp at: ${YT_DLP_PATH}`);
 
   const args = [
-        '--cookies', YTDLP_COOKIES_PATH,
-        '--dump-json',
-        '--no-check-certificate',
-        '--no-warnings',
-        '--user-agent', getRandomUserAgent(),
-        '--extractor-args', 'youtube:player_client=web,android',
-        '--retries', '3',
-        '--socket-timeout', '30',
-        videoUrl // Add videoUrl to the arguments array
-      ];
+   '--cookies',
+   YTDLP_COOKIES_PATH,
+   '--dump-json',
+   '--no-check-certificate',
+   '--no-warnings',
+   '--user-agent',
+   getRandomUserAgent(),
+   '--extractor-args',
+   'youtube:player_client=web,android',
+   '--retries',
+   '3',
+   '--socket-timeout',
+   '30',
+   videoUrl, // Add videoUrl to the arguments array
+  ];
 
   console.log(`[video-metadata] yt-dlp command: ${process.platform === 'win32' ? YT_DLP_PATH : 'yt-dlp'} ${args.join(' ')}`);
 
   // Gunakan yt-dlp untuk mendapatkan metadata tanpa download
   const result = await executeYtDlpSecurely(args, {
-    timeout: 60000, // Increase timeout to 60 seconds
-    maxBuffer: 1024 * 1024 * 10, // 10MB buffer
+   timeout: 60000, // Increase timeout to 60 seconds
+   maxBuffer: 1024 * 1024 * 10, // 10MB buffer
   });
 
   if (!result || result.trim().length === 0) {
@@ -1468,7 +1512,7 @@ app.get('/api/enhanced-transcript/:videoId', async (req, res) => {
 
  try {
   // Use the enhanced orchestrator for robust transcript extraction
-  const result = await enhancedTranscriptOrchestrator.extractTranscript(videoId, {
+  const result = await enhancedTranscriptOrchestrator.extract(videoId, {
    minLength: 50, // Lower threshold for simple transcript endpoint
    lang: lang ? lang.split(',') : ['id', 'en'],
   });
@@ -1572,7 +1616,7 @@ app.get('/api/emergency-transcript/:videoId', async (req, res) => {
  console.log(`[EMERGENCY-API] Simple transcript request for: ${videoId}`);
 
  try {
-  const result = await emergencyTranscriptService.extractTranscript(videoId);
+  const result = await emergencyTranscriptService.extract(videoId);
 
   if (result.isFallback) {
    console.log(`[EMERGENCY-API] ⚠️ Returning fallback data for ${videoId}`);
@@ -1605,7 +1649,7 @@ app.get('/api/transcript-diagnostics/:videoId', async (req, res) => {
 
  // Test Emergency Service
  try {
-  const emergencyResult = await emergencyTranscriptService.extractTranscript(videoId);
+  const emergencyResult = await emergencyTranscriptService.extract(videoId);
   tests.emergency = {success: true, segments: emergencyResult.segments.length, method: emergencyResult.method};
   successful.push('emergency');
  } catch (error) {
@@ -1614,7 +1658,7 @@ app.get('/api/transcript-diagnostics/:videoId', async (req, res) => {
 
  // Test Alternative Service
  try {
-  const altResult = await alternativeTranscriptService.extractTranscript(videoId);
+  const altResult = await alternativeTranscriptService.extract(videoId);
   tests.alternative = {success: true, segments: altResult.segments.length, method: altResult.method};
   successful.push('alternative');
  } catch (error) {
@@ -1632,7 +1676,7 @@ app.get('/api/transcript-diagnostics/:videoId', async (req, res) => {
 
  // Test Enhanced Orchestrator
  try {
-  const orchestratorResult = await enhancedTranscriptOrchestrator.extractTranscript(videoId, {minLength: 50});
+  const orchestratorResult = await enhancedTranscriptOrchestrator.extract(videoId, {minLength: 50});
   tests.orchestrator = {
    success: true,
    segments: orchestratorResult.segments.length,
@@ -1696,7 +1740,7 @@ app.post('/api/intelligent-segments', async (req, res) => {
   console.log(`[INTELLIGENT-SEGMENTS] Starting intelligent segmentation for ${videoId}`);
 
   // Step 1: Get transcript with real timing using enhanced orchestrator
-    const transcriptData = await enhancedTranscriptOrchestrator.extract(videoId, {
+  const transcriptData = await enhancedTranscriptOrchestrator.extract(videoId, {
    lang: ['id', 'en'],
   });
 
@@ -1763,6 +1807,38 @@ app.post('/api/intelligent-segments', async (req, res) => {
 });
 
 // Cleanup old files on server start
+// Test endpoint for transcript orchestrator
+app.get('/api/test-transcript/:videoId', async (req, res) => {
+ const {videoId} = req.params;
+
+ try {
+  console.log(`[TEST-ENDPOINT] Testing transcript extraction for ${videoId}`);
+
+  // Test the enhanced orchestrator
+  const result = await enhancedTranscriptOrchestrator.extract(videoId, {
+   lang: ['id', 'en'],
+   minLength: 50,
+  });
+
+  console.log(`[TEST-ENDPOINT] ✅ Success: ${result.segments?.length || 0} segments`);
+
+  return res.json({
+   success: true,
+   segments: result.segments?.length || 0,
+   totalText: result.segments?.map((s) => s.text).join(' ').length || 0,
+   source: result.source || 'unknown',
+   method: result.method || 'unknown',
+  });
+ } catch (error) {
+  console.error(`[TEST-ENDPOINT] ❌ Failed: ${error.message}`);
+  return res.status(500).json({
+   success: false,
+   error: error.message,
+   type: error.constructor.name,
+  });
+ }
+});
+
 cleanupOldVttFiles();
 cleanupOldMp4Files();
 
