@@ -6,6 +6,10 @@ const {YoutubeTranscript} = require('youtube-transcript');
  * @returns {Promise<Array<{text: string, start: number, duration: number}>>} A promise that resolves to the transcript segments.
  */
 async function extract(videoId) {
+ const startTime = Date.now();
+ stats.totalRequests++;
+ stats.lastRequestTime = new Date().toISOString();
+
  console.log(`Emergency Transcript Service: Attempting to fetch transcript for videoId: ${videoId}`);
 
  // Try multiple languages in order of preference
@@ -21,6 +25,10 @@ async function extract(videoId) {
 
    if (transcript && transcript.length > 0) {
     console.log(`Emergency Transcript Service: Successfully fetched ${transcript.length} segments in ${lang}.`);
+
+    stats.successfulRequests++;
+    stats.avgResponseTime = (stats.avgResponseTime * (stats.totalRequests - 1) + (Date.now() - startTime)) / stats.totalRequests;
+
     // The library already returns the desired format { text, duration, offset }
     // We just need to rename 'offset' to 'start' for consistency
     return {
@@ -41,8 +49,32 @@ async function extract(videoId) {
   }
  }
 
+ stats.failedRequests++;
+ stats.errors.push({
+  videoId,
+  timestamp: new Date().toISOString(),
+  error: 'No transcript found in any supported language',
+ });
+
  console.error('Emergency Transcript Service: No transcript found in any supported language.');
  throw new Error('No transcript found by emergency service.');
 }
 
-module.exports = {extract};
+// Add stats tracking for server.js compatibility
+const stats = {
+ totalRequests: 0,
+ successfulRequests: 0,
+ failedRequests: 0,
+ avgResponseTime: 0,
+ lastRequestTime: null,
+ errors: [],
+};
+
+function getStats() {
+ return {
+  ...stats,
+  successRate: stats.totalRequests > 0 ? ((stats.successfulRequests / stats.totalRequests) * 100).toFixed(2) : '0.00',
+ };
+}
+
+module.exports = {extract, getStats};

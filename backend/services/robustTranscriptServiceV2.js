@@ -30,9 +30,15 @@ async function extract(videoId, options = {}) {
  console.log(`[ROBUST-V2] Checking cookies path: ${COOKIES_PATH}`);
  console.log(`[ROBUST-V2] Cookies file exists: ${fs.existsSync(COOKIES_PATH)}`);
  if (!fs.existsSync(COOKIES_PATH)) {
-  throw new Error('Cookies file not found for robust extraction.');
- }
+  console.log(`[ROBUST-V2] ⚠️ Cookies file not found at: ${COOKIES_PATH}`);
 
+  // In production, provide helpful error message
+  if (process.env.NODE_ENV === 'production') {
+   throw new Error('Production authentication required. Please configure YouTube cookies for transcript access.');
+  } else {
+   throw new Error('Cookies file not found for robust extraction.');
+  }
+ }
  const tempDir = path.join(process.cwd(), 'temp');
  if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
  const tempFile = path.join(tempDir, `${videoId}-${Date.now()}`);

@@ -3,6 +3,9 @@ const fs = require('fs-extra');
 const path = require('path');
 const {v4: uuidv4} = require('uuid');
 
+// Cookies path configuration
+const COOKIES_PATH = process.env.YTDLP_COOKIES_PATH || path.join(__dirname, '..', 'cookies', 'cookies.txt');
+
 // A simple VTT parser
 function parseVTT(vttContent) {
  const lines = vttContent.split('\n');
@@ -69,6 +72,14 @@ async function extract(videoId) {
   tempFile.replace('.en.vtt', ''), // ytdlp appends lang and extension
   videoUrl,
  ];
+
+ // Add cookies if available
+ if (fs.existsSync(COOKIES_PATH)) {
+  args.push('--cookies', COOKIES_PATH);
+  console.log(`Alternative Transcript Service: Using cookies from ${COOKIES_PATH}`);
+ } else {
+  console.log(`Alternative Transcript Service: No cookies file found at ${COOKIES_PATH}`);
+ }
 
  try {
   await ytdlp.exec(args);
