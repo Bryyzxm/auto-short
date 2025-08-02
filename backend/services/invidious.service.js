@@ -135,7 +135,7 @@ async function fetchFromInstance(hostname, videoId) {
  console.log(`Trying instance: ${hostname}`);
 
  const response = await axios.get(apiUrl, {
-  timeout: 5000,
+  timeout: 7000, // Quick timeout to skip unresponsive instances
   headers: {
    'User-Agent': 'YouTube-to-Shorts-Segmenter/1.0',
   },

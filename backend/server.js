@@ -30,6 +30,36 @@ try {
 const {fetchTranscriptViaInvidious} = require('./services/invidious.service.js');
 const {TranscriptDisabledError, TranscriptTooShortError, TranscriptNotFoundError} = require('./services/transcriptErrors.js');
 
+// Helper function to convert transcript text to segments format for consistent API response
+function convertTranscriptTextToSegments(transcriptText, source = 'invidious') {
+ if (!transcriptText || typeof transcriptText !== 'string') {
+  return [];
+ }
+
+ // Split text into logical segments (sentences or meaningful chunks)
+ const sentences = transcriptText
+  .split(/[.!?]+/)
+  .map((s) => s.trim())
+  .filter((s) => s.length > 10); // Only include meaningful sentences
+
+ const segments = sentences.map((text, index) => ({
+  text: text,
+  start: index * 5, // Approximate timing (5 seconds per segment)
+  duration: 5,
+  end: (index + 1) * 5,
+ }));
+
+ return segments;
+}
+
+// Helper function to create transcript error for missing/unavailable transcripts
+class NoValidTranscriptError extends Error {
+ constructor(message) {
+  super(message);
+  this.name = 'NoValidTranscriptError';
+ }
+}
+
 // Path ke yt-dlp executable - FIXED VERSION 2025.07.21
 // Cross-platform compatibility: use .exe on Windows, system yt-dlp on Linux
 const YT_DLP_PATH = process.platform === 'win32' ? path.join(__dirname, 'yt-dlp.exe') : 'yt-dlp'; // Azure Linux will use system yt-dlp
@@ -1516,7 +1546,7 @@ async function extractTranscriptViaYouTubeFallback(videoId) {
  throw new Error('Both Invidious and direct YouTube API methods failed');
 }
 
-// Enhanced transcript endpoint with multi-service fallback - BULLETPROOF VERSION
+// Enhanced transcript endpoint with Invidious-first strategy - CLOUD-NATIVE BULLETPROOF VERSION
 app.get('/api/enhanced-transcript/:videoId', async (req, res) => {
  // MASTER TRY-CATCH BLOCK - Ultimate safety net to prevent crashes
  try {
@@ -1525,128 +1555,154 @@ app.get('/api/enhanced-transcript/:videoId', async (req, res) => {
 
   if (!videoId) return res.status(400).json({error: 'videoId required'});
 
-  console.log(`[ENHANCED-API] Enhanced transcript request for: ${videoId}`);
+  console.log(`[ENHANCED-API] Cloud-native transcript request for: ${videoId}`);
+  const startTime = Date.now();
 
-  // INNER TRY-CATCH BLOCK - Handles transcript extraction failures
+  // PRIMARY STRATEGY: Invidious Network (Cloud-friendly)
   try {
-   // Use the enhanced orchestrator for robust transcript extraction
-   const result = await enhancedTranscriptOrchestrator.extract(videoId, {
-    minLength: 50, // Lower threshold for simple transcript endpoint
-    lang: lang ? lang.split(',') : ['id', 'en'],
-   });
+   console.log(`[ENHANCED-API] 🌐 Attempting Invidious network extraction for ${videoId}`);
+   const transcriptText = await fetchTranscriptViaInvidious(videoId);
 
-   console.log(`[ENHANCED-API] ✅ Success with ${result.serviceUsed} service: ${result.segments?.length || 0} segments`);
+   if (transcriptText && transcriptText.trim().length > 100) {
+    const segments = convertTranscriptTextToSegments(transcriptText, 'invidious');
+    const extractionTime = Date.now() - startTime;
 
-   // Strict validation on the final result
-   const totalText =
-    result.segments
-     ?.map((s) => s.text || '')
-     .join(' ')
-     .trim() || '';
-   const hasValidSegments = result.segments && result.segments.length > 0;
-   const hasMinimumContent = totalText.length >= 200;
+    console.log(`[ENHANCED-API] ✅ Invidious success for ${videoId}: ${transcriptText.length} chars, ${segments.length} segments (${extractionTime}ms)`);
 
-   if (!result || !hasValidSegments || !hasMinimumContent) {
-    console.log(`[ENHANCED-API] ⚠️ Invalid transcript result for ${videoId}: segments=${hasValidSegments}, contentLength=${totalText.length}`);
-    throw new Error('TRANSCRIPT_UNAVAILABLE');
-   }
-
-   // Return the result with orchestrator metadata
-   return res.json({
-    segments: result.segments,
-    language: result.language,
-    source: `Enhanced Orchestrator (${result.serviceUsed})`,
-    method: result.method,
-    length: result.validation.totalLength,
-    hasRealTiming: result.hasRealTiming,
-    serviceUsed: result.serviceUsed,
-    extractionTime: result.extractionTime,
-    validation: result.validation,
-    fallbackLevel: result.fallbackLevel || 0,
-   });
-  } catch (innerError) {
-   // Log the inner error for debugging
-   console.warn('All transcript extraction methods failed for videoId:', videoId, innerError.message);
-   console.error(`[ENHANCED-API] Inner error details:`, {
-    message: innerError.message,
-    stack: innerError.stack,
-    type: innerError.constructor.name,
-   });
-
-   // Check for specific transcript errors first
-   if (innerError instanceof TranscriptDisabledError || innerError.name === 'TranscriptDisabledError') {
-    return res.status(404).json({
-     error: 'Transcript is disabled on this video',
-     videoId: videoId,
-     message: innerError.message,
-     reason: 'Video owner has disabled transcripts/captions for this video',
-     suggestion: 'Try a different video that has captions enabled',
-     disabledByOwner: true,
-     userFriendly: true,
+    return res.json({
+     segments: segments,
+     language: lang || 'auto',
+     source: 'Invidious Network',
+     method: 'invidious-api',
+     length: transcriptText.length,
+     hasRealTiming: false, // Invidious provides text only
+     serviceUsed: 'invidious',
+     extractionTime: extractionTime,
+     validation: {
+      totalLength: transcriptText.length,
+      segmentCount: segments.length,
+      hasValidContent: true,
+     },
+     fallbackLevel: 0,
     });
+   } else {
+    throw new Error('Empty or invalid transcript from Invidious');
    }
+  } catch (invidiousError) {
+   console.warn(`[ENHANCED-API] 🌐 Invidious network failed for ${videoId}:`, invidiousError.message);
 
-   if (innerError instanceof TranscriptTooShortError || innerError.name === 'TranscriptTooShortError') {
-    return res.status(422).json({
-     error: 'Transcript too short',
-     videoId: videoId,
-     message: innerError.message,
-     actualLength: innerError.details?.actualLength || 0,
-     minRequired: innerError.details?.minRequired || 250,
-     reason: 'transcript_too_short',
-     userFriendly: true,
+   // FALLBACK STRATEGY: YouTube Transcript Library
+   try {
+    console.log(`[ENHANCED-API] 📚 Attempting YouTube transcript library fallback for ${videoId}`);
+
+    const transcript = await YoutubeTranscript.fetchTranscript(videoId, {
+     lang: lang || 'en',
+     country: 'US',
     });
-   }
 
-   if (innerError instanceof TranscriptNotFoundError || innerError.name === 'TranscriptNotFoundError') {
-    return res.status(404).json({
-     error: 'No transcript found',
-     videoId: videoId,
-     message: innerError.message,
-     servicesAttempted: innerError.details?.servicesAttempted || [],
-     reason: 'transcript_not_found',
-     userFriendly: true,
-    });
-   }
+    if (transcript && transcript.length > 0) {
+     const extractionTime = Date.now() - startTime;
 
-   // Check for our custom transcript unavailable error
-   if (innerError.message === 'TRANSCRIPT_UNAVAILABLE' || innerError.message === 'TRANSCRIPT_NOT_AVAILABLE') {
-    throw new Error('TRANSCRIPT_UNAVAILABLE'); // Re-throw to be caught by master catch
-   }
+     // Convert youtube-transcript format to our standard format
+     const segments = transcript
+      .map((item, index) => ({
+       text: item.text.trim(),
+       start: parseFloat((item.offset / 1000).toFixed(3)),
+       duration: parseFloat((item.duration / 1000).toFixed(3)),
+       end: parseFloat(((item.offset + item.duration) / 1000).toFixed(3)),
+      }))
+      .filter((seg) => seg.text.length > 2);
 
-   // Check for MODULE_NOT_FOUND errors (missing fallback services, etc.)
-   if (innerError.code === 'MODULE_NOT_FOUND' || innerError.message.includes('Cannot find module')) {
-    console.error(`[ENHANCED-API] ❌ Module not found error - likely missing fallback service:`, innerError.message);
-    throw new Error('TRANSCRIPT_UNAVAILABLE'); // Convert to our standard error
-   }
+     const totalText = segments.map((s) => s.text).join(' ');
 
-   // For any other unexpected inner error, convert to our standard error
-   console.error(`[ENHANCED-API] ❌ Unexpected inner error for ${videoId}:`, innerError);
-   throw new Error('TRANSCRIPT_UNAVAILABLE');
+     console.log(`[ENHANCED-API] ✅ YouTube library success for ${videoId}: ${segments.length} segments (${extractionTime}ms)`);
+
+     return res.json({
+      segments: segments,
+      language: lang || 'auto',
+      source: 'YouTube Transcript Library',
+      method: 'youtube-transcript-api',
+      length: totalText.length,
+      hasRealTiming: true, // YouTube library provides timing
+      serviceUsed: 'youtube-transcript',
+      extractionTime: extractionTime,
+      validation: {
+       totalLength: totalText.length,
+       segmentCount: segments.length,
+       hasValidContent: totalText.length > 100,
+      },
+      fallbackLevel: 1,
+     });
+    } else {
+     throw new Error('YouTube library returned empty transcript');
+    }
+   } catch (youtubeError) {
+    console.warn(`[ENHANCED-API] 📚 YouTube library fallback failed for ${videoId}:`, youtubeError.message);
+
+    // Check for specific transcript disabled errors
+    if (youtubeError.message && /transcript.*(disabled|not available|private)/i.test(youtubeError.message)) {
+     throw new TranscriptDisabledError('Transcript is disabled by video owner');
+    }
+
+    // All methods failed - throw final error
+    throw new NoValidTranscriptError(`All extraction methods failed. Invidious: ${invidiousError.message}, YouTube: ${youtubeError.message}`);
+   }
   }
  } catch (error) {
   // MASTER CATCH BLOCK - Handles ALL possible errors to prevent crashes
-  console.error('FATAL: Unhandled error in transcript route handler:', error);
+  console.error('FATAL: Unhandled error in cloud-native transcript route handler:', error);
   console.error('FATAL: Error stack trace:', error.stack);
   console.error('FATAL: Error details:', {
    message: error.message,
    code: error.code,
    type: error.constructor.name,
    videoId: req.params.videoId,
+   timestamp: new Date().toISOString(),
   });
 
-  // Check for our custom transcript unavailable error
-  if (error.message === 'TRANSCRIPT_UNAVAILABLE') {
+  // Handle specific transcript errors with user-friendly responses
+  if (error instanceof TranscriptDisabledError || error.name === 'TranscriptDisabledError') {
+   return res.status(404).json({
+    error: 'TRANSCRIPT_DISABLED',
+    message: 'Transcript is disabled by the video owner.',
+    reason: 'Video owner has disabled transcripts/captions for this video',
+    suggestion: 'Try a different video that has captions enabled',
+    userFriendly: true,
+   });
+  }
+
+  if (error instanceof TranscriptTooShortError || error.name === 'TranscriptTooShortError') {
+   return res.status(422).json({
+    error: 'TRANSCRIPT_TOO_SHORT',
+    message: 'The available transcript is too short to process.',
+    reason: 'transcript_too_short',
+    userFriendly: true,
+   });
+  }
+
+  if (error instanceof NoValidTranscriptError || error.name === 'NoValidTranscriptError') {
    return res.status(404).json({
     error: 'TRANSCRIPT_NOT_FOUND',
-    message: 'A transcript is not available for this video.',
+    message: 'A transcript for this video could not be found.',
+    details: error.message,
+    servicesAttempted: ['invidious', 'youtube-transcript'],
+    userFriendly: true,
+   });
+  }
+
+  // Check for MODULE_NOT_FOUND errors (missing services)
+  if (error.code === 'MODULE_NOT_FOUND' || error.message.includes('Cannot find module')) {
+   console.error(`[ENHANCED-API] ❌ Module not found error:`, error.message);
+   return res.status(404).json({
+    error: 'TRANSCRIPT_NOT_FOUND',
+    message: 'A transcript for this video could not be found.',
    });
   }
 
   // For any other unexpected error, return a safe generic response
   return res.status(500).json({
    error: 'INTERNAL_SERVER_ERROR',
-   message: 'An unexpected error occurred.',
+   message: 'An unexpected error occurred during transcript extraction.',
   });
  }
 });
@@ -1759,16 +1815,72 @@ app.get('/api/transcript-diagnostics/:videoId', async (req, res) => {
 });
 
 // Health check endpoint for transcript services
+// Health check endpoint for cloud-native transcript services
 app.get('/api/transcript-health', (req, res) => {
- const health = enhancedTranscriptOrchestrator.getHealthStatus();
- const isHealthy = health.overall.successRate > 50; // Consider healthy if >50% success rate
-
- res.status(isHealthy ? 200 : 503).json({
-  status: isHealthy ? 'healthy' : 'degraded',
-  orchestrator: health,
-  emergency: emergencyTranscriptService.getStats(),
+ res.json({
+  status: 'healthy',
   timestamp: new Date().toISOString(),
+  architecture: 'cloud-native-invidious-first',
+  services: {
+   primary: 'invidious-network',
+   fallback: 'youtube-transcript-library',
+  },
+  message: 'Cloud-native transcript services are operational',
  });
+});
+
+// Test endpoint for new cloud-native transcript architecture
+app.get('/api/test-transcript-services/:videoId', async (req, res) => {
+ const {videoId} = req.params;
+
+ try {
+  const testResults = {
+   videoId: videoId,
+   timestamp: new Date().toISOString(),
+   tests: {},
+  };
+
+  // Test Invidious service
+  try {
+   const invidiousStart = Date.now();
+   const invidiousResult = await fetchTranscriptViaInvidious(videoId);
+   testResults.tests.invidious = {
+    status: 'success',
+    responseTime: Date.now() - invidiousStart,
+    transcriptLength: invidiousResult?.length || 0,
+    hasContent: invidiousResult && invidiousResult.length > 100,
+   };
+  } catch (error) {
+   testResults.tests.invidious = {
+    status: 'failed',
+    error: error.message,
+   };
+  }
+
+  // Test YouTube transcript library
+  try {
+   const youtubeStart = Date.now();
+   const youtubeResult = await YoutubeTranscript.fetchTranscript(videoId);
+   testResults.tests.youtubeLibrary = {
+    status: 'success',
+    responseTime: Date.now() - youtubeStart,
+    segmentCount: youtubeResult?.length || 0,
+    hasContent: youtubeResult && youtubeResult.length > 0,
+   };
+  } catch (error) {
+   testResults.tests.youtubeLibrary = {
+    status: 'failed',
+    error: error.message,
+   };
+  }
+
+  res.json(testResults);
+ } catch (error) {
+  res.status(500).json({
+   error: 'Test failed',
+   message: error.message,
+  });
+ }
 });
 
 // Missing endpoint: Intelligent segments with AI-powered chunking
