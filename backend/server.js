@@ -11,7 +11,22 @@ const antiDetectionTranscript = require('./services/antiDetectionTranscript.js')
 const robustTranscriptServiceV2 = require('./services/robustTranscriptServiceV2.js');
 const alternativeTranscriptService = require('./services/alternativeTranscriptService.js');
 const emergencyTranscriptService = require('./services/emergencyTranscriptService.js');
-const enhancedTranscriptOrchestrator = require('./services/enhancedTranscriptOrchestrator.js');
+
+// BULLETPROOF SERVICE LOADING - Handle missing services gracefully
+let enhancedTranscriptOrchestrator;
+try {
+ enhancedTranscriptOrchestrator = require('./services/enhancedTranscriptOrchestrator.js');
+ console.log('[SERVER] ✅ Enhanced transcript orchestrator loaded successfully');
+} catch (error) {
+ console.error('[SERVER] ❌ Failed to load enhanced transcript orchestrator:', error.message);
+ // Create a fallback orchestrator that always throws a clear error
+ enhancedTranscriptOrchestrator = {
+  extract: async () => {
+   throw new Error('TRANSCRIPT_UNAVAILABLE');
+  },
+ };
+}
+
 const {fetchTranscriptViaInvidious} = require('./services/invidious.service.js');
 const {TranscriptDisabledError, TranscriptTooShortError, TranscriptNotFoundError} = require('./services/transcriptErrors.js');
 
@@ -1501,109 +1516,137 @@ async function extractTranscriptViaYouTubeFallback(videoId) {
  throw new Error('Both Invidious and direct YouTube API methods failed');
 }
 
-// Enhanced transcript endpoint with multi-service fallback
+// Enhanced transcript endpoint with multi-service fallback - BULLETPROOF VERSION
 app.get('/api/enhanced-transcript/:videoId', async (req, res) => {
- const {videoId} = req.params;
- const {lang} = req.query;
-
- if (!videoId) return res.status(400).json({error: 'videoId required'});
-
- console.log(`[ENHANCED-API] Enhanced transcript request for: ${videoId}`);
-
+ // MASTER TRY-CATCH BLOCK - Ultimate safety net to prevent crashes
  try {
-  // Use the enhanced orchestrator for robust transcript extraction
-  const result = await enhancedTranscriptOrchestrator.extract(videoId, {
-   minLength: 50, // Lower threshold for simple transcript endpoint
-   lang: lang ? lang.split(',') : ['id', 'en'],
-  });
+  const {videoId} = req.params;
+  const {lang} = req.query;
 
-  console.log(`[ENHANCED-API] ✅ Success with ${result.serviceUsed} service: ${result.segments?.length || 0} segments`);
+  if (!videoId) return res.status(400).json({error: 'videoId required'});
 
-  // Strict validation on the final result
-  const totalText =
-   result.segments
-    ?.map((s) => s.text || '')
-    .join(' ')
-    .trim() || '';
-  const hasValidSegments = result.segments && result.segments.length > 0;
-  const hasMinimumContent = totalText.length >= 200;
+  console.log(`[ENHANCED-API] Enhanced transcript request for: ${videoId}`);
 
-  if (!result || !hasValidSegments || !hasMinimumContent) {
-   console.log(`[ENHANCED-API] ⚠️ Invalid transcript result for ${videoId}: segments=${hasValidSegments}, contentLength=${totalText.length}`);
-   throw new Error('TRANSCRIPT_NOT_AVAILABLE');
+  // INNER TRY-CATCH BLOCK - Handles transcript extraction failures
+  try {
+   // Use the enhanced orchestrator for robust transcript extraction
+   const result = await enhancedTranscriptOrchestrator.extract(videoId, {
+    minLength: 50, // Lower threshold for simple transcript endpoint
+    lang: lang ? lang.split(',') : ['id', 'en'],
+   });
+
+   console.log(`[ENHANCED-API] ✅ Success with ${result.serviceUsed} service: ${result.segments?.length || 0} segments`);
+
+   // Strict validation on the final result
+   const totalText =
+    result.segments
+     ?.map((s) => s.text || '')
+     .join(' ')
+     .trim() || '';
+   const hasValidSegments = result.segments && result.segments.length > 0;
+   const hasMinimumContent = totalText.length >= 200;
+
+   if (!result || !hasValidSegments || !hasMinimumContent) {
+    console.log(`[ENHANCED-API] ⚠️ Invalid transcript result for ${videoId}: segments=${hasValidSegments}, contentLength=${totalText.length}`);
+    throw new Error('TRANSCRIPT_UNAVAILABLE');
+   }
+
+   // Return the result with orchestrator metadata
+   return res.json({
+    segments: result.segments,
+    language: result.language,
+    source: `Enhanced Orchestrator (${result.serviceUsed})`,
+    method: result.method,
+    length: result.validation.totalLength,
+    hasRealTiming: result.hasRealTiming,
+    serviceUsed: result.serviceUsed,
+    extractionTime: result.extractionTime,
+    validation: result.validation,
+    fallbackLevel: result.fallbackLevel || 0,
+   });
+  } catch (innerError) {
+   // Log the inner error for debugging
+   console.warn('All transcript extraction methods failed for videoId:', videoId, innerError.message);
+   console.error(`[ENHANCED-API] Inner error details:`, {
+    message: innerError.message,
+    stack: innerError.stack,
+    type: innerError.constructor.name,
+   });
+
+   // Check for specific transcript errors first
+   if (innerError instanceof TranscriptDisabledError || innerError.name === 'TranscriptDisabledError') {
+    return res.status(404).json({
+     error: 'Transcript is disabled on this video',
+     videoId: videoId,
+     message: innerError.message,
+     reason: 'Video owner has disabled transcripts/captions for this video',
+     suggestion: 'Try a different video that has captions enabled',
+     disabledByOwner: true,
+     userFriendly: true,
+    });
+   }
+
+   if (innerError instanceof TranscriptTooShortError || innerError.name === 'TranscriptTooShortError') {
+    return res.status(422).json({
+     error: 'Transcript too short',
+     videoId: videoId,
+     message: innerError.message,
+     actualLength: innerError.details?.actualLength || 0,
+     minRequired: innerError.details?.minRequired || 250,
+     reason: 'transcript_too_short',
+     userFriendly: true,
+    });
+   }
+
+   if (innerError instanceof TranscriptNotFoundError || innerError.name === 'TranscriptNotFoundError') {
+    return res.status(404).json({
+     error: 'No transcript found',
+     videoId: videoId,
+     message: innerError.message,
+     servicesAttempted: innerError.details?.servicesAttempted || [],
+     reason: 'transcript_not_found',
+     userFriendly: true,
+    });
+   }
+
+   // Check for our custom transcript unavailable error
+   if (innerError.message === 'TRANSCRIPT_UNAVAILABLE' || innerError.message === 'TRANSCRIPT_NOT_AVAILABLE') {
+    throw new Error('TRANSCRIPT_UNAVAILABLE'); // Re-throw to be caught by master catch
+   }
+
+   // Check for MODULE_NOT_FOUND errors (missing fallback services, etc.)
+   if (innerError.code === 'MODULE_NOT_FOUND' || innerError.message.includes('Cannot find module')) {
+    console.error(`[ENHANCED-API] ❌ Module not found error - likely missing fallback service:`, innerError.message);
+    throw new Error('TRANSCRIPT_UNAVAILABLE'); // Convert to our standard error
+   }
+
+   // For any other unexpected inner error, convert to our standard error
+   console.error(`[ENHANCED-API] ❌ Unexpected inner error for ${videoId}:`, innerError);
+   throw new Error('TRANSCRIPT_UNAVAILABLE');
   }
-
-  // Return the result with orchestrator metadata
-  return res.json({
-   segments: result.segments,
-   language: result.language,
-   source: `Enhanced Orchestrator (${result.serviceUsed})`,
-   method: result.method,
-   length: result.validation.totalLength,
-   hasRealTiming: result.hasRealTiming,
-   serviceUsed: result.serviceUsed,
-   extractionTime: result.extractionTime,
-   validation: result.validation,
-   fallbackLevel: result.fallbackLevel || 0,
-  });
  } catch (error) {
-  console.error(`[ENHANCED-API] ❌ Failed for ${videoId}:`, error.message);
-  console.error(`[ENHANCED-API] Error type: ${error.constructor.name}`);
-  console.error(`[ENHANCED-API] Error instance checks:`, {
-   isTranscriptDisabledError: error instanceof TranscriptDisabledError,
-   isTranscriptTooShortError: error instanceof TranscriptTooShortError,
-   isTranscriptNotFoundError: error instanceof TranscriptNotFoundError,
-   hasTranscriptErrorFlag: error.isTranscriptError,
+  // MASTER CATCH BLOCK - Handles ALL possible errors to prevent crashes
+  console.error('FATAL: Unhandled error in transcript route handler:', error);
+  console.error('FATAL: Error stack trace:', error.stack);
+  console.error('FATAL: Error details:', {
+   message: error.message,
+   code: error.code,
+   type: error.constructor.name,
+   videoId: req.params.videoId,
   });
 
-  // Check for specific transcript not available error
-  if (error.message === 'TRANSCRIPT_NOT_AVAILABLE') {
-   return res.status(422).json({
-    error: 'TRANSCRIPT_NOT_AVAILABLE',
-    message: 'A valid transcript is not available for this video.',
-   });
-  }
-
-  // Handle specific transcript errors with defensive checks
-  if (error instanceof TranscriptDisabledError || error.name === 'TranscriptDisabledError') {
+  // Check for our custom transcript unavailable error
+  if (error.message === 'TRANSCRIPT_UNAVAILABLE') {
    return res.status(404).json({
-    error: 'Transcript is disabled on this video',
-    videoId: videoId,
-    message: error.message,
-    reason: 'Video owner has disabled transcripts/captions for this video',
-    suggestion: 'Try a different video that has captions enabled',
-    disabledByOwner: true,
-    userFriendly: true,
+    error: 'TRANSCRIPT_NOT_FOUND',
+    message: 'A transcript is not available for this video.',
    });
   }
 
-  if (error instanceof TranscriptTooShortError || error.name === 'TranscriptTooShortError') {
-   return res.status(422).json({
-    error: 'Transcript too short',
-    videoId: videoId,
-    message: error.message,
-    actualLength: error.details?.actualLength || 0,
-    minRequired: error.details?.minRequired || 250,
-    reason: 'transcript_too_short',
-    userFriendly: true,
-   });
-  }
-
-  if (error instanceof TranscriptNotFoundError || error.name === 'TranscriptNotFoundError') {
-   return res.status(404).json({
-    error: 'No transcript found',
-    videoId: videoId,
-    message: error.message,
-    servicesAttempted: error.details?.servicesAttempted || [],
-    reason: 'transcript_not_found',
-    userFriendly: true,
-   });
-  }
-
-  // Default error response for any other unexpected error
+  // For any other unexpected error, return a safe generic response
   return res.status(500).json({
    error: 'INTERNAL_SERVER_ERROR',
-   message: 'An unexpected error occurred during transcript extraction.',
+   message: 'An unexpected error occurred.',
   });
  }
 });
