@@ -27,7 +27,7 @@ try {
  };
 }
 
-const {fetchTranscriptViaInvidious} = require('./services/invidious.service.js');
+const {fetchTranscriptViaInvidious, getHealthyInvidiousInstances} = require('./services/invidious.service.js');
 const {TranscriptDisabledError, TranscriptTooShortError, TranscriptNotFoundError} = require('./services/transcriptErrors.js');
 
 // Helper function to convert transcript text to segments format for consistent API response
@@ -1552,98 +1552,146 @@ async function extractTranscriptViaYouTubeFallback(videoId) {
 }
 
 // Enhanced transcript endpoint with Invidious-first strategy - TRULY BULLETPROOF VERSION
+/**
+ * BULLETPROOF TRANSCRIPT EXTRACTION ENDPOINT
+ * Production-ready implementation with comprehensive error handling
+ * Implements Invidious-first strategy with YouTube Transcript library fallback
+ * GUARANTEED to never crash the server under any circumstances
+ *
+ * Architecture:
+ * 1. Master try-catch wrapper prevents ALL crashes
+ * 2. Primary: Invidious network (cloud-friendly, datacenter IP compatible)
+ * 3. Fallback: Direct YouTube transcript library
+ * 4. Graceful error responses for all failure scenarios
+ *
+ * @route GET /api/enhanced-transcript/:videoId
+ * @param {string} videoId - YouTube video ID
+ * @query {string} [lang] - Preferred language code (default: 'en')
+ * @returns {Object} Success response with transcript data
+ * @returns {Object} Error response with user-friendly message (never crashes)
+ */
 app.get('/api/enhanced-transcript/:videoId', async (req, res) => {
- // MASTER TRY-CATCH BLOCK - Non-negotiable safety net to prevent ALL crashes
+ // 🛡️ MASTER TRY-CATCH BLOCK - ABSOLUTE CRASH PROTECTION
+ // This wrapper ensures the server NEVER crashes regardless of any error
  try {
   const {videoId} = req.params;
   const {lang} = req.query;
 
-  if (!videoId) return res.status(400).json({error: 'videoId required'});
+  // Input validation
+  if (!videoId || typeof videoId !== 'string' || videoId.trim().length === 0) {
+   return res.status(400).json({
+    error: 'INVALID_VIDEO_ID',
+    message: 'A valid YouTube video ID is required.',
+    bulletproofStatus: 'input_validation_failed',
+   });
+  }
 
-  console.log(`[BULLETPROOF-API] 🛡️ Transcript request for: ${videoId}`);
-  const startTime = Date.now();
+  console.log(`[BULLETPROOF-API] � Starting bulletproof transcript extraction for: ${videoId}`);
+  const extractionStartTime = Date.now();
 
   let transcriptData = null;
+  let primaryMethodFailed = false;
+  let fallbackMethodFailed = false;
 
-  // PRIMARY STRATEGY: Robust Invidious Network
+  // 🌐 PRIMARY STRATEGY: Invidious Network (Cloud-Optimized)
   try {
-   console.log(`[BULLETPROOF-API] 🌐 PRIMARY: Attempting Invidious network extraction for ${videoId}`);
-   const invidiousText = await fetchTranscriptViaInvidious(videoId);
+   console.log(`[BULLETPROOF-API] 🌐 PRIMARY: Attempting Invidious network extraction...`);
+   const invidiousTranscript = await fetchTranscriptViaInvidious(videoId);
 
-   if (invidiousText && invidiousText.trim().length > 100) {
+   // Validate Invidious response
+   if (invidiousTranscript && typeof invidiousTranscript === 'string' && invidiousTranscript.trim().length > 100) {
     transcriptData = {
-     text: invidiousText,
-     segments: convertTranscriptTextToSegments(invidiousText, 'invidious'),
+     text: invidiousTranscript.trim(),
+     segments: convertTranscriptTextToSegments(invidiousTranscript, 'invidious'),
      source: 'Invidious Network (Primary)',
      method: 'invidious-api',
      hasRealTiming: false,
      serviceUsed: 'invidious',
+     extractionMethod: 'primary',
     };
 
-    console.log(`[BULLETPROOF-API] ✅ PRIMARY SUCCESS: Invidious returned ${invidiousText.length} chars`);
+    console.log(`[BULLETPROOF-API] ✅ PRIMARY SUCCESS: Invidious returned ${invidiousTranscript.length} characters`);
    } else {
-    throw new Error('Invidious returned empty or insufficient transcript');
+    throw new Error('Invidious returned insufficient transcript data');
    }
   } catch (invidiousError) {
-   console.warn(`[BULLETPROOF-API] 🌐 Invidious workflow failed. Attempting direct fallback...`, invidiousError.message);
+   primaryMethodFailed = true;
+   console.warn(`[BULLETPROOF-API] ⚠️ PRIMARY FAILED: Invidious network extraction failed`);
+   console.warn(`[BULLETPROOF-API] 🔍 Invidious error details: ${invidiousError.message}`);
 
-   // FALLBACK STRATEGY: YouTube Transcript Library
+   // 📚 FALLBACK STRATEGY: YouTube Transcript Library (Direct)
    try {
-    console.log(`[BULLETPROOF-API] 📚 FALLBACK: Attempting YouTube transcript library for ${videoId}`);
+    console.log(`[BULLETPROOF-API] 📚 FALLBACK: Attempting YouTube transcript library...`);
 
     const youtubeTranscript = await YoutubeTranscript.fetchTranscript(videoId, {
      lang: lang || 'en',
      country: 'US',
     });
 
-    if (youtubeTranscript && youtubeTranscript.length > 0) {
+    // Validate YouTube library response
+    if (youtubeTranscript && Array.isArray(youtubeTranscript) && youtubeTranscript.length > 0) {
      // Convert youtube-transcript format to our standard format
      const segments = youtubeTranscript
-      .map((item, index) => ({
-       text: item.text.trim(),
+      .map((item) => ({
+       text: (item.text || '').trim(),
        start: parseFloat((item.offset / 1000).toFixed(3)),
        duration: parseFloat((item.duration / 1000).toFixed(3)),
        end: parseFloat(((item.offset + item.duration) / 1000).toFixed(3)),
       }))
-      .filter((seg) => seg.text.length > 2);
+      .filter((seg) => seg.text && seg.text.length > 2);
 
-     const totalText = segments.map((s) => s.text).join(' ');
+     const totalText = segments
+      .map((s) => s.text)
+      .join(' ')
+      .trim();
 
-     transcriptData = {
-      text: totalText,
-      segments: segments,
-      source: 'YouTube Transcript Library (Fallback)',
-      method: 'youtube-transcript-api',
-      hasRealTiming: true,
-      serviceUsed: 'youtube-transcript',
-     };
+     // Validate final transcript content
+     if (totalText.length > 50) {
+      transcriptData = {
+       text: totalText,
+       segments: segments,
+       source: 'YouTube Transcript Library (Fallback)',
+       method: 'youtube-transcript-api',
+       hasRealTiming: true,
+       serviceUsed: 'youtube-transcript',
+       extractionMethod: 'fallback',
+      };
 
-     console.log(`[BULLETPROOF-API] ✅ FALLBACK SUCCESS: YouTube library returned ${segments.length} segments`);
+      console.log(`[BULLETPROOF-API] ✅ FALLBACK SUCCESS: YouTube library returned ${segments.length} segments`);
+     } else {
+      throw new Error('YouTube library returned insufficient transcript content');
+     }
     } else {
-     throw new Error('YouTube library returned empty transcript');
+     throw new Error('YouTube library returned empty or invalid transcript');
     }
    } catch (youtubeError) {
-    console.error(`[BULLETPROOF-API] 📚 YouTube library fallback failed:`, youtubeError.message);
+    fallbackMethodFailed = true;
+    console.error(`[BULLETPROOF-API] ❌ FALLBACK FAILED: YouTube library extraction failed`);
+    console.error(`[BULLETPROOF-API] 🔍 YouTube error details: ${youtubeError.message}`);
 
     // Check for specific transcript disabled errors
     if (youtubeError.message && /transcript.*(disabled|not available|private)/i.test(youtubeError.message)) {
      throw new TranscriptDisabledError('Transcript is disabled by video owner');
     }
 
-    // Re-throw the fallback error to be caught by master catch
-    throw new NoValidTranscriptError(`All transcript extraction methods failed. Invidious: ${invidiousError.message}, YouTube: ${youtubeError.message}`);
+    // All methods failed - throw comprehensive error
+    throw new NoValidTranscriptError(`All transcript extraction methods failed. ` + `Primary (Invidious): ${invidiousError.message}. ` + `Fallback (YouTube): ${youtubeError.message}`);
    }
   }
 
-  // FINAL VALIDATION AND SUCCESS RESPONSE
-  if (!transcriptData || !transcriptData.text || transcriptData.text.trim().length < 50) {
-   throw new NoValidTranscriptError('All transcript extraction methods failed - insufficient transcript data.');
+  // 🔍 FINAL VALIDATION
+  if (!transcriptData || !transcriptData.text || transcriptData.text.length < 50) {
+   throw new NoValidTranscriptError('All transcript extraction methods failed - insufficient transcript data');
   }
 
-  const extractionTime = Date.now() - startTime;
+  // 🎉 SUCCESS RESPONSE
+  const extractionTime = Date.now() - extractionStartTime;
 
-  // Success response with comprehensive metadata
-  return res.json({
+  console.log(`[BULLETPROOF-API] 🎉 EXTRACTION COMPLETE: ${transcriptData.extractionMethod} method successful`);
+  console.log(`[BULLETPROOF-API] 📊 Total extraction time: ${extractionTime}ms`);
+
+  return res.status(200).json({
+   success: true,
    segments: transcriptData.segments,
    language: lang || 'auto',
    source: transcriptData.source,
@@ -1657,30 +1705,37 @@ app.get('/api/enhanced-transcript/:videoId', async (req, res) => {
     segmentCount: transcriptData.segments.length,
     hasValidContent: true,
    },
-   fallbackLevel: transcriptData.serviceUsed === 'invidious' ? 0 : 1,
+   fallbackLevel: transcriptData.extractionMethod === 'primary' ? 0 : 1,
    bulletproofStatus: 'success',
+   methodsAttempted: {
+    primary: !primaryMethodFailed,
+    fallback: primaryMethodFailed && !fallbackMethodFailed,
+   },
   });
  } catch (error) {
-  // MASTER CATCH BLOCK - Flawless error handling for ALL possible failures
-  console.error('FATAL: Unhandled error in bulletproof transcript route handler:', error);
-  console.error('FATAL: Error stack trace:', error.stack);
-  console.error('FATAL: Error details:', {
+  // 🚨 MASTER CATCH BLOCK - BULLETPROOF ERROR HANDLING
+  // This block catches ANY and ALL errors, ensuring the server never crashes
+
+  console.error('[BULLETPROOF-API] 🚨 MASTER CATCH: Unhandled error in bulletproof transcript handler');
+  console.error('[BULLETPROOF-API] 📝 Error details:', {
    message: error.message,
+   name: error.name,
    code: error.code,
-   type: error.constructor.name,
+   stack: error.stack?.substring(0, 500), // Truncated stack trace
    videoId: req.params.videoId,
    timestamp: new Date().toISOString(),
-   userAgent: req.headers['user-agent'],
+   userAgent: req.headers['user-agent']?.substring(0, 100),
    origin: req.headers['origin'],
   });
 
-  // Handle specific error types with appropriate responses
+  // Handle specific error types with appropriate HTTP status codes
   if (error instanceof TranscriptDisabledError || error.name === 'TranscriptDisabledError') {
    return res.status(404).json({
     error: 'TRANSCRIPT_DISABLED',
     message: 'Transcript is disabled by the video owner.',
     bulletproofStatus: 'handled_error',
     userFriendly: true,
+    errorType: 'transcript_disabled',
    });
   }
 
@@ -1690,6 +1745,7 @@ app.get('/api/enhanced-transcript/:videoId', async (req, res) => {
     message: 'The available transcript is too short to process.',
     bulletproofStatus: 'handled_error',
     userFriendly: true,
+    errorType: 'transcript_too_short',
    });
   }
 
@@ -1698,36 +1754,20 @@ app.get('/api/enhanced-transcript/:videoId', async (req, res) => {
     error: 'TRANSCRIPT_NOT_FOUND',
     message: 'A transcript for this video could not be found or is disabled by the owner.',
     details: error.message,
-    servicesAttempted: ['invidious-network', 'youtube-transcript-library'],
     bulletproofStatus: 'handled_error',
     userFriendly: true,
+    errorType: 'transcript_not_found',
    });
   }
 
-  // Handle module loading errors
-  if (error.code === 'MODULE_NOT_FOUND' || error.message.includes('Cannot find module')) {
-   console.error(`[BULLETPROOF-API] ❌ Module not found error:`, error.message);
-   return res.status(404).json({
-    error: 'TRANSCRIPT_NOT_FOUND',
-    message: 'A transcript for this video could not be found or is disabled by the owner.',
-    bulletproofStatus: 'handled_error',
-   });
-  }
-
-  // Handle network/timeout errors
-  if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT' || error.message.includes('timeout')) {
-   return res.status(503).json({
-    error: 'SERVICE_TEMPORARILY_UNAVAILABLE',
-    message: 'Transcript services are temporarily unavailable. Please try again later.',
-    bulletproofStatus: 'handled_error',
-   });
-  }
-
-  // Final safety net - catch absolutely everything else
-  return res.status(404).json({
-   error: 'TRANSCRIPT_NOT_FOUND',
-   message: 'A transcript for this video could not be found or is disabled by the owner.',
-   bulletproofStatus: 'ultimate_fallback',
+  // Generic error handling for any unexpected errors
+  return res.status(500).json({
+   error: 'TRANSCRIPT_EXTRACTION_FAILED',
+   message: 'An unexpected error occurred while extracting the transcript. Please try again later.',
+   bulletproofStatus: 'unexpected_error',
+   userFriendly: true,
+   errorType: 'unexpected',
+   details: process.env.NODE_ENV === 'development' ? error.message : undefined,
   });
  }
 });
@@ -1845,19 +1885,57 @@ app.get('/api/transcript-health', (req, res) => {
  res.json({
   status: 'healthy',
   timestamp: new Date().toISOString(),
-  architecture: 'bulletproof-resilient-invidious-first',
+  architecture: 'bulletproof-production-ready-invidious-first',
   services: {
    primary: 'enhanced-invidious-network',
    fallback: 'youtube-transcript-library',
   },
   resilience: {
    masterCatchBlock: true,
-   loosendFiltering: true,
-   hardcodedFallbacks: true,
+   comprehensiveErrorHandling: true,
    crashProof: true,
+   productionReady: true,
   },
-  message: 'Bulletproof transcript services are operational',
+  capabilities: {
+   cloudfriendly: true,
+   datacenterIpCompatible: true,
+   antiBotCircumvention: true,
+   loadBalancing: true,
+   automaticRetry: true,
+  },
+  endpoints: {
+   main: '/api/enhanced-transcript/:videoId',
+   emergency: '/api/emergency-transcript/:videoId',
+   diagnostics: '/api/invidious-instances',
+  },
+  message: 'Production-ready bulletproof transcript services are operational',
  });
+});
+
+// Diagnostic endpoint for testing Invidious instances
+app.get('/api/invidious-instances', async (req, res) => {
+ try {
+  console.log('[DIAGNOSTICS] 🔍 Testing Invidious instances...');
+  const instances = await getHealthyInvidiousInstances();
+
+  const diagnostics = {
+   timestamp: new Date().toISOString(),
+   totalInstances: instances.length,
+   instances: instances.slice(0, 10), // Show first 10 for brevity
+   sampleTestUrls: instances.slice(0, 3).map((hostname) => `https://${hostname}/api/v1/captions/[VIDEO_ID]`),
+   status: instances.length > 0 ? 'healthy' : 'warning',
+   message: instances.length > 0 ? `${instances.length} Invidious instances available` : 'No instances available - using fallback methods',
+  };
+
+  res.json(diagnostics);
+ } catch (error) {
+  console.error('[DIAGNOSTICS] ❌ Error testing instances:', error.message);
+  res.status(500).json({
+   error: 'Failed to test Invidious instances',
+   message: error.message,
+   timestamp: new Date().toISOString(),
+  });
+ }
 });
 
 // Test endpoint for bulletproof transcript architecture
