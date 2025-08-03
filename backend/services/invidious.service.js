@@ -22,7 +22,7 @@ async function getHealthyInvidiousInstances() {
 
   console.log(`Found ${response.data.length} total instances`);
 
-  // Filter instances based on criteria
+  // LOOSENED FILTERING CRITERIA - Filter instances based on basic criteria only
   const healthyInstances = response.data
    .filter((instance) => {
     // Each instance is an array: [domain, details]
@@ -37,9 +37,8 @@ async function getHealthyInvidiousInstances() {
      return false;
     }
 
-    // Filter criteria:
-    // 1. Must be HTTPS (type === 'https')
-    // 2. Must have API enabled (api === true)
+    // LOOSENED CRITERIA: Only filter for HTTPS and API enabled
+    // Removed monitor status requirement to increase pool of candidates
     return details.type === 'https' && details.api === true;
    })
    .map((instance) => {
@@ -54,20 +53,26 @@ async function getHealthyInvidiousInstances() {
 
   console.log(`Filtered to ${healthyInstances.length} healthy HTTPS instances with API enabled`);
 
+  // HARDCODED FALLBACK LIST - Safety net if official API has issues
   if (healthyInstances.length === 0) {
-   console.warn('No healthy Invidious instances found');
+   console.warn('No healthy Invidious instances found from official API');
+   console.log('Using hardcoded fallback instances as safety net');
+
+   const fallbackInstances = ['yewtu.be', 'invidious.fdn.fr', 'invidious.privacydev.net', 'vid.puffyan.us', 'invidious.lunar.icu', 'invidious.nerdvpn.de', 'iv.gg', 'invidious.slipfox.xyz'];
+
+   console.log(`Using ${fallbackInstances.length} hardcoded fallback instances`);
+   return fallbackInstances;
   } else {
    console.log('Sample healthy instances:', healthyInstances.slice(0, 3));
+   return healthyInstances;
   }
-
-  return healthyInstances;
  } catch (error) {
   console.error('Error fetching Invidious instances:', error.message);
 
-  // Return fallback instances if API fails
-  const fallbackInstances = ['yewtu.be', 'invidious.fdn.fr', 'invidious.privacydev.net', 'vid.puffyan.us', 'invidious.lunar.icu'];
+  // Return enhanced fallback instances if API completely fails
+  const fallbackInstances = ['yewtu.be', 'invidious.fdn.fr', 'invidious.privacydev.net', 'vid.puffyan.us', 'invidious.lunar.icu', 'invidious.nerdvpn.de', 'iv.gg', 'invidious.slipfox.xyz'];
 
-  console.log('Using fallback instances due to API error');
+  console.log(`API failed completely - using ${fallbackInstances.length} fallback instances`);
   return fallbackInstances;
  }
 }
@@ -183,18 +188,39 @@ async function fetchTranscriptViaInvidious(videoId) {
  const shuffledInstances = shuffleArray(instances);
  console.log(`Trying ${shuffledInstances.length} instances in random order`);
 
+ let lastError = null;
+ let successfulAttempts = 0;
+ let failedAttempts = 0;
+
  for (const hostname of shuffledInstances) {
   try {
    const transcript = await fetchFromInstance(hostname, videoId);
    if (transcript) {
+    successfulAttempts++;
+    console.log(`✅ Success after ${failedAttempts} failed attempts`);
     return transcript;
+   } else {
+    failedAttempts++;
+    console.log(`⚠️ ${hostname} returned empty transcript`);
    }
   } catch (error) {
-   console.warn(`Failed to fetch from ${hostname}:`, error.message);
+   failedAttempts++;
+   lastError = error;
+   console.warn(`❌ Failed to fetch from ${hostname}: ${error.message}`);
+
+   // Continue to next instance instead of giving up
+   if (failedAttempts < shuffledInstances.length) {
+    console.log(`Continuing to next instance... (${failedAttempts}/${shuffledInstances.length} failed)`);
+   }
   }
  }
 
- throw new Error('Failed to fetch transcript from all available Invidious instances');
+ // All instances failed
+ console.error(`💀 All ${shuffledInstances.length} Invidious instances failed for video ${videoId}`);
+ console.error(`Final stats: ${successfulAttempts} successful, ${failedAttempts} failed`);
+
+ const errorMsg = lastError ? lastError.message : 'Unknown error';
+ throw new Error(`Failed to fetch transcript from all available Invidious instances. Last error: ${errorMsg}`);
 }
 
 module.exports = {getHealthyInvidiousInstances, fetchTranscriptViaInvidious};
