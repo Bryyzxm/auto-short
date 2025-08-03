@@ -70,6 +70,11 @@ let YTDLP_COOKIES_PATH = process.env.YTDLP_COOKIES_PATH || path.join(__dirname, 
 // Check for cookies content in environment variable and create file if needed too
 const checkAndCreateCookiesFromEnv = () => {
  const cookiesContent = process.env.YTDLP_COOKIES_CONTENT;
+ if (cookiesContent) {
+  console.log(`✅ Successfully loaded cookies from environment. Size: ${cookiesContent.length} characters.`);
+ } else {
+  console.error('❌ YOUTUBE_COOKIES_CONTENT environment variable not found!');
+ }
 
  if (cookiesContent && cookiesContent.trim()) {
   try {
