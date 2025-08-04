@@ -3,6 +3,7 @@ import {YouTubeInputForm} from './components/YouTubeInputForm';
 import {ShortVideoCard} from './components/ShortVideoCard';
 import {LoadingSpinner} from './components/LoadingSpinner';
 import {TranscriptErrorHandler} from './components/TranscriptUploadFallback';
+import {ManualTranscriptUpload} from './components/ManualTranscriptUpload';
 import {generateShortsIdeas} from './services/groqService';
 import type {ShortVideo} from './types';
 import {InfoIcon} from './components/icons';
@@ -29,7 +30,7 @@ const getBackendUrl = () => {
   return localhostUrl;
  }
 
-  const backendUrl = envUrl || 'https://auto-short.azurewebsites.net';
+ const backendUrl = envUrl || 'https://auto-short.azurewebsites.net';
 
  return backendUrl;
 };
@@ -70,6 +71,8 @@ const App: React.FC = () => {
  const [aspectRatio, setAspectRatio] = useState<string>('9:16');
  const [showTranscriptUpload, setShowTranscriptUpload] = useState<boolean>(false);
  const [currentVideoId, setCurrentVideoId] = useState<string | null>(null);
+ const [transcriptUploadError, setTranscriptUploadError] = useState<string | null>(null);
+ const [showManualUpload, setShowManualUpload] = useState<boolean>(false);
 
  // Check for API key on mount
  React.useEffect(() => {
@@ -405,6 +408,40 @@ const App: React.FC = () => {
   [aspectRatio]
  );
 
+ // Handler for manual transcript file upload (new feature)
+ const handleTranscriptUploadSuccess = useCallback((updatedSegments: ShortVideo[]) => {
+  console.log(`[APP] ✅ Manual transcript upload successful: ${updatedSegments.length} segments updated`);
+  setGeneratedShorts(updatedSegments);
+  setTranscriptUploadError(null);
+  setShowManualUpload(false);
+ }, []);
+
+ const handleTranscriptUploadError = useCallback((errorMessage: string) => {
+  console.error('[APP] ❌ Manual transcript upload failed:', errorMessage);
+  setTranscriptUploadError(errorMessage);
+ }, []);
+
+ const toggleManualUpload = useCallback(() => {
+  setShowManualUpload(!showManualUpload);
+  setTranscriptUploadError(null);
+ }, [showManualUpload]);
+
+ // Handle URL changes to extract video ID immediately for transcript upload
+ const handleUrlChange = useCallback((url: string) => {
+  if (!url.trim()) {
+   setCurrentVideoId(null);
+   return;
+  }
+
+  const videoId = extractYouTubeVideoId(url);
+  if (videoId) {
+   setCurrentVideoId(videoId);
+   console.log(`[APP] Video ID extracted from URL: ${videoId}`);
+  } else {
+   setCurrentVideoId(null);
+  }
+ }, []);
+
  const handleSubmit = useCallback(
   async (url: string, aspectRatio: string) => {
    if (apiKeyError) return;
@@ -420,6 +457,9 @@ const App: React.FC = () => {
     setIsLoading(false);
     return;
    }
+
+   // Set video ID immediately so users can upload transcripts
+   setCurrentVideoId(videoId);
 
    try {
     console.log(`[APP] ✅ NEW APPROACH: Using intelligent segments with real timing for ${videoId}`);
@@ -439,6 +479,7 @@ const App: React.FC = () => {
     });
 
     setGeneratedShorts(intelligentSegments);
+    setCurrentVideoId(videoId);
     setIsLoading(false);
     return; // Success - no need for legacy fallback
    } catch (intelligentError: any) {
@@ -590,6 +631,7 @@ const App: React.FC = () => {
     });
 
     setGeneratedShorts(shortsWithVideoId);
+    setCurrentVideoId(videoId);
    } catch (e: any) {
     console.error('Enhanced AI segmentation error:', e);
     setError(e.message ?? 'Terjadi kesalahan saat menganalisis video dengan AI. Silakan coba lagi.');
@@ -610,12 +652,60 @@ const App: React.FC = () => {
    <main className="w-full max-w-4xl flex-1">
     <YouTubeInputForm
      onSubmit={handleSubmit}
+     onUrlChange={handleUrlChange}
      isLoading={isLoading}
      aspectRatio={aspectRatio}
      setAspectRatio={setAspectRatio}
     />
-    {isLoading && <LoadingSpinner />}
+    {/* Manual Transcript Upload - Always visible */}
+    <div className="mt-6">
+     <div className="p-6 bg-gray-800 rounded-lg border border-gray-600">
+      <div className="flex items-center justify-between mb-4">
+       <div>
+        <h3 className="text-lg font-semibold text-gray-200">Manual Transcript Upload</h3>
+        <p className="text-sm text-gray-400">Saat ini transcript belum bisa ditampilkan otomatis.</p>
+        <p className="text-xs text-gray-500 mt-1">Upload file transcript (.srt atau .txt) untuk menampilkan teks yang sesuai dengan setiap segmen video.</p>
+       </div>
+      </div>
 
+      {!currentVideoId && (
+       <div className="text-center py-4 text-gray-500">
+        <p className="text-sm">Enter a YouTube URL above to enable transcript upload. You can upload a transcript file even before generating segments.</p>
+       </div>
+      )}
+
+      {currentVideoId && !showManualUpload && (
+       <div className="text-center py-4">
+        <button
+         onClick={toggleManualUpload}
+         className="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium"
+         disabled={isLoading}
+        >
+         Upload Transcript File
+        </button>
+        {generatedShorts.length === 0 && <p className="mt-2 text-xs text-gray-500">No video segments yet? No problem! Upload a transcript and we'll create segments automatically.</p>}
+       </div>
+      )}
+
+      {showManualUpload && currentVideoId && (
+       <ManualTranscriptUpload
+        videoId={currentVideoId}
+        existingSegments={generatedShorts}
+        onSuccess={handleTranscriptUploadSuccess}
+        onError={handleTranscriptUploadError}
+        backendUrl={BACKEND_URL}
+       />
+      )}
+
+      {transcriptUploadError && (
+       <div className="mt-4 p-4 bg-red-800 bg-opacity-70 text-red-200 border border-red-600 rounded-lg">
+        <p className="font-semibold">Upload Error:</p>
+        <p>{transcriptUploadError}</p>
+       </div>
+      )}
+     </div>
+    </div>{' '}
+    {isLoading && <LoadingSpinner />}
     {/* Show transcript upload interface when YouTube is blocking */}
     {showTranscriptUpload && currentVideoId && (
      <div className="mt-6">
@@ -626,14 +716,12 @@ const App: React.FC = () => {
       />
      </div>
     )}
-
     {error && !showTranscriptUpload && (
      <div className="mt-6 p-4 bg-red-800 bg-opacity-70 text-red-200 border border-red-600 rounded-lg text-center">
       <p className="font-semibold">Error:</p>
       <p>{error}</p>
      </div>
     )}
-
     {generatedShorts.length > 0 && (
      <div className="mt-8">
       <h2 className="text-2xl font-semibold mb-6 text-gray-200 text-center">Konsep Klip Pendek yang Disarankan</h2>
@@ -652,13 +740,11 @@ const App: React.FC = () => {
       </div>
      </div>
     )}
-
     {!isLoading && !error && generatedShorts.length === 0 && youtubeUrl && !apiKeyError && (
      <div className="mt-6 p-4 bg-gray-700 bg-opacity-50 text-gray-300 border border-gray-600 rounded-lg text-center">
       <p>Tidak ada hasil untuk ditampilkan. Masukkan URL YouTube dan klik "Generate Clip Segments" untuk melihat saran bertenaga AI.</p>
      </div>
     )}
-
     <div className="mt-10 p-4 bg-yellow-700 bg-opacity-30 text-yellow-200 border border-yellow-600 rounded-lg text-sm flex items-start space-x-3">
      <InfoIcon className="w-6 h-6 flex-shrink-0 mt-0.5 text-yellow-400" />
      <div>

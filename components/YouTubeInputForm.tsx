@@ -3,13 +3,14 @@ import {SparklesIcon} from './icons';
 
 interface YouTubeInputFormProps {
  onSubmit: (url: string, aspectRatio: string) => void;
+ onUrlChange?: (url: string) => void; // New prop to notify parent of URL changes
  isLoading: boolean;
  disabled?: boolean;
  aspectRatio: string;
  setAspectRatio: (v: string) => void;
 }
 
-export const YouTubeInputForm: React.FC<YouTubeInputFormProps> = ({onSubmit, isLoading, disabled, aspectRatio, setAspectRatio}) => {
+export const YouTubeInputForm: React.FC<YouTubeInputFormProps> = ({onSubmit, onUrlChange, isLoading, disabled, aspectRatio, setAspectRatio}) => {
  const [url, setUrl] = useState<string>('');
  const [inputError, setInputError] = useState<string | null>(null);
 
@@ -46,8 +47,11 @@ export const YouTubeInputForm: React.FC<YouTubeInputFormProps> = ({onSubmit, isL
      name="youtubeUrl"
      value={url}
      onChange={(e) => {
-      setUrl(e.target.value);
+      const newUrl = e.target.value;
+      setUrl(newUrl);
       if (inputError) setInputError(null);
+      // Notify parent component of URL changes immediately
+      onUrlChange?.(newUrl);
      }}
      placeholder="cth: https://www.youtube.com/watch?v=dQw4w9WgXcQ"
      className="w-full px-4 py-3 bg-gray-700 text-gray-100 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none transition-colors duration-200 placeholder-gray-500"

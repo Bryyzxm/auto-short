@@ -1,6 +1,11 @@
-require('dotenv').config();
+// Load environment variables from multiple possible locations
+require('dotenv').config(); // Load from backend/.env if exists
+require('dotenv').config({path: '../.env.local'}); // Load from root .env.local
+require('dotenv').config({path: '../.env'}); // Load from root .env if exists
+
 const express = require('express');
 const cors = require('cors');
+const multer = require('multer');
 const {execFile, execSync, spawn} = require('child_process');
 const {v4: uuidv4} = require('uuid');
 const path = require('path');
@@ -29,6 +34,41 @@ try {
 
 const {fetchTranscriptViaInvidious, getHealthyInvidiousInstances} = require('./services/invidious.service.js');
 const {TranscriptDisabledError, TranscriptTooShortError, TranscriptNotFoundError} = require('./services/transcriptErrors.js');
+const {parseTranscriptFile, synchronizeWithSegments} = require('./services/transcriptParser.js');
+
+// ENHANCED AI SEGMENTATION SERVICES
+let enhancedTranscriptProcessor;
+try {
+ enhancedTranscriptProcessor = require('./services/enhancedTranscriptProcessor.js');
+ console.log('[SERVER] ✅ Enhanced transcript processor loaded successfully');
+} catch (error) {
+ console.error('[SERVER] ❌ Failed to load enhanced transcript processor:', error.message);
+ enhancedTranscriptProcessor = null;
+}
+
+// Configure multer for file uploads (in-memory storage for transcript files)
+const transcriptUpload = multer({
+ storage: multer.memoryStorage(),
+ limits: {
+  fileSize: 2 * 1024 * 1024, // 2MB limit
+  files: 1, // Only one file at a time
+ },
+ fileFilter: (req, file, cb) => {
+  // Accept only .srt and .txt files
+  const allowedExtensions = ['.srt', '.txt'];
+  const allowedMimeTypes = ['text/plain', 'application/x-subrip', 'text/x-srt'];
+
+  const fileExtension = path.extname(file.originalname).toLowerCase();
+  const isValidExtension = allowedExtensions.includes(fileExtension);
+  const isValidMimeType = allowedMimeTypes.includes(file.mimetype);
+
+  if (isValidExtension || isValidMimeType) {
+   cb(null, true);
+  } else {
+   cb(new Error('Only .srt and .txt files are allowed'), false);
+  }
+ },
+});
 
 // Helper function to convert transcript text to segments format for consistent API response
 function convertTranscriptTextToSegments(transcriptText, source = 'invidious') {
@@ -2029,16 +2069,16 @@ app.get('/api/debug/invidious-instances', async (req, res) => {
  }
 });
 
-// Missing endpoint: Intelligent segments with AI-powered chunking
+// ENHANCED INTELLIGENT SEGMENTS ENDPOINT WITH AI-POWERED SEGMENTATION
 app.post('/api/intelligent-segments', async (req, res) => {
- const {videoId, targetSegmentCount = 8} = req.body;
+ const {videoId, targetSegmentCount = 8, minDuration = 20, maxDuration = 90} = req.body;
 
  if (!videoId) {
   return res.status(400).json({error: 'Video ID is required'});
  }
 
  try {
-  console.log(`[INTELLIGENT-SEGMENTS] Starting intelligent segmentation for ${videoId}`);
+  console.log(`[INTELLIGENT-SEGMENTS] 🚀 Starting enhanced AI segmentation for ${videoId}`);
 
   // Step 1: Get transcript with real timing using enhanced orchestrator
   const transcriptData = await enhancedTranscriptOrchestrator.extract(videoId, {
@@ -2049,10 +2089,45 @@ app.post('/api/intelligent-segments', async (req, res) => {
    throw new Error('Real timing data required for intelligent segmentation');
   }
 
-  console.log(`[INTELLIGENT-SEGMENTS] Got transcript: ${transcriptData.segments.length} timed segments, ${Math.floor(transcriptData.totalDuration / 60)}m${Math.floor(transcriptData.totalDuration % 60)}s`);
+  console.log(`[INTELLIGENT-SEGMENTS] 📄 Got transcript: ${transcriptData.segments.length} timed segments, ${Math.floor(transcriptData.totalDuration / 60)}m${Math.floor(transcriptData.totalDuration % 60)}s`);
 
-  // Step 2: Create basic intelligent segments (simplified version)
-  const segmentDuration = Math.max(30, Math.min(120, Math.floor(transcriptData.totalDuration / targetSegmentCount)));
+  // Step 2: Use enhanced AI segmentation if available, otherwise fallback to simple chunking
+  let result;
+
+  if (enhancedTranscriptProcessor) {
+   try {
+    console.log(`[INTELLIGENT-SEGMENTS] 🤖 Using enhanced AI segmentation`);
+
+    // Generate segments using enhanced AI processor
+    const aiResult = await enhancedTranscriptProcessor.generateSegmentsFromTranscript(transcriptData.segments, videoId);
+
+    if (aiResult.success) {
+     result = {
+      segments: aiResult.data.segments,
+      videoId: videoId,
+      totalSegments: aiResult.data.segments.length,
+      averageDuration: aiResult.data.stats.averageDuration,
+      method: 'Enhanced AI Segmentation',
+      hasRealTiming: true,
+      transcriptQuality: 'HIGH',
+      aiAnalysis: aiResult.data.aiAnalysis,
+      qualityScore: aiResult.data.stats.qualityScore,
+      contentType: aiResult.data.stats.contentType,
+      extractedAt: new Date().toISOString(),
+     };
+
+     console.log(`[INTELLIGENT-SEGMENTS] ✅ Enhanced AI created ${result.totalSegments} segments (avg: ${result.averageDuration}s, quality: ${result.qualityScore})`);
+     return res.json(result);
+    }
+   } catch (aiError) {
+    console.warn(`[INTELLIGENT-SEGMENTS] ⚠️ Enhanced AI failed: ${aiError.message}, falling back to simple chunking`);
+   }
+  }
+
+  // Fallback: Simple intelligent chunking (existing logic)
+  console.log(`[INTELLIGENT-SEGMENTS] 🔧 Using fallback simple chunking`);
+
+  const segmentDuration = Math.max(minDuration, Math.min(maxDuration, Math.floor(transcriptData.totalDuration / targetSegmentCount)));
   const segments = [];
 
   for (let i = 0; i < transcriptData.segments.length; i += Math.ceil(segmentDuration / 5)) {
@@ -2060,7 +2135,7 @@ app.post('/api/intelligent-segments', async (req, res) => {
    const endIndex = Math.min(i + Math.ceil(segmentDuration / 5), transcriptData.segments.length - 1);
    const end = transcriptData.segments[endIndex];
 
-   if (start && end && end.start - start.start >= 30 && end.start - start.start <= 120) {
+   if (start && end && end.start - start.start >= minDuration && end.start - start.start <= maxDuration) {
     const segmentText = transcriptData.segments
      .slice(i, endIndex + 1)
      .map((s) => s.text)
@@ -2068,12 +2143,12 @@ app.post('/api/intelligent-segments', async (req, res) => {
 
     segments.push({
      id: `intelligent-${videoId}-${segments.length + 1}`,
-     title: `Pembahasan Bagian ${segments.length + 1}`,
-     description: `Segmen menarik dengan durasi ${Math.round(end.start - start.start)} detik`,
+     title: `Segment ${segments.length + 1}`,
+     description: `Segmen dengan durasi ${Math.round(end.start - start.start)} detik`,
      startTimeSeconds: start.start,
      endTimeSeconds: end.start,
      duration: Math.round(end.start - start.start),
-     transcriptExcerpt: segmentText,
+     transcriptExcerpt: segmentText.length > 200 ? segmentText.substring(0, 200) + '...' : segmentText,
      transcriptFull: segmentText,
      youtubeVideoId: videoId,
      thumbnailUrl: `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
@@ -2084,18 +2159,18 @@ app.post('/api/intelligent-segments', async (req, res) => {
    }
   }
 
-  const result = {
+  result = {
    segments: segments,
    videoId: videoId,
    totalSegments: segments.length,
    averageDuration: Math.round(segments.reduce((sum, s) => sum + s.duration, 0) / segments.length),
-   method: 'Intelligent Chunking (Simplified)',
+   method: 'Simple Intelligent Chunking (Fallback)',
    hasRealTiming: true,
    transcriptQuality: 'HIGH',
    extractedAt: new Date().toISOString(),
   };
 
-  console.log(`[INTELLIGENT-SEGMENTS] ✅ Created ${segments.length} intelligent segments (avg: ${result.averageDuration}s)`);
+  console.log(`[INTELLIGENT-SEGMENTS] ✅ Fallback created ${segments.length} segments (avg: ${result.averageDuration}s)`);
   res.json(result);
  } catch (error) {
   console.error(`[INTELLIGENT-SEGMENTS] ❌ Error for ${videoId}:`, error);
@@ -2103,6 +2178,232 @@ app.post('/api/intelligent-segments', async (req, res) => {
    error: 'Intelligent segmentation failed',
    message: error.message,
    videoId: videoId,
+  });
+ }
+});
+
+// ===== ENHANCED MANUAL TRANSCRIPT UPLOAD ENDPOINT =====
+/**
+ * POST /api/upload-transcript
+ * Upload and process transcript file with enhanced AI segmentation
+ *
+ * Body (multipart/form-data):
+ * - file: .srt, .txt, or .vtt transcript file
+ * - videoId: YouTube video ID
+ * - segments: JSON string of existing video segments (optional)
+ * - mode: 'sync' or 'generate' (optional, auto-detected if not provided)
+ */
+app.post('/api/upload-transcript', transcriptUpload.single('transcriptFile'), async (req, res) => {
+ console.log('[TRANSCRIPT-UPLOAD] 🚀 Processing enhanced transcript upload request');
+
+ try {
+  // Validate request
+  if (!req.file) {
+   return res.status(400).json({
+    error: 'No transcript file provided',
+    message: 'Please select a .srt, .txt, or .vtt file to upload',
+   });
+  }
+
+  if (!req.body.videoId) {
+   return res.status(400).json({
+    error: 'Missing video ID',
+    message: 'Video ID is required for transcript processing',
+   });
+  }
+
+  // Parse existing segments (optional)
+  let existingSegments = [];
+  if (req.body.segments) {
+   try {
+    existingSegments = JSON.parse(req.body.segments);
+    if (!Array.isArray(existingSegments)) {
+     throw new Error('Segments must be an array');
+    }
+   } catch (error) {
+    return res.status(400).json({
+     error: 'Invalid segments data',
+     message: 'Segments data must be valid JSON array',
+    });
+   }
+  }
+
+  console.log(`[TRANSCRIPT-UPLOAD] 📄 Processing file: ${req.file.originalname} (${req.file.size} bytes) for video ${req.body.videoId}`);
+  console.log(`[TRANSCRIPT-UPLOAD] 🎯 Mode: ${existingSegments.length > 0 ? 'synchronize' : 'generate'} (${existingSegments.length} existing segments)`);
+
+  // Use enhanced transcript processor if available
+  if (enhancedTranscriptProcessor) {
+   try {
+    console.log(`[TRANSCRIPT-UPLOAD] 🤖 Using enhanced AI transcript processor`);
+
+    const result = await enhancedTranscriptProcessor.processUploadedTranscript(req.file.buffer, req.file.originalname, req.body.videoId, existingSegments);
+
+    if (result.success) {
+     const {mode, data, stats} = result;
+
+     console.log(`[TRANSCRIPT-UPLOAD] ✅ Enhanced processing completed: ${mode} mode, ${data.segments.length} segments`);
+
+     return res.json({
+      success: true,
+      message: mode === 'synchronize' ? `Successfully synchronized transcript with ${stats.matchedSegments}/${stats.totalSegments} video segments` : `Successfully generated ${data.segments.length} AI-powered segments from transcript`,
+      data: data,
+      mode: mode,
+      enhanced: true,
+      processingMethod: 'enhanced-ai',
+      stats: stats,
+     });
+    }
+   } catch (enhancedError) {
+    console.warn(`[TRANSCRIPT-UPLOAD] ⚠️ Enhanced processing failed: ${enhancedError.message}`);
+    console.log(`[TRANSCRIPT-UPLOAD] 🔄 Falling back to legacy processing`);
+   }
+  }
+
+  // Fallback to legacy processing
+  console.log(`[TRANSCRIPT-UPLOAD] 🔧 Using legacy transcript processing`);
+
+  // Parse the uploaded transcript file using legacy parser
+  const transcriptSegments = parseTranscriptFile(req.file.buffer, req.file.originalname, req.file.mimetype);
+  console.log(`[TRANSCRIPT-UPLOAD] 📄 Parsed ${transcriptSegments.length} transcript segments`);
+
+  // Handle case where no video segments exist - generate segments from transcript
+  if (!existingSegments || existingSegments.length === 0) {
+   console.log(`[TRANSCRIPT-UPLOAD] 🎯 No existing segments found - generating segments from transcript`);
+
+   // Create segments from transcript chunks (every ~60 seconds worth of transcript)
+   const generatedSegments = [];
+   const segmentDuration = 60; // 60 seconds per segment
+   let currentSegmentStart = 0;
+
+   // Get transcript duration
+   const lastTranscript = transcriptSegments[transcriptSegments.length - 1];
+   const totalDuration = lastTranscript ? lastTranscript.end : 600; // fallback to 10 minutes
+
+   let segmentIndex = 1;
+   while (currentSegmentStart < totalDuration) {
+    const segmentEnd = Math.min(currentSegmentStart + segmentDuration, totalDuration);
+
+    // Find transcript segments that overlap with this time range
+    const segmentTranscripts = transcriptSegments.filter((t) => t.start < segmentEnd && t.end > currentSegmentStart);
+
+    if (segmentTranscripts.length > 0) {
+     const combinedText = segmentTranscripts
+      .map((t) => t.text)
+      .join(' ')
+      .trim();
+     const startMinutes = Math.floor(currentSegmentStart / 60);
+     const startSeconds = Math.floor(currentSegmentStart % 60);
+     const endMinutes = Math.floor(segmentEnd / 60);
+     const endSeconds = Math.floor(segmentEnd % 60);
+
+     generatedSegments.push({
+      id: `transcript-segment-${segmentIndex}`,
+      title: `Segment ${segmentIndex} (${startMinutes}:${startSeconds.toString().padStart(2, '0')} - ${endMinutes}:${endSeconds.toString().padStart(2, '0')})`,
+      description: combinedText.length > 100 ? combinedText.substring(0, 100) + '...' : combinedText,
+      startTimeSeconds: currentSegmentStart,
+      endTimeSeconds: segmentEnd,
+      youtubeVideoId: req.body.videoId,
+      transcriptExcerpt: combinedText,
+      hasManualTranscript: true,
+      thumbnailUrl: `https://i.ytimg.com/vi/${req.body.videoId}/mqdefault.jpg`,
+     });
+
+     segmentIndex++;
+    }
+
+    currentSegmentStart += segmentDuration;
+   }
+
+   console.log(`[TRANSCRIPT-UPLOAD] ✅ Generated ${generatedSegments.length} segments from transcript (legacy mode)`);
+
+   return res.json({
+    success: true,
+    message: `Successfully created ${generatedSegments.length} video segments from transcript`,
+    data: {
+     videoId: req.body.videoId,
+     segments: generatedSegments,
+     transcriptStats: {
+      totalSegments: transcriptSegments.length,
+      duration: Math.round(totalDuration / 60) + ' minutes',
+      generatedFrom: 'transcript',
+     },
+    },
+    mode: 'generate',
+    enhanced: false,
+    processingMethod: 'legacy-generation',
+   });
+  }
+
+  // Synchronize transcript with existing video segments using legacy method
+  const updatedSegments = synchronizeWithSegments(transcriptSegments, existingSegments);
+
+  // Count successful matches
+  const matchedCount = updatedSegments.filter((s) => s.hasManualTranscript).length;
+
+  if (matchedCount === 0) {
+   return res.status(400).json({
+    error: 'No transcript matches found',
+    message: 'The uploaded transcript timestamps do not align with any video segments. Please check the timing format.',
+    details: {
+     transcriptSegments: transcriptSegments.length,
+     videoSegments: existingSegments.length,
+     matched: 0,
+    },
+   });
+  }
+
+  console.log(`[TRANSCRIPT-UPLOAD] ✅ Legacy synchronization completed - ${matchedCount}/${existingSegments.length} segments matched`);
+
+  // Return updated segments with transcript data
+  res.json({
+   success: true,
+   message: `Successfully synchronized transcript with ${matchedCount} out of ${existingSegments.length} video segments`,
+   data: {
+    videoId: req.body.videoId,
+    segments: updatedSegments,
+    stats: {
+     totalSegments: existingSegments.length,
+     matchedSegments: matchedCount,
+     transcriptEntries: transcriptSegments.length,
+     filename: req.file.originalname,
+     fileSize: req.file.size,
+    },
+   },
+   mode: 'synchronize',
+   enhanced: false,
+   processingMethod: 'legacy-synchronization',
+  });
+ } catch (error) {
+  console.error('[TRANSCRIPT-UPLOAD] ❌ Error processing transcript upload:', error);
+
+  // Handle multer errors
+  if (error.code === 'LIMIT_FILE_SIZE') {
+   return res.status(400).json({
+    error: 'File too large',
+    message: 'Transcript file must be smaller than 2MB',
+   });
+  }
+
+  if (error.message.includes('Only .srt and .txt files are allowed')) {
+   return res.status(400).json({
+    error: 'Invalid file type',
+    message: 'Only .srt, .txt, and .vtt files are supported',
+   });
+  }
+
+  // Handle parsing errors
+  if (error.message.includes('Failed to parse transcript file')) {
+   return res.status(400).json({
+    error: 'Parse error',
+    message: error.message,
+   });
+  }
+
+  // Generic error
+  res.status(500).json({
+   error: 'Server error',
+   message: 'Failed to process transcript upload. Please try again.',
+   details: process.env.NODE_ENV === 'development' ? error.message : undefined,
   });
  }
 });

@@ -1,0 +1,14 @@
+[00:00 - 00:04] Welcome to our AI tutorial series. Today we'll be learning about machine learning fundamentals.
+[00:05 - 00:09] Machine learning is a subset of artificial intelligence that allows computers to learn automatically.
+[00:10 - 00:14] There are three main types of machine learning: supervised, unsupervised, and reinforcement learning.
+[00:15 - 00:19] Supervised learning uses labeled data to train models. For example, showing a computer thousands of cat photos.
+[00:20 - 00:24] Unsupervised learning finds patterns in data without labels. It's like finding hidden connections.
+[00:25 - 00:29] Reinforcement learning learns through trial and error, much like how humans learn to play games.
+[00:30 - 00:34] Popular machine learning algorithms include linear regression, decision trees, and neural networks.
+[00:35 - 00:39] Neural networks are inspired by the human brain and can solve complex problems.
+[00:40 - 00:44] Deep learning is a subset of machine learning that uses multi-layered neural networks.
+[00:45 - 00:49] Applications of machine learning include image recognition, natural language processing, and recommendation systems.
+[00:50 - 00:54] To get started with machine learning, you need data, a problem to solve, and the right tools.
+[00:55 - 00:59] Popular tools include Python, TensorFlow, PyTorch, and scikit-learn.
+[01:00 - 01:04] The future of machine learning includes automated machine learning and explainable AI.
+[01:05 - 01:09] Thank you for watching this introduction to machine learning. Subscribe for more AI content!

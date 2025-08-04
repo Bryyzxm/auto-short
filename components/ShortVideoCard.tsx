@@ -374,19 +374,23 @@ export const ShortVideoCard: React.FC<ShortVideoCardProps> = ({shortVideo, isAct
        </div>
        {(() => {
         const displayText = shortVideo.transcriptExcerpt || transcript;
-        return showFullTranscript ? (
+        const isLongText = displayText.length > 200; // Increase threshold to 200 chars
+
+        return showFullTranscript || !isLongText ? (
          <span>{displayText}</span>
         ) : (
          <span>
-          {displayText.slice(0, 120)}
-          {displayText.length > 120 ? '...' : ''}
+          {displayText.slice(0, 200)}
+          {isLongText ? '...' : ''}
          </span>
         );
        })()}
        {(() => {
         const displayText = shortVideo.transcriptExcerpt || transcript;
+        const isLongText = displayText.length > 200;
+
         return (
-         displayText.length > 120 && (
+         isLongText && (
           <button
            className="ml-2 text-blue-400 underline hover:text-blue-300 focus:outline-none text-xs"
            onClick={() => setShowFullTranscript((v) => !v)}
