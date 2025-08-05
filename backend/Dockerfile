@@ -5,7 +5,7 @@ FROM node:18-slim
 ENV NODE_ENV=production
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install system dependencies dengan optimisasi untuk Railway
+# Install system dependencies dengan optimisasi untuk Azure
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
@@ -47,7 +47,7 @@ RUN mkdir -p temp cookies outputs logs \
 # Switch to non-root user
 USER appuser
 
-# Expose port (Railway menggunakan PORT environment variable)
+# Expose port (Azure menggunakan PORT environment variable)
 EXPOSE ${PORT:-5001}
 
 # Health check untuk memastikan aplikasi berjalan

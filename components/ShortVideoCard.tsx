@@ -20,7 +20,7 @@ const getBackendUrl = () => {
   return localhostUrl;
  }
 
- const backendUrl = envUrl || 'https://auto-short-production.up.railway.app';
+ const backendUrl = envUrl || 'https://auto-short.azurewebsites.net';
  console.log(`[ShortVideoCard] Using backend: ${backendUrl}`);
  return backendUrl;
 };

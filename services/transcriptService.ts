@@ -169,7 +169,7 @@ class SmartTranscriptManager {
   // Use environment-aware backend URL
   const envUrl = (import.meta as any).env.VITE_BACKEND_URL;
   const isDev = (import.meta as any).env.DEV;
-  const backend = isDev && !envUrl ? 'http://localhost:5001' : envUrl || 'https://auto-short-production.up.railway.app';
+  const backend = isDev && !envUrl ? 'http://localhost:5001' : envUrl || 'https://auto-short.azurewebsites.net';
 
   try {
    // Use new enhanced transcript endpoint with path parameter
@@ -285,7 +285,7 @@ class SmartTranscriptManager {
    // Use environment-aware backend URL
    const envUrl = (import.meta as any).env.VITE_BACKEND_URL;
    const isDev = (import.meta as any).env.DEV;
-   const backend = isDev && !envUrl ? 'http://localhost:5001' : envUrl || 'https://auto-short-production.up.railway.app';
+   const backend = isDev && !envUrl ? 'http://localhost:5001' : envUrl || 'https://auto-short.azurewebsites.net';
 
    const response = await fetch(`${backend}/api/video-metadata?videoId=${videoId}`);
    if (response.ok) {

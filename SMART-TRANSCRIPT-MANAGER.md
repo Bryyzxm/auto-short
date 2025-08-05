@@ -4,7 +4,7 @@
 
 ### **Root Cause Analysis:**
 
-- **YouTube Bot Detection**: Railway server IP gets blocked by YouTube
+- **YouTube Bot Detection**: Azure server IP gets blocked by YouTube
 - **Infinite Loops**: Multiple components calling transcript API simultaneously
 - **React Strict Mode**: Development vs Production behavior differences
 - **Poor Error Handling**: Failed requests not properly cached
@@ -40,7 +40,7 @@
 
 #### **Strategy 4: Backend Fallback** (Priority 4)
 
-- Current Railway backend as fallback
+- Current Azure backend as fallback
 - Enhanced with better error handling
 - Rate limiting and timeout management
 
@@ -141,7 +141,7 @@ transcriptManager.clearCache(); // Reset for testing
 
 ### **Backend Fallback:**
 
-- **Current**: Railway production server
+- **Current**: Azure production server
 - **Enhanced**: Better error handling and timeouts
 - **When**: Only when other strategies fail
 

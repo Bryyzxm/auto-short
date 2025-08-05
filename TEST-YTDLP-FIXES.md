@@ -89,7 +89,7 @@ RUN apt-get update && apt-get install -y \
 - [x] ✅ Updated Dockerfile for latest yt-dlp
 - [x] ✅ Enhanced reliability parameters
 - [x] ✅ Local testing completed successfully
-- [ ] 🔄 Deploy to Railway production environment
+- [ ] 🔄 Deploy to Azure production environment
 - [ ] 🔄 Monitor production success rate
 - [ ] 🔄 Update error tracking and analytics
 
@@ -100,7 +100,7 @@ RUN apt-get update && apt-get install -y \
 1. **Immediate Deployment**
 
    - Push changes to Git repository
-   - Deploy to Railway production environment
+   - Deploy to Azure production environment
    - Monitor initial success rate
 
 2. **Success Rate Monitoring**

@@ -465,7 +465,7 @@ app.get('/api/debug/environment', async (req, res) => {
    cookies_env_variable: process.env.YTDLP_COOKIES_CONTENT ? 'present' : 'not set',
    cookies_env_length: process.env.YTDLP_COOKIES_CONTENT ? process.env.YTDLP_COOKIES_CONTENT.length : 0,
    environment: process.env.NODE_ENV || 'development',
-   railway_env: process.env.RAILWAY_ENVIRONMENT_NAME || 'none',
+   azure_env: process.env.WEBSITE_HOSTNAME || 'local',
    uptime: process.uptime(),
    memory: process.memoryUsage(),
    timestamp: new Date().toISOString(),
@@ -598,7 +598,7 @@ function logEnvironmentInfo(id) {
  console.log(`[${id}] - YT-DLP Path: ${YT_DLP_PATH}`);
  console.log(`[${id}] - YT-DLP Exists: ${fs.existsSync(YT_DLP_PATH) || 'N/A (system binary)'}`);
  console.log(`[${id}] - NODE_ENV: ${process.env.NODE_ENV || 'undefined'}`);
- console.log(`[${id}] - Railway Env: ${process.env.RAILWAY_ENVIRONMENT_NAME || 'none'}`);
+ console.log(`[${id}] - Azure Env: ${process.env.WEBSITE_HOSTNAME || 'local'}`);
 }
 
 // Check video formats availability
@@ -868,7 +868,7 @@ app.post('/api/shorts', async (req, res) => {
    environment: {
     platform: process.platform,
     node_env: process.env.NODE_ENV,
-    railway_env: process.env.RAILWAY_ENVIRONMENT_NAME || 'none',
+    azure_env: process.env.WEBSITE_HOSTNAME || 'local',
     ytdlp_path: process.platform === 'win32' ? YT_DLP_PATH : 'yt-dlp',
     timestamp: new Date().toISOString(),
    },

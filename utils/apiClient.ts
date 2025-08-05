@@ -1,6 +1,6 @@
 /**
  * API Client Configuration untuk Production
- * Mengatur koneksi ke backend Railway dengan error handling
+ * Mengatur koneksi ke backend Azure dengan error handling
  * Menggunakan native fetch untuk menghindari dependency axios
  */
 
@@ -15,7 +15,7 @@ const getBackendUrl = (): string => {
  }
 
  // Production: wajib menggunakan environment variable
- return envUrl || 'https://auto-short-production.up.railway.app';
+ return envUrl || 'https://auto-short.azurewebsites.net';
 };
 
 const BACKEND_URL = getBackendUrl();

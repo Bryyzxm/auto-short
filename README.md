@@ -123,7 +123,7 @@ YouTube may block yt-dlp requests. To bypass this:
 Application menggunakan multi-backend fallback:
 
 1. Custom environment URL
-2. Railway production
+2. Azure production
 3. Local development
 
 ### **API Rate Limiting**

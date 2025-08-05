@@ -17,7 +17,7 @@ npm run dev
 ✅ **Keuntungan:**
 
 - Setup cepat, tidak perlu backend lokal
-- Menggunakan backend Railway yang sudah stabil
+- Menggunakan backend Azure yang sudah stabil
 - Cocok untuk development UI/UX
 
 ### Option 2: Frontend Lokal + Backend Lokal (Full Stack Development)
@@ -51,7 +51,7 @@ npm run dev
 
 ```bash
 # Backend URL - pilih salah satu:
-VITE_BACKEND_URL=https://auto-short-production.up.railway.app  # Production backend
+VITE_BACKEND_URL=https://auto-short.azurewebsites.net  # Production backend
 # VITE_BACKEND_URL=http://localhost:5001                      # Local backend
 
 # API Keys
@@ -62,7 +62,7 @@ VITE_GEMINI_API_KEY=your_gemini_key_here
 ### Vercel Environment (Production)
 
 ```bash
-VITE_BACKEND_URL=https://auto-short-production.up.railway.app
+VITE_BACKEND_URL=https://auto-short.azurewebsites.net
 VITE_GROQ_API_KEY=your_production_groq_key
 VITE_GEMINI_API_KEY=your_production_gemini_key
 ```
@@ -78,10 +78,10 @@ VITE_GEMINI_API_KEY=your_production_gemini_key
 
 - ❌ Pastikan backend URL benar di .env.local
 - 🔧 Jika menggunakan backend lokal, pastikan CORS diaktifkan
-- ✅ Backend Railway sudah configured untuk CORS
+- ✅ Backend Azure sudah configured untuk CORS
 
 ### 404 API Errors
 
 - 🔍 Check: Apakah backend URL dapat diakses langsung
-- 🔧 Test: Buka https://auto-short-production.up.railway.app/health
-- ⏳ Wait: Backend Railway mungkin butuh waktu startup (cold start)
+- 🔧 Test: Buka https://auto-short.azurewebsites.net/health
+- ⏳ Wait: Backend Azure mungkin butuh waktu startup (cold start)

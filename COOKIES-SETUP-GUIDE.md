@@ -194,7 +194,7 @@ curl http://localhost:5001/api/debug/environment
 
 ## Production Deployment
 
-### Railway/Vercel Deployment
+### Azure/Vercel Deployment
 
 1. **Upload cookies file to your deployment:**
 
@@ -207,8 +207,9 @@ curl http://localhost:5001/api/debug/environment
 2. **Set environment variable:**
 
    ```bash
-   # Railway
-   railway variables set YTDLP_COOKIES_PATH=/app/backend/cookies/youtube-cookies.txt
+   # Azure App Service
+   # Set in Azure portal under Configuration > Application settings
+   YTDLP_COOKIES_PATH=/home/site/wwwroot/cookies.txt
 
    # Vercel
    vercel env add YTDLP_COOKIES_PATH

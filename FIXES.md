@@ -4,7 +4,7 @@
 
 ### 1. **API Backend 404 Error**
 
-- URL `https://auto-short-production.up.railway.app/api/yt-transcript` mengembalikan 404
+- URL `https://auto-short.azurewebsites.net/api/yt-transcript` mengembalikan 404
 - Backend production tidak tersedia atau bermasalah
 
 ### 2. **Infinite Loop React Components**
@@ -34,7 +34,7 @@ const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001';
 
 // After
 const getBackendUrl = () => {
- const backendUrls = [import.meta.env.VITE_BACKEND_URL, 'https://auto-short-production.up.railway.app', 'http://localhost:5001'].filter(Boolean);
+ const backendUrls = [import.meta.env.VITE_BACKEND_URL, 'https://auto-short.azurewebsites.net', 'http://localhost:5001'].filter(Boolean);
 
  return backendUrls[0] || 'http://localhost:5001';
 };
@@ -114,7 +114,7 @@ Infinite React re-rendering
 ### ✅ **After (Fixed)**
 
 ```
-[TRANSCRIPT] Trying backend 1/3: https://auto-short-production.up.railway.app
+[TRANSCRIPT] Trying backend 1/3: https://auto-short.azurewebsites.net
 [TRANSCRIPT] Backend 1 failed: 404
 [TRANSCRIPT] Trying backend 2/3: http://localhost:5001
 [TRANSCRIPT] Success with backend 2: Cached transcript
