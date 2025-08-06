@@ -15,9 +15,6 @@ const getBackendUrl = () => {
  const envUrl = (import.meta as any).env.VITE_BACKEND_URL;
  const isDev = (import.meta as any).env.DEV;
 
- console.log(`[CONFIG] Environment: ${isDev ? 'development' : 'production'}`);
- console.log(`[CONFIG] VITE_BACKEND_URL from env: ${envUrl}`);
-
  // Smart backend selection:
  // 1. Development: use localhost only if no env var is set
  // 2. If environment variable is set, always use it (for both dev and prod)
@@ -36,8 +33,6 @@ const getBackendUrl = () => {
 };
 
 const BACKEND_URL = getBackendUrl();
-console.log(`[CONFIG] Using backend URL: ${BACKEND_URL}`);
-
 // Helper: ekstrak videoId dari berbagai format URL YouTube (termasuk live/replay)
 function extractYouTubeVideoId(url: string): string | null {
  // Lebih sederhana dan aman
@@ -645,7 +640,7 @@ const App: React.FC = () => {
  return (
   <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-blue-900 text-gray-100 flex flex-col items-center p-4 sm:p-8 selection:bg-purple-500 selection:text-white">
    <header className="w-full max-w-4xl mb-8 text-center">
-    <h1 className="text-4xl sm:text-5xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-pink-400 to-red-400">AI Clipper (ALPHA)</h1>
+    <h1 className="text-4xl sm:text-5xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-pink-400 to-red-400">AI Clipper (0.1)</h1>
     <p className="mt-3 text-lg text-gray-300">Identifikasi segmen kunci dari video YouTube dengan AI GRATIS tanpa batas. Ditenagai oleh Groq AI.</p>
     {/* Build: {new Date().toISOString()} */}
    </header>
@@ -670,7 +665,7 @@ const App: React.FC = () => {
 
       {!currentVideoId && (
        <div className="text-center py-4 text-gray-500">
-        <p className="text-sm">Enter a YouTube URL above to enable transcript upload. You can upload a transcript file even before generating segments.</p>
+        <p className="text-sm">Masukkan URL Youtube pada kolom diatas untuk upload fil transcript. Kamu bisa mengupload file transcript bahkan sebelum membuat segmen.</p>
        </div>
       )}
 
@@ -748,19 +743,30 @@ const App: React.FC = () => {
     <div className="mt-10 p-4 bg-yellow-700 bg-opacity-30 text-yellow-200 border border-yellow-600 rounded-lg text-sm flex items-start space-x-3">
      <InfoIcon className="w-6 h-6 flex-shrink-0 mt-0.5 text-yellow-400" />
      <div>
-      <h4 className="font-semibold text-yellow-100">Penting: Pratinjau Tertanam & Simulasi Unduhan</h4>
-      <p>Aplikasi ini menggunakan AI untuk **mengidentifikasi segmen** video dan **menampilkannya sebagai konsep klip pendek** menggunakan pemutar YouTube yang disematkan.</p>
-      <p className="mt-1">Setiap kartu akan menampilkan pemutar video untuk segmen yang disarankan. Anda dapat menonton konsep klip pendek ini langsung di sini.</p>
+      <h4 className="font-semibold text-yellow-100">Cara Upload Transcript Manual</h4>
+      <p>1. Copy URL Youtube yang kamu mau.</p>
       <p className="mt-1">
-       **Pengunduhan file video pendek secara langsung tidak dimungkinkan dalam demo ini** karena batasan teknis browser dan Ketentuan Layanan YouTube. Tombol "Download" bersifat simulasi dan akan memberikan detail segmen.
+       2. Kunjungi{' '}
+       <a
+        href="https://downsub.com/"
+        className="font-bold italic underline"
+        target="_blank"
+        rel="noopener noreferrer"
+       >
+        Downsub
+       </a>
+       , paste URL Youtube tersebut dan download tipe file SRT.
       </p>
-      <p className="mt-1">Dalam aplikasi produksi penuh, fitur pengunduhan video memerlukan infrastruktur backend (server) untuk memproses dan menyediakan file video.</p>
+      <p className="mt-1">3. Paste URL Youtube lagi di website Autoshort.</p>
+      <p className="mt-1">4. Klik tombol upload transcript file, lalu upload file SRT yang sudah kamu download.</p>
+      <p className="mt-1">5. Klik tombol generate clip segments dan tunggu hasilnya.</p>
+      <p className="mt-1">*Fitur upload transcript hanya sementara. Developer sedang berusaha memperbaiki agar fitur transcript otomatis bisa bekerja.</p>
      </div>
     </div>
    </main>
 
    <footer className="w-full max-w-4xl mt-12 text-center text-gray-500">
-    <p>&copy; {new Date().getFullYear()} AI Shorts Segmenter (Groq + Llama 3.3 70B). Demonstrasi Konsep.</p>
+    <p>&copy; {new Date().getFullYear()} AI Shorts Segmenter (Groq + Llama 3.3 70B). Beta 0.1</p>
    </footer>
   </div>
  );

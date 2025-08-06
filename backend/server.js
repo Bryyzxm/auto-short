@@ -349,24 +349,48 @@ const whitelist = [...productionOrigins, ...developmentOrigins];
 
 const corsOptions = {
  origin: function (origin, callback) {
-  // Izinkan jika origin ada di whitelist, atau jika permintaan tidak memiliki origin (misal: Postman)
-  if (whitelist.indexOf(origin) !== -1 || !origin) {
+  // Allow requests with no origin (like mobile apps or curl requests)
+  if (!origin) return callback(null, true);
+
+  // Check if the origin is in the whitelist
+  if (whitelist.indexOf(origin) !== -1) {
    callback(null, true);
   } else {
+   console.log(`[CORS] Blocked origin: ${origin}`);
+   console.log(`[CORS] Allowed origins: ${whitelist.join(', ')}`);
    callback(new Error('Origin ini tidak diizinkan oleh kebijakan CORS'));
   }
  },
+ credentials: true,
+ methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+ allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+ optionsSuccessStatus: 200, // Some legacy browsers (IE11, various SmartTVs) choke on 204
 };
 
 app.use(cors(corsOptions));
 app.use(express.json({limit: '10mb'}));
-
 app.use(express.urlencoded({extended: true, limit: '10mb'}));
+
+// Handle preflight OPTIONS requests explicitly
+app.options('*', cors(corsOptions));
+
+// Add request timeout middleware
+app.use((req, res, next) => {
+ // Set timeout to 5 minutes for upload endpoints
+ if (req.path.includes('/upload-transcript') || req.path.includes('/api/shorts')) {
+  res.setTimeout(300000); // 5 minutes
+ } else {
+  res.setTimeout(60000); // 1 minute for other endpoints
+ }
+ next();
+});
 
 // Log CORS configuration on startup
 console.log('🌐 CORS Configuration:');
 console.log('📋 Allowed Origins:', whitelist);
 console.log('✅ CORS middleware applied');
+console.log('✅ OPTIONS preflight handler added');
+console.log('✅ Request timeout middleware configured');
 
 // 🔧 STARTUP VALIDATION: Verify yt-dlp is available
 async function validateStartup() {

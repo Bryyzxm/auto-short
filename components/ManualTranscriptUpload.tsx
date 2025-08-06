@@ -51,6 +51,9 @@ export const ManualTranscriptUpload: React.FC<ManualTranscriptUploadProps> = ({v
   setUploadProgress('Preparing upload...');
   setSuccessStats(null);
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout
+
   try {
    console.log(`[MANUAL-TRANSCRIPT] Uploading ${file.name} for video ${videoId}`);
 
@@ -64,13 +67,16 @@ export const ManualTranscriptUpload: React.FC<ManualTranscriptUploadProps> = ({v
    const response = await fetch(`${backendUrl}/api/upload-transcript`, {
     method: 'POST',
     body: formData,
+    signal: controller.signal,
    });
 
-   const result = await response.json();
-
    if (!response.ok) {
-    throw new Error(result.message || result.error || 'Upload failed');
+    const errorText = await response.text();
+    console.error(`[MANUAL-TRANSCRIPT] HTTP ${response.status}:`, errorText);
+    throw new Error(`HTTP ${response.status}: ${errorText || 'Upload failed'}`);
    }
+
+   const result = await response.json();
 
    console.log(`[MANUAL-TRANSCRIPT] ✅ Upload successful:`, result);
 
@@ -91,8 +97,15 @@ export const ManualTranscriptUpload: React.FC<ManualTranscriptUploadProps> = ({v
    onSuccess(segments);
   } catch (error: any) {
    console.error('[MANUAL-TRANSCRIPT] ❌ Upload failed:', error);
-   onError(error.message || 'Failed to upload transcript. Please try again.');
+
+   // Handle specific error types
+   if (error.name === 'AbortError') {
+    onError('Upload timed out after 5 minutes. Please try again.');
+   } else {
+    onError(error.message || 'Failed to upload transcript. Please try again.');
+   }
   } finally {
+   clearTimeout(timeoutId);
    setIsUploading(false);
    setUploadProgress('');
   }

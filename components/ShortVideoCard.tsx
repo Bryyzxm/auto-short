@@ -9,9 +9,6 @@ const getBackendUrl = () => {
  const envUrl = (import.meta as any).env.VITE_BACKEND_URL;
  const isDev = (import.meta as any).env.DEV;
 
- console.log(`[ShortVideoCard] Environment: ${isDev ? 'development' : 'production'}`);
- console.log(`[ShortVideoCard] VITE_BACKEND_URL from env: ${envUrl}`);
-
  // Smart backend selection for consistency with App.tsx
  if (isDev && !envUrl) {
   // Development without explicit env var: use localhost
@@ -21,7 +18,6 @@ const getBackendUrl = () => {
  }
 
  const backendUrl = envUrl || 'https://auto-short.azurewebsites.net';
- console.log(`[ShortVideoCard] Using backend: ${backendUrl}`);
  return backendUrl;
 };
 
