@@ -44,7 +44,7 @@ class EnhancedAISegmenter {
 
  /**
   * MAIN SEGMENTATION METHOD
-  * Takes structured transcript and generates intelligent segments with metadata
+  * Takes structured transcript and generates intelligent segments focused on interesting moments
   */
  async generateIntelligentSegments(transcriptSegments, options = {}) {
   if (!this.groq) {
@@ -53,27 +53,45 @@ class EnhancedAISegmenter {
   }
 
   try {
-   console.log(`[AI-SEGMENTER] 🚀 Starting AI segmentation for ${transcriptSegments.length} transcript segments`);
+   console.log(`[AI-SEGMENTER] 🚀 Starting INTELLIGENT segmentation for ${transcriptSegments.length} transcript segments`);
+   console.log(`[AI-SEGMENTER] 🎯 Focus: Finding INTERESTING VIRAL MOMENTS (not rigid segmentation)`);
 
-   // STEP 1: Analyze transcript structure and content
-   const contentAnalysis = await this.analyzeTranscriptContent(transcriptSegments);
-   console.log(`[AI-SEGMENTER] 📊 Content analysis: ${contentAnalysis.contentType}, ${contentAnalysis.language}, ${contentAnalysis.topics.length} topics`);
+   // Enforce segment limits with proper shorts duration
+   const maxSegments = Math.min(options.maxSegments || 15, 15); // Allow up to 15 segments
+   const targetCount = Math.min(options.targetCount || 12, maxSegments);
+   const minDuration = options.minDuration || 30; // 30 seconds minimum for shorts
+   const maxDuration = options.maxDuration || 90; // 90 seconds maximum for shorts
 
-   // STEP 2: Detect topic boundaries using AI
-   const topicBoundaries = await this.detectTopicBoundaries(transcriptSegments, contentAnalysis);
-   console.log(`[AI-SEGMENTER] 🎯 Detected ${topicBoundaries.length} topic boundaries`);
+   console.log(`[AI-SEGMENTER] ⚙️ Parameters: target=${targetCount}, max=${maxSegments}, duration=${minDuration}-${maxDuration}s`);
 
-   // STEP 3: Generate optimal segments based on boundaries and duration constraints
-   const rawSegments = await this.generateOptimalSegments(transcriptSegments, topicBoundaries, contentAnalysis);
-   console.log(`[AI-SEGMENTER] ⚡ Generated ${rawSegments.length} raw segments`);
+   // STEP 1: Analyze transcript for interesting moments and viral potential
+   const contentAnalysis = await this.analyzeTranscriptForViralMoments(transcriptSegments);
+   console.log(`[AI-SEGMENTER] 📊 Viral analysis: ${contentAnalysis.contentType}, ${contentAnalysis.language}, ${contentAnalysis.viralMoments?.length || 0} interesting moments`);
 
-   // STEP 4: Generate compelling titles and descriptions using AI
-   const segmentsWithMetadata = await this.generateSegmentMetadata(rawSegments, contentAnalysis);
-   console.log(`[AI-SEGMENTER] 📝 Added metadata to ${segmentsWithMetadata.length} segments`);
+   // STEP 2: Detect engaging content boundaries using AI focus on interest
+   const interestingMoments = await this.detectInterestingMoments(transcriptSegments, contentAnalysis);
+   console.log(`[AI-SEGMENTER] 🎯 Detected ${interestingMoments.length} interesting moments`);
 
-   // STEP 5: Extract impact quotes for each segment
+   // STEP 3: Generate segments around interesting moments with proper duration
+   const rawSegments = await this.generateMomentBasedSegments(transcriptSegments, interestingMoments, contentAnalysis, {targetCount, minDuration, maxDuration});
+   console.log(`[AI-SEGMENTER] ⚡ Generated ${rawSegments.length} moment-based segments`);
+
+   // STEP 4: Enforce STRICT limits and validate durations
+   const validatedSegments = this.validateAndLimitSegments(rawSegments, maxSegments, minDuration, maxDuration);
+   console.log(`[AI-SEGMENTER] 🔒 STRICT ENFORCEMENT: ${validatedSegments.length}/${maxSegments} segments (avg: ${Math.round(validatedSegments.reduce((sum, s) => sum + s.duration, 0) / validatedSegments.length)}s)`);
+
+   // STEP 5: Generate compelling metadata focused on viral appeal
+   const segmentsWithMetadata = await this.generateViralMetadata(validatedSegments, contentAnalysis);
+   console.log(`[AI-SEGMENTER] 📝 Added viral-focused metadata to ${segmentsWithMetadata.length} segments`);
+
+   // STEP 6: Extract impact quotes for each segment
    const finalSegments = await this.extractImpactQuotes(segmentsWithMetadata);
-   console.log(`[AI-SEGMENTER] ✨ Final result: ${finalSegments.length} complete segments`);
+   console.log(`[AI-SEGMENTER] ✨ FINAL RESULT: ${finalSegments.length} INTERESTING segments (NOT rigid chunks)`);
+
+   // Log final segment details for debugging
+   finalSegments.forEach((segment, i) => {
+    console.log(`[AI-SEGMENTER] Segment ${i + 1}: "${segment.title}" (${segment.duration}s) - Interest: ${segment.interestScore || 'N/A'}`);
+   });
 
    return {
     segments: finalSegments,
@@ -84,6 +102,9 @@ class EnhancedAISegmenter {
      contentType: contentAnalysis.contentType,
      qualityScore: this.calculateQualityScore(finalSegments),
      processingTime: Date.now(),
+     processingMethod: 'viral-moment-detection',
+     interestingMomentsFound: interestingMoments.length,
+     enforcedLimits: {maxSegments, targetCount, minDuration, maxDuration},
     },
    };
   } catch (error) {
@@ -93,6 +114,73 @@ class EnhancedAISegmenter {
    console.log('[AI-SEGMENTER] 🔄 Falling back to rule-based segmentation');
    return await this.generateFallbackSegments(transcriptSegments, options);
   }
+ }
+ /**
+  * Fast mode segmentation for large transcripts
+  * Uses simplified analysis to reduce processing time
+  */
+ async generateFastSegments(transcriptSegments, options = {}) {
+  const targetCount = options.targetCount || 8;
+  const segmentDuration = 60; // 60 seconds per segment
+  const totalDuration = Math.max(...transcriptSegments.map((s) => s.end));
+
+  console.log(`[AI-SEGMENTER] ⚡ Fast segmentation: ${targetCount} segments from ${Math.round(totalDuration / 60)}min content`);
+
+  const segments = [];
+  const segmentStep = totalDuration / targetCount;
+
+  for (let i = 0; i < targetCount; i++) {
+   const startTime = i * segmentStep;
+   const endTime = Math.min((i + 1) * segmentStep, totalDuration);
+
+   // Find transcript segments in this time range
+   const segmentTranscripts = transcriptSegments.filter((t) => t.start < endTime && t.end > startTime);
+
+   if (segmentTranscripts.length > 0) {
+    const combinedText = segmentTranscripts.map((t) => t.text).join(' ');
+    const duration = endTime - startTime;
+
+    segments.push({
+     id: `fast-segment-${i + 1}`,
+     title: `Segment ${i + 1}`,
+     description: combinedText.length > 200 ? combinedText.substring(0, 200) + '...' : combinedText,
+     text: combinedText,
+     start: startTime,
+     end: endTime,
+     duration: Math.round(duration),
+     keyQuote: this.extractSimpleQuote(combinedText),
+    });
+   }
+  }
+
+  return {
+   segments: segments,
+   analysis: {
+    contentType: 'video',
+    language: 'unknown',
+    topics: ['general'],
+   },
+   metadata: {
+    totalDuration: totalDuration,
+    averageSegmentDuration: Math.round(totalDuration / segments.length),
+    contentType: 'video',
+    qualityScore: 0.7, // Lower quality for fast mode
+    processingTime: Date.now(),
+    fastMode: true,
+   },
+  };
+ }
+
+ /**
+  * Extract a simple quote from text for fast mode
+  */
+ extractSimpleQuote(text) {
+  const sentences = text.split(/[.!?]+/).filter((s) => s.trim().length > 10);
+  if (sentences.length > 0) {
+   // Return the first meaningful sentence
+   return sentences[0].trim().substring(0, 150);
+  }
+  return text.substring(0, 100);
  }
 
  /**
@@ -276,7 +364,7 @@ OUTPUT FORMAT (JSON only):
   * STEP 3: OPTIMAL SEGMENT GENERATION
   * Creates segments based on topic boundaries and duration constraints
   */
- async generateOptimalSegments(transcriptSegments, topicBoundaries, contentAnalysis) {
+ async generateOptimalSegments(transcriptSegments, topicBoundaries, contentAnalysis, targetCount = 8) {
   const segments = [];
   const totalDuration = this.calculateTotalDuration(transcriptSegments);
 
@@ -342,7 +430,7 @@ OUTPUT FORMAT (JSON only):
 
    const batchTexts = batch.map((seg, idx) => `=== SEGMENT ${i + idx + 1} (${seg.duration}s) ===\n${seg.text.substring(0, 800)}\n`).join('\n');
 
-   const prompt = `Generate compelling titles and descriptions for these ${contentAnalysis.contentType} segments.
+   const prompt = `Generate SHORT, punchy titles and descriptions for these ${contentAnalysis.contentType} segments.
 
 CONTENT TYPE: ${contentAnalysis.contentType}
 LANGUAGE: ${contentAnalysis.language} 
@@ -350,19 +438,20 @@ STYLE: ${contentAnalysis.style}
 
 ${batchTexts}
 
-For each segment, create:
-1. A compelling title (max 12 words) that captures the key insight/topic
-2. A clear description (1-2 sentences) explaining what viewers will learn
-3. Make titles relevant and unique to each segment's content
+STRICT REQUIREMENTS:
+1. Title: MAXIMUM 40 CHARACTERS - must be short, punchy, and capture the key point
+2. Description: MAXIMUM 100 CHARACTERS - concise explanation of segment value
+3. Make each title unique and specific to the segment content
+4. Use action words and avoid filler words
 
-${contentAnalysis.language === 'indonesian' ? 'PENTING: Generate titles and descriptions in BAHASA INDONESIA.' : 'Generate titles and descriptions in the same language as the transcript.'}
+${contentAnalysis.language === 'indonesian' ? 'PENTING: Generate titles and descriptions in BAHASA INDONESIA. Keep them SHORT!' : 'Generate titles and descriptions in the same language as the transcript. Keep them SHORT!'}
 
 OUTPUT FORMAT (JSON only):
 {
   "segments": [
     {
-      "title": "Engaging title that captures the segment essence",
-      "description": "Clear 1-2 sentence description of the segment content and value."
+      "title": "Short punchy title ≤40 chars",
+      "description": "Concise description explaining value ≤100 chars"
     }
   ]
 }`;
@@ -389,13 +478,26 @@ OUTPUT FORMAT (JSON only):
     const result = JSON.parse(response);
 
     if (result.segments && Array.isArray(result.segments)) {
-     // Merge AI-generated metadata with segments
+     // Merge AI-generated metadata with segments and enforce length limits
      batch.forEach((segment, idx) => {
       const aiMetadata = result.segments[idx];
+
+      // Enforce strict character limits
+      let title = aiMetadata?.title || `Segment ${i + idx + 1}`;
+      let description = aiMetadata?.description || `${contentAnalysis.contentType} segment lasting ${segment.duration} seconds`;
+
+      // Truncate if too long
+      if (title.length > 40) {
+       title = title.substring(0, 37) + '...';
+      }
+      if (description.length > 100) {
+       description = description.substring(0, 97) + '...';
+      }
+
       segmentsWithMetadata.push({
        ...segment,
-       title: aiMetadata?.title || `Segment ${i + idx + 1}`,
-       description: aiMetadata?.description || `${contentAnalysis.contentType} segment lasting ${segment.duration} seconds`,
+       title: title,
+       description: description,
        id: `ai-segment-${Date.now()}-${i + idx + 1}`,
       });
      });
@@ -824,14 +926,19 @@ Return JSON format:
     .replace(/^(well|so|now|today|okay|right|um|uh|like|basically)/i, '')
     .trim();
 
-   if (cleanTitle.length > 10 && cleanTitle.length <= 60) {
+   if (cleanTitle.length > 10 && cleanTitle.length <= 40) {
     return this.capitalizeTitle(cleanTitle);
    }
 
-   // If too long, extract key phrase
+   // If too long, extract key phrase (max 40 chars)
    const words = cleanTitle.split(/\s+/);
-   if (words.length > 8) {
-    return this.capitalizeTitle(words.slice(0, 6).join(' ') + '...');
+   if (words.length > 6) {
+    let shortTitle = words.slice(0, 4).join(' ');
+    if (shortTitle.length <= 37) {
+     return this.capitalizeTitle(shortTitle + '...');
+    } else {
+     return this.capitalizeTitle(shortTitle.substring(0, 37) + '...');
+    }
    }
   }
 
@@ -850,7 +957,7 @@ Return JSON format:
   */
  generateSmartFallbackDescription(text, duration) {
   if (!text || text.length < 50) {
-   return `${Math.round(duration)}-second segment covering key content.`;
+   return `${Math.round(duration)}s segment with key content.`;
   }
 
   // Extract main themes and concepts
@@ -862,27 +969,26 @@ Return JSON format:
   if (keyTopics.length > 0) {
    const mainTopics = keyTopics.slice(0, 2);
    description = `Covers ${mainTopics.join(' and ')}`;
-
-   // Add context from content analysis
-   if (sentences.length > 0) {
-    const firstSentence = sentences[0].trim();
-    if (firstSentence.length > 20 && firstSentence.length < 100) {
-     description += ` including discussion about ${firstSentence.toLowerCase()}`;
-    }
-   }
   } else if (sentences.length > 0) {
    // Use first meaningful sentence as description base
    const mainSentence = sentences[0].trim();
-   if (mainSentence.length <= 120) {
+   if (mainSentence.length <= 60) {
     description = mainSentence;
    } else {
-    description = mainSentence.substring(0, 100) + '...';
+    description = mainSentence.substring(0, 57) + '...';
    }
   } else {
    description = 'Important content segment';
   }
 
-  return `${description}. Duration: ${Math.round(duration)} seconds.`;
+  // Ensure final description is under 100 characters
+  const finalDesc = `${description} (${Math.round(duration)}s)`;
+  if (finalDesc.length > 100) {
+   const maxDescLength = 100 - ` (${Math.round(duration)}s)`.length;
+   return description.substring(0, maxDescLength - 3) + `... (${Math.round(duration)}s)`;
+  }
+
+  return finalDesc;
  }
 
  /**
@@ -1551,6 +1657,490 @@ Return JSON format:
     fallback: true,
    },
   };
+ }
+
+ /**
+  * NEW: VIRAL MOMENT DETECTION METHODS
+  * Focus on finding interesting, engaging content rather than rigid segmentation
+  */
+
+ /**
+  * Analyze transcript specifically for viral moments and engaging content
+  */
+ async analyzeTranscriptForViralMoments(transcriptSegments) {
+  await this.respectRateLimit();
+
+  // Sample content for analysis
+  const sampleText = this.sampleTranscriptForAnalysis(transcriptSegments, 2000);
+
+  const prompt = `Analyze this transcript to identify VIRAL POTENTIAL and INTERESTING MOMENTS for short-form content.
+
+TRANSCRIPT SAMPLE:
+${sampleText}
+
+Identify:
+1. Content type and style
+2. Language and tone
+3. VIRAL MOMENTS: timestamps or topics that would be most engaging for short videos
+4. KEY THEMES that audiences find compelling
+5. EMOTIONAL PEAKS: exciting, surprising, or valuable moments
+
+Focus on finding content that would make people:
+- Stop scrolling and watch
+- Share with friends
+- Leave comments
+- Learn something valuable
+
+OUTPUT FORMAT (JSON only):
+{
+  "contentType": "educational|entertainment|business|lifestyle|tech|other",
+  "language": "english|indonesian|other", 
+  "tone": "energetic|calm|educational|entertaining",
+  "viralMoments": [
+    {
+      "topic": "Brief description of interesting moment",
+      "reason": "Why this would be engaging",
+      "intensity": 1-10
+    }
+  ],
+  "keyThemes": ["theme1", "theme2"],
+  "emotionalPeaks": ["exciting_topic", "surprising_reveal"],
+  "engagementFactors": ["learning", "entertainment", "shock", "value"]
+}`;
+
+  try {
+   const completion = await this.groq.chat.completions.create({
+    messages: [
+     {
+      role: 'system',
+      content: 'You are an expert viral content analyst. Focus on identifying moments that would engage short-form video audiences.',
+     },
+     {
+      role: 'user',
+      content: prompt,
+     },
+    ],
+    model: 'llama3-70b-8192',
+    temperature: 0.3,
+    max_tokens: 1000,
+    response_format: {type: 'json_object'},
+   });
+
+   const response = completion.choices[0]?.message?.content;
+   const analysis = JSON.parse(response);
+
+   return {
+    contentType: analysis.contentType || 'unknown',
+    language: analysis.language || 'unknown',
+    tone: analysis.tone || 'unknown',
+    viralMoments: analysis.viralMoments || [],
+    keyThemes: analysis.keyThemes || [],
+    emotionalPeaks: analysis.emotionalPeaks || [],
+    engagementFactors: analysis.engagementFactors || [],
+    topics: analysis.keyThemes || [],
+    style: analysis.tone || 'unknown',
+   };
+  } catch (error) {
+   console.warn('[AI-SEGMENTER] ⚠️ Viral analysis failed:', error.message);
+   return {
+    contentType: 'unknown',
+    language: 'unknown',
+    tone: 'unknown',
+    viralMoments: [],
+    keyThemes: [],
+    emotionalPeaks: [],
+    engagementFactors: [],
+    topics: [],
+    style: 'unknown',
+   };
+  }
+ }
+
+ /**
+  * Detect specific interesting moments in the transcript using AI
+  */
+ async detectInterestingMoments(transcriptSegments, contentAnalysis) {
+  await this.respectRateLimit();
+
+  // Create chunks for analysis - smaller chunks to find more moments
+  const chunks = this.createTimeBasedChunks(transcriptSegments, 3);
+  const interestingMoments = [];
+
+  for (let i = 0; i < chunks.length; i++) {
+   const chunk = chunks[i];
+
+   const prompt = `Find the MOST INTERESTING 30-90 second moments in this transcript chunk that would make great short videos.
+
+CONTENT TYPE: ${contentAnalysis.contentType}
+ENGAGEMENT FACTORS: ${contentAnalysis.engagementFactors?.join(', ') || 'entertainment, education'}
+
+TRANSCRIPT CHUNK ${i + 1}:
+${chunk.text}
+
+Look for moments that are:
+- Surprising or unexpected
+- Educational with immediate value  
+- Emotionally engaging
+- Controversial or thought-provoking
+- Funny or entertaining
+- Revealing secrets or tips
+- Showing transformation or results
+
+Find 2-4 BEST moments in this chunk that would make engaging short videos. We need enough content for 12+ segments total.
+
+OUTPUT FORMAT (JSON only):
+{
+  "moments": [
+    {
+      "startTime": seconds_number,
+      "endTime": seconds_number, 
+      "topic": "Brief engaging description",
+      "hook": "Why viewers would stop scrolling",
+      "interestScore": 1-10,
+      "engagementType": "educational|entertaining|surprising|valuable"
+    }
+  ]
+}`;
+
+   try {
+    const completion = await this.groq.chat.completions.create({
+     messages: [
+      {
+       role: 'system',
+       content: 'You are an expert at identifying viral moments in video content. Focus on quality over quantity.',
+      },
+      {
+       role: 'user',
+       content: prompt,
+      },
+     ],
+     model: 'llama3-70b-8192',
+     temperature: 0.4,
+     max_tokens: 800,
+     response_format: {type: 'json_object'},
+    });
+
+    const response = completion.choices[0]?.message?.content;
+    const result = JSON.parse(response);
+
+    if (result.moments && Array.isArray(result.moments)) {
+     interestingMoments.push(...result.moments);
+    }
+   } catch (error) {
+    console.warn(`[AI-SEGMENTER] ⚠️ Moment detection failed for chunk ${i + 1}:`, error.message);
+   }
+  }
+
+  // Sort by interest score and return top moments
+  return interestingMoments.sort((a, b) => (b.interestScore || 0) - (a.interestScore || 0)).slice(0, 15); // Max 15 interesting moments to choose from
+ }
+
+ /**
+  * Generate segments based on interesting moments rather than rigid topic boundaries
+  */
+ async generateMomentBasedSegments(transcriptSegments, interestingMoments, contentAnalysis, options) {
+  const {targetCount, minDuration, maxDuration} = options;
+  const segments = [];
+  const usedTimeRanges = [];
+
+  console.log(`[AI-SEGMENTER] 🎯 Creating segments from ${interestingMoments.length} interesting moments`);
+
+  // Sort moments by interest score
+  const sortedMoments = interestingMoments.sort((a, b) => (b.interestScore || 0) - (a.interestScore || 0));
+
+  for (const moment of sortedMoments) {
+   // Generate more segments if we have interesting moments, up to maxSegments
+   if (segments.length >= 15) break; // Hard limit to prevent too many segments
+
+   let startTime = moment.startTime || 0;
+   let endTime = moment.endTime || startTime + 60;
+   let duration = endTime - startTime;
+
+   // Ensure duration is within limits
+   if (duration < minDuration) {
+    endTime = startTime + minDuration;
+    duration = minDuration;
+   } else if (duration > maxDuration) {
+    endTime = startTime + maxDuration;
+    duration = maxDuration;
+   }
+
+   // Check for overlap with existing segments
+   const hasOverlap = usedTimeRanges.some((range) => !(endTime <= range.start || startTime >= range.end));
+
+   if (!hasOverlap) {
+    // Extract transcript text for this segment
+    const segmentText = this.extractSegmentText(transcriptSegments, startTime, endTime);
+
+    if (segmentText.length > 50) {
+     // Ensure meaningful content
+     segments.push({
+      start: startTime,
+      end: endTime,
+      duration: Math.round(duration),
+      text: segmentText,
+      transcriptExcerpt: this.createExcerpt(segmentText, 200),
+      topic: moment.topic,
+      hook: moment.hook,
+      interestScore: moment.interestScore,
+      engagementType: moment.engagementType,
+      segmentIndex: segments.length + 1,
+     });
+
+     usedTimeRanges.push({start: startTime, end: endTime});
+    }
+   }
+  }
+
+  console.log(`[AI-SEGMENTER] ✨ Created ${segments.length} moment-based segments`);
+  return segments;
+ }
+
+ /**
+  * Validate segments and enforce strict limits
+  */
+ validateAndLimitSegments(segments, maxSegments, minDuration, maxDuration) {
+  // First, enforce segment count limit
+  const limitedSegments = segments.slice(0, maxSegments);
+
+  // Then validate and fix duration issues
+  const validatedSegments = limitedSegments.map((segment, index) => {
+   let {start, end, duration} = segment;
+
+   // Recalculate duration to be sure
+   duration = Math.round(end - start);
+
+   // Fix duration issues
+   if (duration > maxDuration) {
+    end = start + maxDuration;
+    duration = maxDuration;
+    console.log(`[AI-SEGMENTER] ⚠️ Segment ${index + 1} capped at ${maxDuration}s (was ${Math.round(segment.end - segment.start)}s)`);
+   }
+
+   if (duration < minDuration) {
+    end = start + minDuration;
+    duration = minDuration;
+    console.log(`[AI-SEGMENTER] ⚠️ Segment ${index + 1} extended to ${minDuration}s (was ${Math.round(segment.end - segment.start)}s)`);
+   }
+
+   return {
+    ...segment,
+    end: end,
+    duration: duration,
+   };
+  });
+
+  return validatedSegments;
+ }
+
+ /**
+  * Generate viral-focused metadata instead of generic titles/descriptions
+  */
+ async generateViralMetadata(segments, contentAnalysis) {
+  const segmentsWithMetadata = [];
+
+  // Process segments in batches to avoid rate limits
+  const batchSize = 3;
+  for (let i = 0; i < segments.length; i += batchSize) {
+   const batch = segments.slice(i, i + batchSize);
+
+   await this.respectRateLimit();
+
+   const batchTexts = batch
+    .map(
+     (seg, idx) =>
+      `=== MOMENT ${i + idx + 1} (${seg.duration}s) ===
+TOPIC: ${seg.topic || 'Interesting content'}
+HOOK: ${seg.hook || 'Engaging moment'}
+TEXT: ${seg.text.substring(0, 500)}
+`
+    )
+    .join('\n');
+
+   const prompt = `Create VIRAL-WORTHY titles and descriptions for these interesting moments.
+
+CONTENT TYPE: ${contentAnalysis.contentType}
+LANGUAGE: ${contentAnalysis.language}
+ENGAGEMENT FACTORS: ${contentAnalysis.engagementFactors?.join(', ') || 'education, entertainment'}
+
+${batchTexts}
+
+Create titles and descriptions that make people want to WATCH, SHARE, and COMMENT:
+
+REQUIREMENTS:
+- Title: MAX 50 characters for Indonesian, punchy, curiosity-driven
+- Description: MAX 100 characters, explain the value/benefit
+- Use power words: "Secret", "Mistake", "Truth", "Hidden", "Revealed"
+- Create urgency and curiosity
+- Focus on viewer benefit
+- NO truncation with "..." - make titles complete
+
+${contentAnalysis.language === 'indonesian' ? 'IMPORTANT: Use BAHASA INDONESIA. Keep titles complete within 50 characters!' : 'Keep it SHORT and ENGAGING!'}
+
+OUTPUT FORMAT (JSON only):
+{
+  "segments": [
+    {
+      "title": "Complete viral title ≤50 chars",
+      "description": "Compelling benefit ≤100 chars"
+    }
+  ]
+}`;
+
+   try {
+    const completion = await this.groq.chat.completions.create({
+     messages: [
+      {
+       role: 'system',
+       content: 'You are a viral content expert specializing in short-form video titles that get millions of views.',
+      },
+      {
+       role: 'user',
+       content: prompt,
+      },
+     ],
+     model: 'llama3-70b-8192',
+     temperature: 0.5, // Higher creativity for viral content
+     max_tokens: 1000,
+     response_format: {type: 'json_object'},
+    });
+
+    const response = completion.choices[0]?.message?.content;
+    const result = JSON.parse(response);
+
+    if (result.segments && Array.isArray(result.segments)) {
+     batch.forEach((segment, idx) => {
+      const aiMetadata = result.segments[idx];
+
+      // Enforce strict character limits with viral focus
+      let title = aiMetadata?.title || `Momen Menarik ${i + idx + 1}`;
+      let description = aiMetadata?.description || `Konten viral ${segment.duration} detik`;
+
+      // Better truncation with word boundaries - avoid "..." endings
+      if (title.length > 50) {
+       // Find last space before 47 chars to avoid cutting words
+       const truncated = title.substring(0, 47);
+       const lastSpace = truncated.lastIndexOf(' ');
+       if (lastSpace > 35) {
+        title = title.substring(0, lastSpace);
+       } else {
+        title = truncated;
+       }
+      }
+      if (description.length > 100) {
+       // Find last space before 97 chars to avoid cutting words
+       const truncated = description.substring(0, 97);
+       const lastSpace = truncated.lastIndexOf(' ');
+       if (lastSpace > 80) {
+        description = description.substring(0, lastSpace);
+       } else {
+        description = truncated;
+       }
+      }
+
+      segmentsWithMetadata.push({
+       ...segment,
+       title: title,
+       description: description,
+       id: `viral-moment-${Date.now()}-${i + idx + 1}`,
+      });
+     });
+    } else {
+     // Fallback with viral focus
+     batch.forEach((segment, idx) => {
+      segmentsWithMetadata.push({
+       ...segment,
+       title: this.generateViralFallbackTitle(segment.text, segment.topic),
+       description: this.generateViralFallbackDescription(segment.hook, segment.duration),
+       id: `viral-fallback-${Date.now()}-${i + idx + 1}`,
+      });
+     });
+    }
+   } catch (error) {
+    console.warn(`[AI-SEGMENTER] ⚠️ Viral metadata generation failed for batch ${Math.floor(i / batchSize) + 1}:`, error.message);
+
+    // Viral-focused fallback
+    batch.forEach((segment, idx) => {
+     segmentsWithMetadata.push({
+      ...segment,
+      title: this.generateViralFallbackTitle(segment.text, segment.topic),
+      description: this.generateViralFallbackDescription(segment.hook, segment.duration),
+      id: `viral-fallback-${Date.now()}-${i + idx + 1}`,
+     });
+    });
+   }
+  }
+
+  return segmentsWithMetadata;
+ }
+
+ /**
+  * Helper methods for viral content generation
+  */
+ generateViralFallbackTitle(text, topic) {
+  if (topic) {
+   return topic.length > 35 ? topic.substring(0, 32) + '...' : topic;
+  }
+
+  // Extract viral keywords from text
+  const viralWords = ['rahasia', 'secret', 'mistake', 'kesalahan', 'truth', 'kebenaran', 'hidden', 'tersembunyi'];
+  const lowerText = text.toLowerCase();
+
+  for (const word of viralWords) {
+   if (lowerText.includes(word)) {
+    return `${word.charAt(0).toUpperCase() + word.slice(1)} Terungkap!`;
+   }
+  }
+
+  // Generic viral title
+  return 'Momen Viral Ini';
+ }
+
+ generateViralFallbackDescription(hook, duration) {
+  if (hook) {
+   return hook.length > 90 ? hook.substring(0, 87) + '...' : hook;
+  }
+
+  return `Konten menarik dalam ${duration} detik yang wajib ditonton!`;
+ }
+
+ /**
+  * Helper methods
+  */
+ createTimeBasedChunks(transcriptSegments, chunkCount) {
+  const totalDuration = Math.max(...transcriptSegments.map((s) => s.end));
+  const chunkDuration = totalDuration / chunkCount;
+  const chunks = [];
+
+  for (let i = 0; i < chunkCount; i++) {
+   const startTime = i * chunkDuration;
+   const endTime = Math.min((i + 1) * chunkDuration, totalDuration);
+
+   const relevantSegments = transcriptSegments.filter((s) => s.start < endTime && s.end > startTime);
+
+   if (relevantSegments.length > 0) {
+    chunks.push({
+     startTime,
+     endTime,
+     text: relevantSegments.map((s) => s.text).join(' '),
+    });
+   }
+  }
+
+  return chunks;
+ }
+
+ sampleTranscriptForAnalysis(transcriptSegments, maxChars) {
+  const fullText = transcriptSegments.map((s) => s.text).join(' ');
+  if (fullText.length <= maxChars) return fullText;
+
+  // Sample from beginning, middle, and end
+  const sampleSize = Math.floor(maxChars / 3);
+  const beginning = fullText.substring(0, sampleSize);
+  const middle = fullText.substring(Math.floor(fullText.length / 2) - sampleSize / 2, Math.floor(fullText.length / 2) + sampleSize / 2);
+  const end = fullText.substring(fullText.length - sampleSize);
+
+  return `${beginning}\n\n[... middle content ...]\n\n${middle}\n\n[... later content ...]\n\n${end}`;
  }
 }
 

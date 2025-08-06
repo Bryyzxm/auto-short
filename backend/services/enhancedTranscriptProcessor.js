@@ -534,57 +534,335 @@ class EnhancedTranscriptProcessor {
   console.log(`[TRANSCRIPT-PROCESSOR] 🎯 Generating new segments from ${transcriptSegments.length} transcript segments using AI`);
 
   try {
-   // Use enhanced AI segmenter for intelligent analysis
+   // ALWAYS use AI-powered analysis for finding interesting moments
+   // Remove the "large transcript" shortcut that bypasses AI
+   console.log(`[TRANSCRIPT-PROCESSOR] 🧠 Using FULL AI analysis to find interesting moments`);
+
+   // Use full AI processing with strict parameters for finding viral moments
    const aiResult = await enhancedAISegmenter.generateIntelligentSegments(transcriptSegments, {
-    targetCount: 8,
-    minDuration: this.minSegmentDuration,
-    maxDuration: this.maxSegmentDuration,
-   }); // Convert AI segments to video segment format
-   const videoSegments = aiResult.segments.map((aiSegment, index) => ({
-    id: aiSegment.id || `generated-${Date.now()}-${index + 1}`,
-    title: aiSegment.title || `Generated Segment ${index + 1}`,
-    description: aiSegment.description || `AI-generated segment with ${aiSegment.duration}s duration`,
-    startTimeSeconds: aiSegment.start,
-    endTimeSeconds: aiSegment.end,
-    youtubeVideoId: videoId,
-    transcriptExcerpt: aiSegment.text, // Use full text instead of truncated excerpt
-    transcriptFull: aiSegment.text,
-    keyQuote: aiSegment.keyQuote,
-    hasManualTranscript: true,
-    hasAIGenerated: true,
-    aiQualityScore: aiResult.metadata.qualityScore,
-    contentType: aiResult.analysis.contentType,
-    thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
-    duration: aiSegment.duration,
-    segmentIndex: index + 1,
-   }));
+    targetCount: 12, // Target exactly 12 segments (minimum requirement)
+    minDuration: 30, // Minimum 30 seconds (good for shorts)
+    maxDuration: 90, // Maximum 90 seconds (max for shorts)
+    maxSegments: 15, // Hard limit - allow up to 15 segments
+    focusOnInterest: true, // NEW: Focus on finding interesting moments
+    contentMode: 'viral-moments', // NEW: Look for viral/engaging content
+   });
 
-   console.log(`[TRANSCRIPT-PROCESSOR] ✅ Generated ${videoSegments.length} AI-powered segments`);
+   // STRICT enforcement - never exceed 15 segments
+   if (!aiResult || !aiResult.segments || aiResult.segments.length === 0) {
+    console.log(`[TRANSCRIPT-PROCESSOR] ⚠️ AI returned no segments, using emergency fallback`);
+    return this.generateEmergencySegments(transcriptSegments, videoId);
+   }
 
-   return {
-    success: true,
-    mode: 'generate',
-    data: {
-     videoId: videoId,
-     segments: videoSegments,
-     aiAnalysis: aiResult.analysis,
-     stats: {
-      totalSegments: videoSegments.length,
-      transcriptEntries: transcriptSegments.length,
-      averageDuration: aiResult.metadata.averageSegmentDuration,
-      qualityScore: aiResult.metadata.qualityScore,
-      contentType: aiResult.analysis.contentType,
-      processingMethod: 'ai-enhanced',
-     },
+   // Enforce strict segment count limit
+   const strictLimit = Math.min(aiResult.segments.length, 15);
+   const limitedSegments = aiResult.segments.slice(0, strictLimit);
+
+   console.log(`[TRANSCRIPT-PROCESSOR] 🔒 STRICT LIMIT: Using ${limitedSegments.length} out of ${aiResult.segments.length} AI segments`);
+
+   // Validate segment durations and fix any that are too long
+   const validatedSegments = limitedSegments.map((segment, index) => {
+    // Ensure duration is within shorts-friendly limits
+    if (segment.duration > 90) {
+     console.log(`[TRANSCRIPT-PROCESSOR] ⚠️ Segment ${index + 1} too long (${segment.duration}s), capping at 90s`);
+     const newEnd = segment.start + 90;
+     return {
+      ...segment,
+      end: newEnd,
+      duration: 90,
+      text: this.extractSegmentText(transcriptSegments, segment.start, newEnd),
+     };
+    }
+
+    if (segment.duration < 30) {
+     console.log(`[TRANSCRIPT-PROCESSOR] ⚠️ Segment ${index + 1} too short (${segment.duration}s), extending to 30s`);
+     const newEnd = Math.min(segment.start + 30, Math.max(...transcriptSegments.map((s) => s.end)));
+     return {
+      ...segment,
+      end: newEnd,
+      duration: Math.round(newEnd - segment.start),
+      text: this.extractSegmentText(transcriptSegments, segment.start, newEnd),
+     };
+    }
+
+    return segment;
+   });
+
+   const finalResult = {
+    ...aiResult,
+    segments: validatedSegments,
+    metadata: {
+     ...aiResult.metadata,
+     processingMethod: 'full-ai-analysis',
+     segmentCount: validatedSegments.length,
+     averageSegmentDuration: Math.round(validatedSegments.reduce((sum, s) => sum + s.duration, 0) / validatedSegments.length),
     },
    };
-  } catch (aiError) {
-   console.warn(`[TRANSCRIPT-PROCESSOR] ⚠️ AI segmentation failed: ${aiError.message}`);
-   console.log(`[TRANSCRIPT-PROCESSOR] 🔄 Falling back to rule-based generation`);
 
-   // Fallback to rule-based segmentation
-   return this.generateRuleBasedSegments(transcriptSegments, videoId);
+   return this.formatSegmentResults(validatedSegments, videoId, finalResult, transcriptSegments);
+  } catch (error) {
+   console.error('[TRANSCRIPT-PROCESSOR] ❌ AI processing failed:', error);
+   // Fallback to emergency simple segmentation
+   return this.generateEmergencySegments(transcriptSegments, videoId);
   }
+ }
+
+ /**
+  * Create intelligent chunks for large transcripts that preserve timing accuracy
+  */
+ createIntelligentChunks(transcriptSegments, targetCount) {
+  const totalDuration = Math.max(...transcriptSegments.map((s) => s.end));
+  const chunkDuration = totalDuration / targetCount;
+  const chunks = [];
+
+  for (let i = 0; i < targetCount; i++) {
+   const startTime = i * chunkDuration;
+   const endTime = Math.min((i + 1) * chunkDuration, totalDuration);
+
+   // Find all transcript segments that overlap with this chunk
+   const overlappingSegments = transcriptSegments.filter((segment) => segment.start < endTime && segment.end > startTime);
+
+   if (overlappingSegments.length > 0) {
+    // Use actual timing from the overlapping segments
+    const actualStartTime = Math.min(...overlappingSegments.map((s) => s.start));
+    const actualEndTime = Math.max(...overlappingSegments.map((s) => s.end));
+    const combinedText = overlappingSegments.map((s) => s.text).join(' ');
+
+    chunks.push({
+     startTime: actualStartTime,
+     endTime: actualEndTime,
+     text: combinedText,
+     segmentCount: overlappingSegments.length,
+    });
+   }
+  }
+
+  return chunks;
+ }
+
+ /**
+  * Generate short, concise titles (max 40 characters)
+  */
+ generateShortTitle(text) {
+  // Extract first meaningful sentence or phrase
+  const sentences = text.split(/[.!?]+/).filter((s) => s.trim().length > 5);
+  if (sentences.length > 0) {
+   let title = sentences[0].trim();
+   // Truncate to 40 characters with proper word boundary
+   if (title.length > 40) {
+    title = title.substring(0, 37).trim();
+    const lastSpace = title.lastIndexOf(' ');
+    if (lastSpace > 20) {
+     title = title.substring(0, lastSpace);
+    }
+    title += '...';
+   }
+   return title;
+  }
+
+  // Fallback: use first few words
+  const words = text.split(' ').slice(0, 6).join(' ');
+  return words.length > 40 ? words.substring(0, 37) + '...' : words;
+ }
+
+ /**
+  * Generate short, concise descriptions (max 100 characters)
+  */
+ generateShortDescription(text) {
+  // Find the most descriptive sentence
+  const sentences = text.split(/[.!?]+/).filter((s) => s.trim().length > 10);
+
+  for (const sentence of sentences) {
+   const trimmed = sentence.trim();
+   if (trimmed.length > 20 && trimmed.length <= 100) {
+    return trimmed;
+   }
+  }
+
+  // Fallback: truncate text to 100 chars
+  if (text.length <= 100) {
+   return text.trim();
+  }
+
+  let description = text.substring(0, 97).trim();
+  const lastSpace = description.lastIndexOf(' ');
+  if (lastSpace > 50) {
+   description = description.substring(0, lastSpace);
+  }
+  return description + '...';
+ }
+
+ /**
+  * Extract a simple quote from text
+  */
+ extractSimpleQuote(text) {
+  const sentences = text.split(/[.!?]+/).filter((s) => s.trim().length > 15);
+  if (sentences.length > 0) {
+   // Return the most impactful sentence (usually the first meaningful one)
+   const quote = sentences[0].trim();
+   return quote.length > 120 ? quote.substring(0, 117) + '...' : quote;
+  }
+  return text.substring(0, 100).trim();
+ }
+ /**
+  * Sample transcript segments for large files to reduce processing time
+  */
+ sampleTranscriptSegments(transcriptSegments, targetCount) {
+  if (transcriptSegments.length <= targetCount) {
+   return transcriptSegments;
+  }
+
+  const sampledSegments = [];
+  const step = Math.floor(transcriptSegments.length / targetCount);
+
+  for (let i = 0; i < transcriptSegments.length; i += step) {
+   sampledSegments.push(transcriptSegments[i]);
+  }
+
+  return sampledSegments.slice(0, targetCount);
+ }
+
+ /**
+  * Map sampled AI results back to original transcript timing
+  */
+ mapSampledResultsToOriginal(aiSegments, originalTranscript) {
+  return aiSegments.map((segment) => {
+   // Find closest matches in original transcript
+   const startMatch = this.findClosestTranscriptMatch(segment.start, originalTranscript);
+   const endMatch = this.findClosestTranscriptMatch(segment.end, originalTranscript);
+
+   return {
+    ...segment,
+    start: startMatch ? startMatch.start : segment.start,
+    end: endMatch ? endMatch.end : segment.end,
+   };
+  });
+ }
+
+ /**
+  * Find closest transcript segment by timestamp
+  */
+ findClosestTranscriptMatch(targetTime, transcriptSegments) {
+  let closest = null;
+  let minDiff = Infinity;
+
+  for (const segment of transcriptSegments) {
+   const diff = Math.abs(segment.start - targetTime);
+   if (diff < minDiff) {
+    minDiff = diff;
+    closest = segment;
+   }
+  }
+
+  return closest;
+ }
+
+ /**
+  * Format segment results into consistent response format
+  */
+ formatSegmentResults(segments, videoId, aiResult, transcriptSegments) {
+  // Convert AI segments to video segment format
+  const videoSegments = segments.map((aiSegment, index) => ({
+   id: aiSegment.id || `generated-${Date.now()}-${index + 1}`,
+   title: aiSegment.title || `Generated Segment ${index + 1}`,
+   description: aiSegment.description || `AI-generated segment with ${aiSegment.duration}s duration`,
+   startTimeSeconds: aiSegment.start,
+   endTimeSeconds: aiSegment.end,
+   youtubeVideoId: videoId,
+   transcriptExcerpt: aiSegment.text, // Use full text instead of truncated excerpt
+   transcriptFull: aiSegment.text,
+   keyQuote: aiSegment.keyQuote,
+   hasManualTranscript: true,
+   hasAIGenerated: true,
+   aiQualityScore: aiResult.metadata?.qualityScore || 0.8,
+   contentType: aiResult.analysis?.contentType || 'video',
+   thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
+   duration: aiSegment.duration,
+   segmentIndex: index + 1,
+  }));
+
+  console.log(`[TRANSCRIPT-PROCESSOR] ✅ Generated ${videoSegments.length} AI-powered segments`);
+
+  return {
+   success: true,
+   mode: 'generate',
+   data: {
+    videoId: videoId,
+    segments: videoSegments,
+    aiAnalysis: aiResult.analysis,
+    stats: {
+     totalSegments: videoSegments.length,
+     transcriptEntries: transcriptSegments.length,
+     averageDuration: aiResult.metadata?.averageSegmentDuration || 60,
+     qualityScore: aiResult.metadata?.qualityScore || 0.8,
+     contentType: aiResult.analysis?.contentType || 'video',
+     processingMethod: 'ai-enhanced',
+    },
+   },
+  };
+ }
+
+ /**
+  * Fallback segmentation for when AI processing fails
+  */
+ generateFallbackSegments(transcriptSegments, videoId) {
+  console.log(`[TRANSCRIPT-PROCESSOR] 🔄 Using fallback segmentation for ${transcriptSegments.length} segments`);
+
+  const segments = [];
+  const segmentDuration = 60; // 60 seconds per segment
+  const totalDuration = Math.max(...transcriptSegments.map((s) => s.end));
+
+  let currentStart = 0;
+  let segmentIndex = 1;
+
+  while (currentStart < totalDuration) {
+   const currentEnd = Math.min(currentStart + segmentDuration, totalDuration);
+
+   // Find transcript segments in this time range
+   const segmentTranscripts = transcriptSegments.filter((t) => t.start < currentEnd && t.end > currentStart);
+
+   if (segmentTranscripts.length > 0) {
+    const combinedText = segmentTranscripts.map((t) => t.text).join(' ');
+
+    segments.push({
+     id: `fallback-${segmentIndex}`,
+     title: `Segment ${segmentIndex}`,
+     description: combinedText.length > 100 ? combinedText.substring(0, 100) + '...' : combinedText,
+     startTimeSeconds: currentStart,
+     endTimeSeconds: currentEnd,
+     youtubeVideoId: videoId,
+     transcriptExcerpt: combinedText,
+     hasManualTranscript: true,
+     thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
+     duration: currentEnd - currentStart,
+    });
+
+    segmentIndex++;
+   }
+
+   currentStart += segmentDuration;
+  }
+
+  return {
+   success: true,
+   mode: 'generate',
+   data: {
+    videoId: videoId,
+    segments: segments,
+    stats: {
+     totalSegments: segments.length,
+     transcriptEntries: transcriptSegments.length,
+     processingMethod: 'fallback-rule-based',
+    },
+   },
+  };
+ }
+
+ /**
+  * Legacy method - kept for compatibility
+  */
+ async generateRuleBasedSegments(transcriptSegments, videoId) {
+  return this.generateFallbackSegments(transcriptSegments, videoId);
  }
 
  /**
@@ -683,6 +961,157 @@ class EnhancedTranscriptProcessor {
 
    return false;
   });
+ }
+
+ /**
+  * Emergency segmentation when AI fails - focus on finding interesting content
+  */
+ generateEmergencySegments(transcriptSegments, videoId) {
+  console.log(`[TRANSCRIPT-PROCESSOR] 🚨 Using emergency segmentation - finding interesting moments`);
+
+  const totalDuration = Math.max(...transcriptSegments.map((s) => s.end));
+  const targetSegments = 8;
+  const segmentDuration = 60; // 60 seconds per segment
+  const segments = [];
+
+  // Look for content indicators of interesting moments
+  const interestKeywords = [
+   // General interest indicators
+   'amazing',
+   'incredible',
+   'shocking',
+   'unbelievable',
+   'secret',
+   'revealed',
+   'important',
+   'crucial',
+   'essential',
+   'must know',
+   'warning',
+   'dangerous',
+   'money',
+   'profit',
+   'earn',
+   'save',
+   'expensive',
+   'cheap',
+   'free',
+   'mistake',
+   'error',
+   'wrong',
+   'correct',
+   'truth',
+   'lie',
+   'hidden',
+
+   // Indonesian equivalents
+   'menakjubkan',
+   'luar biasa',
+   'mengejutkan',
+   'penting',
+   'rahasia',
+   'terungkap',
+   'wajib',
+   'harus',
+   'peringatan',
+   'berbahaya',
+   'uang',
+   'keuntungan',
+   'gratis',
+   'kesalahan',
+   'benar',
+   'salah',
+   'kebenaran',
+   'bohong',
+   'tersembunyi',
+  ];
+
+  // Find segments with interesting content
+  const scoredSegments = transcriptSegments.map((segment) => {
+   const text = segment.text.toLowerCase();
+   let score = 0;
+
+   // Score based on keywords
+   interestKeywords.forEach((keyword) => {
+    if (text.includes(keyword)) score += 2;
+   });
+
+   // Score based on punctuation (excitement)
+   score += (text.match(/[!?]/g) || []).length;
+
+   // Score based on length (meaningful content)
+   if (text.length > 100) score += 1;
+
+   return {...segment, interestScore: score};
+  });
+
+  // Sort by interest score
+  scoredSegments.sort((a, b) => b.interestScore - a.interestScore);
+
+  // Create segments around high-interest points
+  const usedTimeRanges = [];
+
+  for (let i = 0; i < Math.min(targetSegments, scoredSegments.length); i++) {
+   const centerSegment = scoredSegments[i];
+   const centerTime = centerSegment.start;
+
+   // Create 60-second segment centered around interesting moment
+   let startTime = Math.max(0, centerTime - 30);
+   let endTime = Math.min(totalDuration, startTime + segmentDuration);
+
+   // Adjust if it would go beyond total duration
+   if (endTime - startTime < segmentDuration) {
+    startTime = Math.max(0, endTime - segmentDuration);
+   }
+
+   // Check for overlap with existing segments
+   const hasOverlap = usedTimeRanges.some((range) => !(endTime <= range.start || startTime >= range.end));
+
+   if (!hasOverlap) {
+    usedTimeRanges.push({start: startTime, end: endTime});
+
+    const segmentText = this.extractSegmentText(transcriptSegments, startTime, endTime);
+
+    segments.push({
+     id: `emergency-segment-${segments.length + 1}`,
+     title: this.generateShortTitle(segmentText),
+     description: this.generateShortDescription(segmentText),
+     start: startTime,
+     end: endTime,
+     duration: Math.round(endTime - startTime),
+     text: segmentText,
+     keyQuote: this.extractSimpleQuote(segmentText),
+     interestScore: centerSegment.interestScore,
+    });
+   }
+  }
+
+  console.log(`[TRANSCRIPT-PROCESSOR] 🎯 Emergency segmentation created ${segments.length} interesting segments`);
+
+  const result = {
+   segments: segments,
+   analysis: {contentType: 'video', language: 'unknown', topics: ['general']},
+   metadata: {
+    totalDuration: totalDuration,
+    averageSegmentDuration: Math.round(segments.reduce((sum, s) => sum + s.duration, 0) / segments.length),
+    processingMethod: 'emergency-interest-based',
+    qualityScore: 0.7,
+   },
+  };
+
+  return this.formatSegmentResults(segments, videoId, result, transcriptSegments);
+ }
+
+ /**
+  * Extract text content for a specific time range
+  */
+ extractSegmentText(transcriptSegments, startTime, endTime) {
+  const relevantSegments = transcriptSegments.filter((segment) => segment.start < endTime && segment.end > startTime);
+
+  return relevantSegments
+   .map((segment) => segment.text)
+   .join(' ')
+   .trim();
  }
 
  calculateTotalDuration(transcriptSegments) {

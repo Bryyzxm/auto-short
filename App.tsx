@@ -68,6 +68,33 @@ const App: React.FC = () => {
  const [currentVideoId, setCurrentVideoId] = useState<string | null>(null);
  const [transcriptUploadError, setTranscriptUploadError] = useState<string | null>(null);
  const [showManualUpload, setShowManualUpload] = useState<boolean>(false);
+ const [backendStatus, setBackendStatus] = useState<{isOnline: boolean; url: string; lastChecked?: Date}>({
+  isOnline: false,
+  url: BACKEND_URL,
+ });
+
+ // Check backend status
+ const checkBackendStatus = async () => {
+  try {
+   const controller = new AbortController();
+   const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+
+   const response = await fetch(`${BACKEND_URL}/`, {
+    signal: controller.signal,
+   });
+
+   clearTimeout(timeoutId);
+
+   if (response.ok) {
+    setBackendStatus({isOnline: true, url: BACKEND_URL, lastChecked: new Date()});
+   } else {
+    setBackendStatus({isOnline: false, url: BACKEND_URL, lastChecked: new Date()});
+   }
+  } catch (error) {
+   console.log(`[APP] Backend ${BACKEND_URL} is offline:`, error);
+   setBackendStatus({isOnline: false, url: BACKEND_URL, lastChecked: new Date()});
+  }
+ };
 
  // Check for API key on mount
  React.useEffect(() => {
@@ -75,6 +102,9 @@ const App: React.FC = () => {
    setApiKeyError('Groq API Key is not configured. Please set the VITE_GROQ_API_KEY environment variable.');
    console.error('Groq API Key is missing (import.meta.env.VITE_GROQ_API_KEY).');
   }
+
+  // Check backend status
+  checkBackendStatus();
  }, []);
 
  // Utility: Clean transcript from duplicate lines/phrases (global, not just consecutive)
@@ -642,6 +672,23 @@ const App: React.FC = () => {
    <header className="w-full max-w-4xl mb-8 text-center">
     <h1 className="text-4xl sm:text-5xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-pink-400 to-red-400">AI Clipper (0.1)</h1>
     <p className="mt-3 text-lg text-gray-300">Identifikasi segmen kunci dari video YouTube dengan AI GRATIS tanpa batas. Ditenagai oleh Groq AI.</p>
+
+    {/* Backend Status Indicator */}
+    <div className="mt-4 flex items-center justify-center space-x-2">
+     <div className={`w-2 h-2 rounded-full ${backendStatus.isOnline ? 'bg-green-400' : 'bg-red-400'}`}></div>
+     <span className={`text-xs ${backendStatus.isOnline ? 'text-green-400' : 'text-red-400'}`}>
+      Backend: {backendStatus.isOnline ? 'Online' : 'Offline'} ({backendStatus.url.includes('localhost') ? 'Local' : 'Azure'})
+     </span>
+     {!backendStatus.isOnline && (
+      <button
+       onClick={checkBackendStatus}
+       className="text-xs text-blue-400 hover:text-blue-300 underline ml-2"
+      >
+       Retry
+      </button>
+     )}
+    </div>
+
     {/* Build: {new Date().toISOString()} */}
    </header>
    <main className="w-full max-w-4xl flex-1">
@@ -671,10 +718,15 @@ const App: React.FC = () => {
 
       {currentVideoId && !showManualUpload && (
        <div className="text-center py-4">
+        {!backendStatus.isOnline && (
+         <div className="mb-4 p-3 bg-red-800/30 border border-red-600/30 rounded-lg">
+          <p className="text-sm text-red-200">⚠️ Backend server is offline. Manual transcript upload will not work until the backend is available.</p>
+         </div>
+        )}
         <button
          onClick={toggleManualUpload}
-         className="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium"
-         disabled={isLoading}
+         className={`px-6 py-3 rounded-lg transition-colors font-medium ${backendStatus.isOnline ? 'bg-purple-600 text-white hover:bg-purple-700' : 'bg-gray-600 text-gray-300 cursor-not-allowed'}`}
+         disabled={isLoading || !backendStatus.isOnline}
         >
          Upload Transcript File
         </button>

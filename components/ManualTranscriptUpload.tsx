@@ -43,19 +43,53 @@ export const ManualTranscriptUpload: React.FC<ManualTranscriptUploadProps> = ({v
    return;
   }
 
+  // Warn about large files
+  const fileSizeKB = file.size / 1024;
+  if (fileSizeKB > 50) {
+   // Files larger than 50KB
+   console.warn(`[MANUAL-TRANSCRIPT] Large file detected: ${Math.round(fileSizeKB)}KB - processing may take longer`);
+  }
+
   uploadTranscript(file);
  };
 
  const uploadTranscript = async (file: File) => {
   setIsUploading(true);
-  setUploadProgress('Preparing upload...');
+  setUploadProgress('Checking backend connection...');
   setSuccessStats(null);
 
+  // Dynamic timeout based on file size - larger files need more time
+  const baseTimeout = 300000; // 5 minutes base
+  const fileSizeKB = file.size / 1024;
+  const extraTimePerKB = 100; // 100ms per KB
+  const dynamicTimeout = Math.min(
+   baseTimeout + fileSizeKB * extraTimePerKB,
+   1800000 // Max 30 minutes
+  );
+
+  console.log(`[MANUAL-TRANSCRIPT] File size: ${Math.round(fileSizeKB)}KB, timeout: ${Math.round(dynamicTimeout / 1000)}s`);
+
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout
+  const timeoutId = setTimeout(() => controller.abort(), dynamicTimeout);
 
   try {
    console.log(`[MANUAL-TRANSCRIPT] Uploading ${file.name} for video ${videoId}`);
+
+   // Test backend connectivity first
+   try {
+    const healthCheck = await fetch(`${backendUrl}/`, {
+     method: 'GET',
+     signal: controller.signal,
+    });
+
+    if (!healthCheck.ok) {
+     throw new Error(`Backend health check failed: ${healthCheck.status}`);
+    }
+    console.log(`[MANUAL-TRANSCRIPT] ✅ Backend connectivity confirmed`);
+   } catch (healthError) {
+    console.error(`[MANUAL-TRANSCRIPT] ❌ Backend health check failed:`, healthError);
+    throw new Error(`Backend server is not reachable at ${backendUrl}. Please check if the backend is running.`);
+   }
 
    const formData = new FormData();
    formData.append('transcriptFile', file);
@@ -76,6 +110,7 @@ export const ManualTranscriptUpload: React.FC<ManualTranscriptUploadProps> = ({v
     throw new Error(`HTTP ${response.status}: ${errorText || 'Upload failed'}`);
    }
 
+   setUploadProgress('Finalizing results...');
    const result = await response.json();
 
    console.log(`[MANUAL-TRANSCRIPT] ✅ Upload successful:`, result);
@@ -100,7 +135,12 @@ export const ManualTranscriptUpload: React.FC<ManualTranscriptUploadProps> = ({v
 
    // Handle specific error types
    if (error.name === 'AbortError') {
-    onError('Upload timed out after 5 minutes. Please try again.');
+    const timeoutMinutes = Math.round(dynamicTimeout / 60000);
+    onError(`Upload timed out after ${timeoutMinutes} minutes. Large transcript files require more processing time. Please try with a smaller file or try again later.`);
+   } else if (error.name === 'TypeError' && error.message.includes('NetworkError')) {
+    onError('Backend server is not reachable. Please check if the backend is running or try again later.');
+   } else if (error.name === 'TypeError' && error.message.includes('fetch')) {
+    onError('Network connection failed. Please check your internet connection and backend server status.');
    } else {
     onError(error.message || 'Failed to upload transcript. Please try again.');
    }
@@ -234,6 +274,12 @@ Today we'll learn about...`}
        ></path>
       </svg>
       <span className="text-purple-300 font-medium">{uploadProgress}</span>
+     </div>
+
+     <div className="mt-4 text-sm text-gray-400">
+      <p>⏱️ Large transcript files may take 5-15 minutes to process</p>
+      <p>🤖 AI is analyzing your content to create intelligent segments</p>
+      <p className="mt-2 text-xs text-gray-500">Please keep this tab open during processing</p>
      </div>
     </div>
    )}

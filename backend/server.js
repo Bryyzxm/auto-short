@@ -197,87 +197,58 @@ function getRandomUserAgent() {
 
 // Secure yt-dlp execution helper using spawn to prevent shell injection
 async function executeYtDlpSecurely(args, options = {}) {
- // Build the command arguments for yt-dlp-exec
- const finalArgs = {};
- let url = null;
+ return new Promise((resolve, reject) => {
+  // Validate all arguments to prevent injection
+  const safeArgs = args.map((arg) => {
+   if (typeof arg !== 'string') {
+    throw new Error('Invalid argument type');
+   }
+   return arg;
+  });
 
- // Add cookies if available
- if (options.useCookies !== false) {
-  const cookiesPath = options.cookiesPath || YTDLP_COOKIES_PATH;
-  if (validateCookiesFile(cookiesPath)) {
-   console.log(`[SECURE-YTDLP] Using cookies from: ${cookiesPath}`);
-   finalArgs.cookies = cookiesPath;
-  }
- }
-
- // Parse arguments properly
- for (let i = 0; i < args.length; i++) {
-  const arg = args[i];
-
-  // Detect URL
-  if (arg.startsWith('http')) {
-   url = arg;
-   continue;
-  }
-
-  // Handle flags
-  if (arg.startsWith('--')) {
-   const flagName = arg.substring(2);
-
-   // Handle flags with values
-   if (i + 1 < args.length && !args[i + 1].startsWith('--') && !args[i + 1].startsWith('http')) {
-    const value = args[i + 1];
-
-    // Convert kebab-case to camelCase for yt-dlp-exec
-    const camelKey = flagName.replace(/-([a-z])/g, (g) => g[1].toUpperCase());
-
-    // Special handling for specific flags
-    if (flagName === 'user-agent') {
-     finalArgs.userAgent = value;
-    } else if (flagName === 'extractor-args') {
-     finalArgs.extractorArgs = value;
-    } else if (flagName === 'sub-lang') {
-     finalArgs.subLang = value;
-    } else if (flagName === 'sub-format') {
-     finalArgs.subFormat = value;
-    } else if (flagName === 'socket-timeout') {
-     finalArgs.socketTimeout = parseInt(value);
-    } else {
-     finalArgs[camelKey] = value;
-    }
-    i++; // Skip next argument as it's the value
-   } else {
-    // Boolean flags
-    const camelKey = flagName.replace(/-([a-z])/g, (g) => g[1].toUpperCase());
-
-    // Special handling for boolean flags
-    if (flagName === 'dump-json') {
-     finalArgs.dumpJson = true;
-    } else if (flagName === 'no-check-certificate') {
-     finalArgs.noCheckCertificate = true;
-    } else if (flagName === 'no-warnings') {
-     finalArgs.noWarnings = true;
-    } else if (flagName === 'write-subs') {
-     finalArgs.writeSubs = true;
-    } else if (flagName === 'write-auto-subs') {
-     finalArgs.writeAutoSubs = true;
-    } else if (flagName === 'skip-download') {
-     finalArgs.skipDownload = true;
-    } else {
-     finalArgs[camelKey] = true;
-    }
+  // Add cookies if available
+  const finalArgs = [...safeArgs];
+  if (options.useCookies !== false) {
+   const cookiesPath = options.cookiesPath || YTDLP_COOKIES_PATH;
+   if (validateCookiesFile(cookiesPath)) {
+    console.log(`[SECURE-YTDLP] Using cookies from: ${cookiesPath}`);
+    finalArgs.unshift('--cookies', cookiesPath);
    }
   }
- }
 
- console.log(`[SECURE-YTDLP] Executing yt-dlp with URL: ${url} and args: ${JSON.stringify(finalArgs)}`);
+  const ytdlpPath = process.platform === 'win32' ? YT_DLP_PATH : 'yt-dlp';
 
- try {
-  const result = await ytdlp(url, finalArgs);
-  return result;
- } catch (error) {
-  throw new Error(`yt-dlp failed: ${error.message}`);
- }
+  console.log(`[SECURE-YTDLP] Executing: ${ytdlpPath} ${finalArgs.join(' ')}`);
+
+  const child = spawn(ytdlpPath, finalArgs, {
+   stdio: ['pipe', 'pipe', 'pipe'],
+   timeout: options.timeout || 300000,
+   maxBuffer: options.maxBuffer || 1024 * 1024 * 50,
+  });
+
+  let stdout = '';
+  let stderr = '';
+
+  child.stdout.on('data', (data) => {
+   stdout += data.toString();
+  });
+
+  child.stderr.on('data', (data) => {
+   stderr += data.toString();
+  });
+
+  child.on('close', (code) => {
+   if (code === 0) {
+    resolve(stdout);
+   } else {
+    reject(new Error(`yt-dlp failed with code ${code}: ${stderr}`));
+   }
+  });
+
+  child.on('error', (error) => {
+   reject(new Error(`Failed to start yt-dlp process: ${error.message}`));
+  });
+ });
 }
 
 // Secure ffprobe execution helper using spawn to prevent shell injection
