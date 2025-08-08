@@ -316,6 +316,101 @@ async function executeYtDlpSecurely(args, options = {}) {
  });
 }
 
+// -------------------------------------------------------------
+// ADVANCED FALLBACK EXECUTION (sign-in / bot verification errors)
+// -------------------------------------------------------------
+const YTDLP_SIGNIN_PATTERNS = [
+ 'Sign in to confirm you\u2019re not a bot', // unicode apostrophe variant
+ "Sign in to confirm you're not a bot",
+ 'sign in to confirm you are not a bot',
+ 'confirm you’re not a bot',
+];
+
+function isSignInBotError(message = '') {
+ if (!message) return false;
+ const lower = message.toLowerCase();
+ return YTDLP_SIGNIN_PATTERNS.some((p) => lower.includes(p.toLowerCase()));
+}
+
+async function executeWithFallbackStrategies(baseArgs, {purpose = 'generic', timeout = 300000, maxBuffer, allowCookies = true} = {}) {
+ const strategies = [];
+
+ // Strategy 1: Original args (already includes cookies if validated)
+ strategies.push({label: 'original', args: baseArgs.slice(), useCookies: allowCookies});
+
+ // Strategy 2: Force android client only
+ strategies.push({
+  label: 'android-client',
+  mutate: true,
+  transform: (a) => replaceOrInsertExtractorArgs(a, 'youtube:player_client=android'),
+  useCookies: allowCookies,
+ });
+
+ // Strategy 3: Embedded web client + android (some bypass)
+ strategies.push({
+  label: 'embedded-web',
+  mutate: true,
+  transform: (a) => replaceOrInsertExtractorArgs(a, 'youtube:player_client=web_embedded,android'),
+  useCookies: allowCookies,
+ });
+
+ // Strategy 4: Disable cookies (sometimes stale cookies trigger challenge)
+ strategies.push({
+  label: 'no-cookies',
+  mutate: false,
+  useCookies: false,
+ });
+
+ // Strategy 5: Force IPv4 + android
+ strategies.push({
+  label: 'ipv4-android',
+  mutate: true,
+  transform: (a) => addArgsIfMissing(replaceOrInsertExtractorArgs(a, 'youtube:player_client=android'), ['--force-ipv4']),
+  useCookies: allowCookies,
+ });
+
+ let lastError;
+ for (const strat of strategies) {
+  try {
+   let workingArgs = strat.mutate ? strat.transform(baseArgs.slice()) : baseArgs.slice();
+   console.log(`[YTDLP-FALLBACK] Attempting strategy=${strat.label} purpose=${purpose}`);
+   const out = await executeYtDlpSecurely(workingArgs, {timeout, maxBuffer, useCookies: strat.useCookies});
+   if (strat.label !== 'original') {
+    console.log(`[YTDLP-FALLBACK] ✅ Strategy succeeded: ${strat.label}`);
+   }
+   return {output: out, strategy: strat.label};
+  } catch (err) {
+   lastError = err;
+   const signIn = isSignInBotError(err.message);
+   console.warn(`[YTDLP-FALLBACK] ❌ Strategy failed (${strat.label}) signIn=${signIn} err=${err.message.substring(0, 140)}`);
+   if (!signIn && strat.label === 'original') {
+    // Non sign-in error at first attempt -> break early (not a bot issue)
+    break;
+   }
+   // Continue loop for sign-in errors or if we are exploring strategies
+  }
+ }
+ throw lastError;
+}
+
+// Utility: replace or inject --extractor-args value
+function replaceOrInsertExtractorArgs(argsArray, newValue) {
+ const idx = argsArray.findIndex((a) => a === '--extractor-args');
+ if (idx !== -1 && idx + 1 < argsArray.length) {
+  argsArray[idx + 1] = newValue;
+  return argsArray;
+ }
+ return argsArray.concat(['--extractor-args', newValue]);
+}
+
+// Utility: add extra flags if not already present
+function addArgsIfMissing(argsArray, flags) {
+ for (const f of flags) {
+  if (!argsArray.includes(f)) argsArray.push(f);
+ }
+ return argsArray;
+}
+
 // Secure ffprobe execution helper using spawn to prevent shell injection
 async function executeFfprobeSecurely(filePath, options = {}) {
  return new Promise((resolve, reject) => {
@@ -597,6 +692,7 @@ app.post('/api/video-quality-check', async (req, res) => {
   const formatsResult = await executeYtDlpSecurely(qualityCheckArgs, {
    timeout: 30000, // 30 second timeout
   });
+  // If returned fine, continue; fallback executor not needed here unless sign-in
   console.log('Available formats:', formatsResult);
 
   // Parse for quality levels with better detection
@@ -676,7 +772,15 @@ async function checkVideoFormats(id, youtubeUrl) {
  try {
   const formatCheckArgs = ['--list-formats', '--no-warnings', '--user-agent', getRandomUserAgent(), '--extractor-args', 'youtube:player_client=web,android', '--socket-timeout', '20', youtubeUrl];
 
-  const formatCheck = await executeYtDlpSecurely(formatCheckArgs, {timeout: 30000});
+  let formatCheck;
+  try {
+   const {output, strategy} = await executeWithFallbackStrategies(formatCheckArgs, {purpose: 'list-formats', timeout: 30000});
+   formatCheck = output;
+   console.log(`[${id}] list-formats strategy used: ${strategy}`);
+  } catch (e) {
+   console.warn(`[${id}] list-formats all strategies failed: ${e.message}`);
+   throw e;
+  }
 
   const has720p = /\b(720p|1280x720|1920x1080|2560x1440|3840x2160)\b/i.test(formatCheck);
   const has480p = /\b(480p|854x480)\b/i.test(formatCheck);
@@ -755,7 +859,7 @@ function handleDownloadError(err) {
    userFriendlyError = 'This video format is not supported. Try a different video.';
   } else if (err.message.includes('Sign in to confirm')) {
    errorDetails = 'YouTube age verification or sign-in required';
-   userFriendlyError = 'This video requires sign-in or age verification. Try a different video.';
+   userFriendlyError = 'This video triggered YouTube bot / age verification. Please try another video or update cookies.';
   } else if (err.message.includes('Video unavailable') || err.message.includes('Private video')) {
    errorDetails = 'Video is not accessible';
    userFriendlyError = 'This video is private, unavailable, or geo-blocked.';
@@ -911,7 +1015,13 @@ app.post('/api/shorts', async (req, res) => {
  console.log(`[${id}] yt-dlp command: ${YT_DLP_PATH} ${ytDlpArgs.join(' ')}`);
 
  try {
-  await executeYtDlpSecurely(ytDlpArgs, {maxBuffer: 1024 * 1024 * 50, timeout: 300000});
+  try {
+   const {output, strategy} = await executeWithFallbackStrategies(ytDlpArgs, {purpose: 'download', timeout: 300000, maxBuffer: 1024 * 1024 * 50});
+   console.log(`[${id}] download strategy used: ${strategy}`);
+  } catch (downloadErr) {
+   // Re-throw to existing catch below
+   throw downloadErr;
+  }
   console.timeEnd(`[${id}] yt-dlp download`);
   console.log(`[${id}] yt-dlp download successful`);
 
