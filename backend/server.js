@@ -100,9 +100,45 @@ class NoValidTranscriptError extends Error {
  }
 }
 
-// Path ke yt-dlp executable - FIXED VERSION 2025.07.21
-// Cross-platform compatibility: use .exe on Windows, system yt-dlp on Linux
-const YT_DLP_PATH = process.platform === 'win32' ? path.join(__dirname, 'yt-dlp.exe') : 'yt-dlp'; // Azure Linux will use system yt-dlp
+// -----------------------------------------------------------------------------
+// yt-dlp EXECUTION STRATEGY (Solution C: leverage yt-dlp-exec vendor binary)
+// -----------------------------------------------------------------------------
+// We rely on the vendored package 'yt-dlp-exec' which bundles a known-good
+// yt-dlp binary inside backend/vendor/yt-dlp-exec/bin. This removes dependency
+// on system-wide installation (fixes Azure ENOENT issues) and keeps updates
+// centralized via npm dependency management.
+//
+// Precedence order for resolution:
+// 1. Explicit override via environment variable YT_DLP_PATH (absolute path)
+// 2. yt-dlp-exec provided binary path (require('yt-dlp-exec/src/constants').YOUTUBE_DL_PATH)
+// 3. Final emergency fallback to plain 'yt-dlp' on PATH (only attempted if spawn fails)
+//
+// NOTE: We keep existing argument construction & security validation to avoid
+// rewriting large parts of the pipeline. Only the binary resolution changes.
+// -----------------------------------------------------------------------------
+let YT_DLP_PATH; // resolved absolute path (or fallback string)
+let YT_DLP_SOURCE = 'unresolved';
+try {
+ const {YOUTUBE_DL_PATH} = require('yt-dlp-exec/src/constants');
+ const overridePath = process.env.YT_DLP_PATH && process.env.YT_DLP_PATH.trim();
+ if (overridePath && fs.existsSync(overridePath)) {
+  YT_DLP_PATH = overridePath;
+  YT_DLP_SOURCE = 'env_override';
+ } else if (fs.existsSync(YOUTUBE_DL_PATH)) {
+  YT_DLP_PATH = YOUTUBE_DL_PATH;
+  YT_DLP_SOURCE = 'yt-dlp-exec';
+ } else {
+  // Fallback to legacy heuristic (may fail on Azure if not installed)
+  YT_DLP_PATH = process.platform === 'win32' ? path.join(__dirname, 'yt-dlp.exe') : 'yt-dlp';
+  YT_DLP_SOURCE = 'fallback_path_or_system';
+ }
+} catch (e) {
+ // As a last resort—should not normally happen unless package resolution fails
+ YT_DLP_PATH = process.platform === 'win32' ? path.join(__dirname, 'yt-dlp.exe') : 'yt-dlp';
+ YT_DLP_SOURCE = 'exception_fallback';
+ console.warn('[YT-DLP] Failed to resolve yt-dlp-exec constants:', e.message);
+}
+console.log(`[YT-DLP] Resolved binary path: ${YT_DLP_PATH} (source=${YT_DLP_SOURCE})`);
 
 // Configurable cookies path for bypassing YouTube bot detection
 let YTDLP_COOKIES_PATH = process.env.YTDLP_COOKIES_PATH || path.join(__dirname, 'cookies', 'cookies.txt');
@@ -146,15 +182,30 @@ checkAndCreateCookiesFromEnv();
 
 // Enhanced validation for yt-dlp executable availability
 const validateYtDlpPath = () => {
- if (process.platform === 'win32') {
-  // Windows: check if yt-dlp.exe exists in current directory
-  if (!fs.existsSync(YT_DLP_PATH)) {
-   console.error(`❌ yt-dlp.exe not found at: ${YT_DLP_PATH}`);
-   return false;
+ try {
+  if (YT_DLP_PATH && YT_DLP_PATH !== 'yt-dlp') {
+   if (!fs.existsSync(YT_DLP_PATH)) {
+    console.error(`❌ yt-dlp binary not found at resolved path: ${YT_DLP_PATH}`);
+    return false;
+   }
+   const stats = fs.statSync(YT_DLP_PATH);
+   if (!(stats.mode & 0o111)) {
+    console.warn(`⚠️  yt-dlp binary at ${YT_DLP_PATH} may not be executable (mode=${stats.mode.toString(8)})`);
+   }
+  } else {
+   // For system 'yt-dlp', do a lightweight version probe to confirm presence
+   try {
+    execSync('command -v yt-dlp || which yt-dlp', {stdio: 'ignore'});
+   } catch {
+    console.error('❌ System yt-dlp not found in PATH');
+    return false;
+   }
   }
+  return true;
+ } catch (err) {
+  console.error('[YT-DLP] Validation exception:', err.message);
+  return false;
  }
- // Linux production will rely on system yt-dlp installed via pip
- return true;
 };
 
 // Helper function to check if cookies file exists and is valid
@@ -198,15 +249,13 @@ function getRandomUserAgent() {
 // Secure yt-dlp execution helper using spawn to prevent shell injection
 async function executeYtDlpSecurely(args, options = {}) {
  return new Promise((resolve, reject) => {
+  const startTime = Date.now();
   // Validate all arguments to prevent injection
   const safeArgs = args.map((arg) => {
-   if (typeof arg !== 'string') {
-    throw new Error('Invalid argument type');
-   }
+   if (typeof arg !== 'string') throw new Error('Invalid argument type');
    return arg;
   });
 
-  // Add cookies if available
   const finalArgs = [...safeArgs];
   if (options.useCookies !== false) {
    const cookiesPath = options.cookiesPath || YTDLP_COOKIES_PATH;
@@ -216,36 +265,52 @@ async function executeYtDlpSecurely(args, options = {}) {
    }
   }
 
-  const ytdlpPath = process.platform === 'win32' ? YT_DLP_PATH : 'yt-dlp';
+  const binaryToUse = YT_DLP_PATH || 'yt-dlp';
+  console.log(`[SECURE-YTDLP] Executing: ${binaryToUse} ${finalArgs.join(' ')}`);
 
-  console.log(`[SECURE-YTDLP] Executing: ${ytdlpPath} ${finalArgs.join(' ')}`);
+  let spawned = null;
+  try {
+   spawned = spawn(binaryToUse, finalArgs, {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: options.timeout || 300000,
+    maxBuffer: options.maxBuffer || 1024 * 1024 * 50,
+   });
+  } catch (spawnErr) {
+   console.warn(`[SECURE-YTDLP] Primary spawn failed immediately: ${spawnErr.message}`);
+   spawned = null;
+  }
 
-  const child = spawn(ytdlpPath, finalArgs, {
-   stdio: ['pipe', 'pipe', 'pipe'],
-   timeout: options.timeout || 300000,
-   maxBuffer: options.maxBuffer || 1024 * 1024 * 50,
-  });
+  if (!spawned) {
+   // Attempt fallback using programmatic API from yt-dlp-exec
+   console.warn('[SECURE-YTDLP] Falling back to yt-dlp-exec programmatic API');
+   try {
+    // yt-dlp-exec expects (url, flags) style; we emulate by joining args
+    // We cannot easily map our array to that interface if multiple URLs; assume last arg is URL
+    const maybeUrl = finalArgs[finalArgs.length - 1];
+    const execResult = ytdlp.exec(maybeUrl, {}, {timeout: options.timeout || 300000});
+    execResult.then((r) => resolve(r.stdout || r)).catch((e) => reject(e));
+    return; // Exit early after fallback
+   } catch (fallbackErr) {
+    return reject(new Error(`Failed to start yt-dlp (both direct & fallback): ${fallbackErr.message}`));
+   }
+  }
 
   let stdout = '';
   let stderr = '';
-
-  child.stdout.on('data', (data) => {
-   stdout += data.toString();
-  });
-
-  child.stderr.on('data', (data) => {
-   stderr += data.toString();
-  });
-
-  child.on('close', (code) => {
+  spawned.stdout.on('data', (d) => (stdout += d.toString()));
+  spawned.stderr.on('data', (d) => (stderr += d.toString()));
+  spawned.on('close', (code) => {
+   const duration = Date.now() - startTime;
    if (code === 0) {
+    console.log(`[SECURE-YTDLP] ✅ Completed in ${duration}ms (${(stdout.length / 1024).toFixed(1)} KB stdout)`);
     resolve(stdout);
    } else {
+    console.warn(`[SECURE-YTDLP] ❌ Exit code ${code} after ${duration}ms`);
     reject(new Error(`yt-dlp failed with code ${code}: ${stderr}`));
    }
   });
-
-  child.on('error', (error) => {
+  spawned.on('error', (error) => {
+   console.error('[SECURE-YTDLP] Spawn error:', error.message);
    reject(new Error(`Failed to start yt-dlp process: ${error.message}`));
   });
  });
@@ -454,6 +519,7 @@ app.get('/api/debug/environment', async (req, res) => {
    platform: process.platform,
    node_version: process.version,
    ytdlp_path: YT_DLP_PATH,
+   ytdlp_source: YT_DLP_SOURCE,
    ytdlp_exists_windows: process.platform === 'win32' ? fs.existsSync(YT_DLP_PATH) : 'N/A',
    cookies_path: YTDLP_COOKIES_PATH,
    cookies_exists: validateCookiesFile(YTDLP_COOKIES_PATH),
@@ -525,7 +591,7 @@ app.post('/api/video-quality-check', async (req, res) => {
   // Enhanced format checking with better reliability
   const qualityCheckArgs = ['--list-formats', '--no-warnings', '--user-agent', getRandomUserAgent(), '--extractor-args', 'youtube:player_client=web,android', '--retries', '2', '--socket-timeout', '20', url];
 
-  console.log(`[quality-check] yt-dlp command: ${process.platform === 'win32' ? YT_DLP_PATH : 'yt-dlp'} ${qualityCheckArgs.join(' ')}`);
+  console.log(`[quality-check] yt-dlp command: ${YT_DLP_PATH} ${qualityCheckArgs.join(' ')}`);
 
   // Check available formats with yt-dlp using secure execution
   const formatsResult = await executeYtDlpSecurely(qualityCheckArgs, {
@@ -590,8 +656,17 @@ function validateShortsInput(youtubeUrl, start, end) {
 function logEnvironmentInfo(id) {
  console.log(`[${id}] 🔧 Environment Debug Info:`);
  console.log(`[${id}] - Platform: ${process.platform}`);
- console.log(`[${id}] - YT-DLP Path: ${YT_DLP_PATH}`);
- console.log(`[${id}] - YT-DLP Exists: ${fs.existsSync(YT_DLP_PATH) || 'N/A (system binary)'}`);
+ console.log(`[${id}] - YT-DLP Path: ${YT_DLP_PATH} (source=${YT_DLP_SOURCE})`);
+ try {
+  if (YT_DLP_PATH && YT_DLP_PATH !== 'yt-dlp') {
+   console.log(`[${id}] - YT-DLP Exists: ${fs.existsSync(YT_DLP_PATH)}`);
+  } else {
+   execSync('command -v yt-dlp || which yt-dlp', {stdio: 'ignore'});
+   console.log(`[${id}] - System yt-dlp present in PATH`);
+  }
+ } catch {
+  console.log(`[${id}] - System yt-dlp not found`);
+ }
  console.log(`[${id}] - NODE_ENV: ${process.env.NODE_ENV || 'undefined'}`);
  console.log(`[${id}] - Azure Env: ${process.env.WEBSITE_HOSTNAME || 'local'}`);
 }
@@ -833,7 +908,7 @@ app.post('/api/shorts', async (req, res) => {
  // Download video
  console.time(`[${id}] yt-dlp download`);
  const ytDlpArgs = buildYtDlpArgs(tempFile, youtubeUrl);
- console.log(`[${id}] yt-dlp command: ${process.platform === 'win32' ? YT_DLP_PATH : 'yt-dlp'} ${ytDlpArgs.join(' ')}`);
+ console.log(`[${id}] yt-dlp command: ${YT_DLP_PATH} ${ytDlpArgs.join(' ')}`);
 
  try {
   await executeYtDlpSecurely(ytDlpArgs, {maxBuffer: 1024 * 1024 * 50, timeout: 300000});
@@ -864,7 +939,7 @@ app.post('/api/shorts', async (req, res) => {
     platform: process.platform,
     node_env: process.env.NODE_ENV,
     azure_env: process.env.WEBSITE_HOSTNAME || 'local',
-    ytdlp_path: process.platform === 'win32' ? YT_DLP_PATH : 'yt-dlp',
+    ytdlp_path: YT_DLP_PATH,
     timestamp: new Date().toISOString(),
    },
    request_info: {id, url: youtubeUrl, duration: `${start}s - ${end}s`},
@@ -1388,7 +1463,7 @@ app.get('/api/video-metadata', async (req, res) => {
    throw new Error(`yt-dlp.exe not found at path: ${YT_DLP_PATH}`);
   }
 
-  console.log(`[video-metadata] Using yt-dlp at: ${YT_DLP_PATH}`);
+  console.log(`[video-metadata] Using yt-dlp at: ${YT_DLP_PATH} (source=${YT_DLP_SOURCE}, exists=${YT_DLP_PATH === 'yt-dlp' ? 'system' : fs.existsSync(YT_DLP_PATH)})`);
 
   const args = [
    '--cookies',
@@ -1407,7 +1482,7 @@ app.get('/api/video-metadata', async (req, res) => {
    videoUrl, // Add videoUrl to the arguments array
   ];
 
-  console.log(`[video-metadata] yt-dlp command: ${process.platform === 'win32' ? YT_DLP_PATH : 'yt-dlp'} ${args.join(' ')}`);
+  console.log(`[video-metadata] yt-dlp command: ${YT_DLP_PATH} ${args.join(' ')}`);
 
   // Gunakan yt-dlp untuk mendapatkan metadata tanpa download
   const result = await executeYtDlpSecurely(args, {
@@ -1700,7 +1775,6 @@ app.get('/api/enhanced-transcript/:videoId', async (req, res) => {
      throw new Error('YouTube library returned empty or invalid transcript');
     }
    } catch (youtubeError) {
-    fallbackMethodFailed = true;
     console.error(`[BULLETPROOF-API] ❌ FALLBACK FAILED: YouTube library extraction failed`);
     console.error(`[BULLETPROOF-API] 🔍 YouTube error details: ${youtubeError.message}`);
 
