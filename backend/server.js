@@ -649,6 +649,47 @@ app.get('/api/debug/environment', async (req, res) => {
  }
 });
 
+// Debug cookies metadata (no sensitive values)
+app.get('/api/debug/cookies-meta', (req, res) => {
+ try {
+  const cookiesPath = YTDLP_COOKIES_PATH;
+  const exists = cookiesPath && fs.existsSync(cookiesPath);
+  let size = 0;
+  let lines = 0;
+  let hash = null;
+  let sampleFirst = null;
+  const requiredKeys = ['CONSENT', 'SOCS', 'SID', 'HSID', 'SSID', 'APISID', 'SAPISID', 'PREF', 'VISITOR_INFO1_LIVE', 'VISITOR_PRIVACY_METADATA', 'YSC'];
+  const presence = {};
+  if (exists) {
+   const content = fs.readFileSync(cookiesPath, 'utf8');
+   size = Buffer.byteLength(content);
+   lines = content.split(/\r?\n/).length;
+   const crypto = require('crypto');
+   hash = crypto.createHash('sha256').update(content).digest('hex');
+   sampleFirst = content.split(/\r?\n/).slice(0, 5);
+   for (const key of requiredKeys) {
+    presence[key] = content.includes(`\t${key}\t`) || content.includes(`\t${key}\n`);
+   }
+  }
+  res.json({
+   status: 'ok',
+   cookiesPath,
+   exists,
+   size,
+   lines,
+   hash,
+   presence,
+   missingKeys: Object.entries(presence)
+    .filter(([, v]) => !v)
+    .map(([k]) => k),
+   sampleFirst,
+   timestamp: new Date().toISOString(),
+  });
+ } catch (e) {
+  res.status(500).json({status: 'error', message: e.message});
+ }
+});
+
 // Serve static files from current directory (for video outputs)
 app.use(
  '/outputs',
