@@ -4,7 +4,7 @@ const path = require('path');
 const {v4: uuidv4} = require('uuid');
 
 // Cookies path configuration
-const COOKIES_PATH = process.env.YTDLP_COOKIES_PATH || path.join(__dirname, '..', 'cookies', 'cookies.txt');
+const COOKIES_PATH = process.env.YTDLP_COOKIES_PATH || path.join(__dirname, '..', 'cookies.txt');
 
 // A simple VTT parser
 function parseVTT(vttContent) {

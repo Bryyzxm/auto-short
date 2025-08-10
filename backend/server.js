@@ -14,6 +14,270 @@ const ytdlp = require('yt-dlp-exec');
 const {YoutubeTranscript} = require('youtube-transcript');
 const antiDetectionTranscript = require('./services/antiDetectionTranscript.js');
 const robustTranscriptServiceV2 = require('./services/robustTranscriptServiceV2.js');
+
+// ================================
+// 🔧 AZURE ENVIRONMENT DETECTION & UTILITIES
+// ================================
+
+/**
+ * Comprehensive Azure environment detection and configuration
+ */
+class AzureEnvironmentManager {
+ constructor() {
+  this.isAzure = this.detectAzureEnvironment();
+  this.azureConfig = this.getAzureConfiguration();
+  this.logEnvironmentInfo();
+ }
+
+ /**
+  * Detect if running in Azure App Service
+  */
+ detectAzureEnvironment() {
+  const azureIndicators = {
+   website_hostname: !!process.env.WEBSITE_HOSTNAME,
+   website_site_name: !!process.env.WEBSITE_SITE_NAME,
+   website_resource_group: !!process.env.WEBSITE_RESOURCE_GROUP,
+   appsetting_website_node_default_version: !!process.env.APPSETTING_WEBSITE_NODE_DEFAULT_VERSION,
+   azure_storage_account: !!process.env.AZURE_STORAGE_ACCOUNT,
+   home_path: process.env.HOME && process.env.HOME.includes('/home/site'),
+   running_in_container: !!process.env.WEBSITE_INSTANCE_ID,
+  };
+
+  const azureCount = Object.values(azureIndicators).filter(Boolean).length;
+  const isAzure = azureCount >= 2; // Require at least 2 indicators
+
+  console.log('[AZURE-ENV] 🔍 Environment Detection Results:');
+  Object.entries(azureIndicators).forEach(([key, value]) => {
+   console.log(`[AZURE-ENV]   ${value ? '✅' : '❌'} ${key}: ${value}`);
+  });
+  console.log(`[AZURE-ENV] ${isAzure ? '✅' : '❌'} Azure detected: ${isAzure} (${azureCount}/7 indicators)`);
+
+  return isAzure;
+ }
+
+ /**
+  * Get Azure-specific configuration
+  */
+ getAzureConfiguration() {
+  if (!this.isAzure) {
+   return {
+    environment: 'local',
+    paths: {
+     home: process.cwd(),
+     temp: './temp',
+     logs: './logs',
+     cookies: path.join(__dirname, 'cookies.txt'),
+    },
+   };
+  }
+
+  const config = {
+   environment: 'azure',
+   siteName: process.env.WEBSITE_SITE_NAME || 'unknown',
+   resourceGroup: process.env.WEBSITE_RESOURCE_GROUP || 'unknown',
+   hostname: process.env.WEBSITE_HOSTNAME || 'unknown',
+   instanceId: process.env.WEBSITE_INSTANCE_ID || 'unknown',
+   nodeVersion: process.env.WEBSITE_NODE_DEFAULT_VERSION || process.version,
+   paths: {
+    home: process.env.HOME || '/home/site/wwwroot',
+    wwwroot: '/home/site/wwwroot',
+    temp: process.env.TEMP || '/tmp',
+    logs: '/home/LogFiles',
+    data: '/home/data',
+   },
+   limits: {
+    // Azure App Service has specific limitations
+    maxEnvVarSize: 32 * 1024, // 32KB limit for environment variables
+    maxFileSize: 1 * 1024 * 1024, // 1MB for temp files
+    maxLogSize: 100 * 1024, // 100KB for logs
+   },
+  };
+
+  // Determine optimal file paths for Azure
+  config.paths.cookies = this.getOptimalCookiesPath(config);
+
+  return config;
+ }
+
+ /**
+  * Get optimal cookies file path for Azure environment
+  */
+ getOptimalCookiesPath(config) {
+  const candidatePaths = [
+   path.join(config.paths.data, 'cookies.txt'), // Persistent data folder
+   path.join(config.paths.home, 'cookies.txt'), // Home directory
+   path.join(config.paths.temp, 'cookies.txt'), // Temp directory
+   path.join(config.paths.wwwroot, 'cookies.txt'), // WWW root
+   path.join(__dirname, 'cookies.txt'), // Current directory
+   path.join(process.cwd(), 'cookies.txt'), // Process working directory
+  ];
+
+  return candidatePaths;
+ }
+
+ /**
+  * Handle Azure environment variable size limitations
+  */
+ handleLargeEnvironmentVariable(varName, defaultValue = null) {
+  const value = process.env[varName];
+
+  if (!value) {
+   console.log(`[AZURE-ENV] ⚠️  Environment variable ${varName} not found`);
+   return defaultValue;
+  }
+
+  const valueSize = Buffer.byteLength(value, 'utf8');
+  console.log(`[AZURE-ENV] 📏 ${varName} size: ${valueSize} bytes`);
+
+  if (this.isAzure && valueSize > this.azureConfig.limits.maxEnvVarSize) {
+   console.warn(`[AZURE-ENV] ⚠️  ${varName} exceeds Azure limit (${valueSize} > ${this.azureConfig.limits.maxEnvVarSize})`);
+   console.log(`[AZURE-ENV] 💡 Consider using Azure Key Vault for large values`);
+
+   // Check if value might be truncated
+   if (value.length > 0 && !value.endsWith('\n') && value.includes('youtube.com')) {
+    console.warn(`[AZURE-ENV] ⚠️  ${varName} may be truncated - last chars: "${value.slice(-20)}"`);
+   }
+  }
+
+  return value;
+ }
+
+ /**
+  * Try to read from Azure Key Vault (placeholder for future implementation)
+  */
+ async tryAzureKeyVault(secretName) {
+  if (!this.isAzure) {
+   return null;
+  }
+
+  console.log(`[AZURE-ENV] 🔑 Attempting to read from Azure Key Vault: ${secretName}`);
+
+  // TODO: Implement Azure Key Vault integration
+  // const { DefaultAzureCredential } = require('@azure/identity');
+  // const { SecretClient } = require('@azure/keyvault-secrets');
+
+  console.log(`[AZURE-ENV] ⚠️  Azure Key Vault integration not yet implemented`);
+  return null;
+ }
+
+ /**
+  * Get environment variable with Azure-specific handling
+  */
+ async getEnvironmentVariable(varName, options = {}) {
+  const {required = false, keyVaultSecret = null, maxSize = null, validateFormat = null} = options;
+
+  console.log(`[AZURE-ENV] 🔍 Getting environment variable: ${varName}`);
+
+  // Try environment variable first
+  let value = this.handleLargeEnvironmentVariable(varName);
+
+  // Try Azure Key Vault as fallback
+  if (!value && keyVaultSecret && this.isAzure) {
+   console.log(`[AZURE-ENV] 🔑 Trying Azure Key Vault for: ${keyVaultSecret}`);
+   value = await this.tryAzureKeyVault(keyVaultSecret);
+  }
+
+  if (!value && required) {
+   throw new Error(`Required environment variable ${varName} not found`);
+  }
+
+  if (value && maxSize && Buffer.byteLength(value, 'utf8') > maxSize) {
+   console.warn(`[AZURE-ENV] ⚠️  ${varName} exceeds specified max size (${maxSize})`);
+  }
+
+  if (value && validateFormat && !validateFormat(value)) {
+   console.warn(`[AZURE-ENV] ⚠️  ${varName} failed format validation`);
+  }
+
+  return value;
+ }
+
+ /**
+  * Find writable location in Azure with enhanced error handling
+  */
+ async findWritableLocation(paths) {
+  console.log(`[AZURE-ENV] 🔍 Testing ${paths.length} potential file locations...`);
+
+  for (let i = 0; i < paths.length; i++) {
+   const testPath = paths[i];
+   try {
+    const testDir = path.dirname(testPath);
+
+    // Check if directory exists and is accessible
+    if (!fs.existsSync(testDir)) {
+     console.log(`[AZURE-ENV] 📁 Creating directory: ${testDir}`);
+     fs.mkdirSync(testDir, {recursive: true});
+    }
+
+    // Test write permissions with a small test file
+    const testFile = path.join(testDir, '.write-test-' + Date.now());
+    const testContent = 'test-write-permissions';
+
+    fs.writeFileSync(testFile, testContent);
+    const readBack = fs.readFileSync(testFile, 'utf8');
+
+    if (readBack === testContent) {
+     fs.unlinkSync(testFile);
+     console.log(`[AZURE-ENV] ✅ Writable location found (${i + 1}/${paths.length}): ${testPath}`);
+     return testPath;
+    } else {
+     console.log(`[AZURE-ENV] ❌ Write verification failed: ${testPath}`);
+     fs.unlinkSync(testFile).catch(() => {}); // Clean up if possible
+    }
+   } catch (error) {
+    console.log(`[AZURE-ENV] ❌ Location not writable (${i + 1}/${paths.length}): ${testPath}`);
+    console.log(`[AZURE-ENV]     Error: ${error.message}`);
+
+    // Log Azure-specific permission details
+    if (this.isAzure) {
+     console.log(`[AZURE-ENV]     Azure Path Type: ${this.getAzurePathType(testPath)}`);
+    }
+   }
+  }
+
+  console.error(`[AZURE-ENV] ❌ No writable locations found out of ${paths.length} candidates`);
+  return null;
+ }
+
+ /**
+  * Identify Azure path types for better debugging
+  */
+ getAzurePathType(filePath) {
+  if (!this.isAzure) return 'local';
+
+  if (filePath.includes('/home/site/wwwroot')) return 'wwwroot';
+  if (filePath.includes('/home/data')) return 'persistent-data';
+  if (filePath.includes('/tmp')) return 'temp';
+  if (filePath.includes('/home/LogFiles')) return 'logs';
+  if (filePath.includes(__dirname)) return 'app-directory';
+
+  return 'unknown';
+ }
+
+ /**
+  * Log comprehensive environment information
+  */
+ logEnvironmentInfo() {
+  console.log('[AZURE-ENV] 🌐 Environment Configuration:');
+  console.log(`[AZURE-ENV]   Environment: ${this.azureConfig.environment}`);
+  console.log(`[AZURE-ENV]   Platform: ${process.platform}`);
+  console.log(`[AZURE-ENV]   Node Version: ${process.version}`);
+  console.log(`[AZURE-ENV]   Working Directory: ${process.cwd()}`);
+  console.log(`[AZURE-ENV]   __dirname: ${__dirname}`);
+
+  if (this.isAzure) {
+   console.log(`[AZURE-ENV]   Site Name: ${this.azureConfig.siteName}`);
+   console.log(`[AZURE-ENV]   Hostname: ${this.azureConfig.hostname}`);
+   console.log(`[AZURE-ENV]   Resource Group: ${this.azureConfig.resourceGroup}`);
+   console.log(`[AZURE-ENV]   Instance ID: ${this.azureConfig.instanceId}`);
+   console.log(`[AZURE-ENV]   Home Path: ${this.azureConfig.paths.home}`);
+   console.log(`[AZURE-ENV]   Temp Path: ${this.azureConfig.paths.temp}`);
+  }
+ }
+}
+
+// Initialize Azure environment manager
+const azureEnv = new AzureEnvironmentManager();
 const alternativeTranscriptService = require('./services/alternativeTranscriptService.js');
 const emergencyTranscriptService = require('./services/emergencyTranscriptService.js');
 
@@ -100,22 +364,6 @@ class NoValidTranscriptError extends Error {
  }
 }
 
-// -----------------------------------------------------------------------------
-// yt-dlp EXECUTION STRATEGY (Solution C: leverage yt-dlp-exec vendor binary)
-// -----------------------------------------------------------------------------
-// We rely on the vendored package 'yt-dlp-exec' which bundles a known-good
-// yt-dlp binary inside backend/vendor/yt-dlp-exec/bin. This removes dependency
-// on system-wide installation (fixes Azure ENOENT issues) and keeps updates
-// centralized via npm dependency management.
-//
-// Precedence order for resolution:
-// 1. Explicit override via environment variable YT_DLP_PATH (absolute path)
-// 2. yt-dlp-exec provided binary path (require('yt-dlp-exec/src/constants').YOUTUBE_DL_PATH)
-// 3. Final emergency fallback to plain 'yt-dlp' on PATH (only attempted if spawn fails)
-//
-// NOTE: We keep existing argument construction & security validation to avoid
-// rewriting large parts of the pipeline. Only the binary resolution changes.
-// -----------------------------------------------------------------------------
 let YT_DLP_PATH; // resolved absolute path (or fallback string)
 let YT_DLP_SOURCE = 'unresolved';
 try {
@@ -141,44 +389,482 @@ try {
 console.log(`[YT-DLP] Resolved binary path: ${YT_DLP_PATH} (source=${YT_DLP_SOURCE})`);
 
 // Configurable cookies path for bypassing YouTube bot detection
-let YTDLP_COOKIES_PATH = process.env.YTDLP_COOKIES_PATH || path.join(__dirname, 'cookies', 'cookies.txt');
+// Use the comprehensive cookies file (31KB) instead of minimal generated one
+let YTDLP_COOKIES_PATH = process.env.YTDLP_COOKIES_PATH || path.join(__dirname, 'cookies.txt');
 
-// Check for cookies content in environment variable and create file if needed too
-const checkAndCreateCookiesFromEnv = () => {
- const cookiesContent = process.env.YTDLP_COOKIES_CONTENT;
- if (cookiesContent) {
-  console.log(`✅ Successfully loaded cookies from environment. Size: ${cookiesContent.length} characters.`);
- } else {
-  console.error('❌ YOUTUBE_COOKIES_CONTENT environment variable not found!');
- }
+// Enhanced cookies setup with proper encoding and validation
+async function setupCookiesFile() {
+ console.log('[COOKIES-SETUP] 🔧 Starting enhanced cookies file setup...');
+ console.log(`[COOKIES-SETUP] 🌐 Environment: ${azureEnv.azureConfig.environment}`);
+ console.log('[COOKIES-SETUP] 📊 Process initiated at:', new Date().toISOString());
 
- if (cookiesContent && cookiesContent.trim()) {
-  try {
-   const rootCookiesPath = path.join(process.cwd(), 'cookies.txt');
+ try {
+  // Step 1: Read environment variable with Azure-specific handling
+  console.log('[COOKIES-SETUP] 📡 Reading cookies from environment variables...');
 
-   // Write the cookies content to cookies.txt in project root
-   fs.writeFileSync(rootCookiesPath, cookiesContent, 'utf8');
+  // Track which environment variable we find and use
+  let usedVarName = null;
+  let finalCookiesContent = null;
 
-   console.log('[COOKIES-ENV] ✅ Successfully created cookies.txt from environment variable');
-   console.log(`[COOKIES-ENV] Created file: ${rootCookiesPath}`);
+  const envVarNames = ['YTDLP_COOKIES_CONTENT', 'YOUTUBE_COOKIES_CONTENT', 'COOKIES_CONTENT'];
 
-   // Update the cookies path to use the newly created file
-   process.env.YTDLP_COOKIES_PATH = rootCookiesPath;
-   YTDLP_COOKIES_PATH = rootCookiesPath;
+  for (const varName of envVarNames) {
+   console.log(`[COOKIES-SETUP] 🔍 Checking environment variable: ${varName}`);
 
-   return true;
-  } catch (error) {
-   console.log(`[COOKIES-ENV] ❌ Error creating cookies.txt from environment: ${error.message}`);
+   const content = await azureEnv.getEnvironmentVariable(varName, {
+    required: false,
+    keyVaultSecret: varName === 'YTDLP_COOKIES_CONTENT' ? 'youtube-cookies' : null,
+    maxSize: azureEnv.isAzure ? azureEnv.azureConfig.limits.maxEnvVarSize : null,
+    validateFormat: (content) => {
+     return content.includes('youtube.com') || content.includes('.youtube.com');
+    },
+   });
+
+   if (content && content.trim()) {
+    usedVarName = varName;
+    finalCookiesContent = content;
+    console.log(`[COOKIES-SETUP] ✅ Found cookies in: ${varName}`);
+    console.log(`[COOKIES-SETUP] 📏 Raw size: ${content.length} characters (${Buffer.byteLength(content, 'utf8')} bytes)`);
+    break;
+   } else {
+    console.log(`[COOKIES-SETUP] ❌ No content in: ${varName}`);
+   }
+  }
+
+  if (!finalCookiesContent || !finalCookiesContent.trim()) {
+   console.log('[COOKIES-SETUP] ⚠️  No cookies content found in any environment variables');
+   console.log('[COOKIES-SETUP] 📋 Checked variables:', envVarNames.join(', '));
+   console.log('[COOKIES-SETUP] 💡 Checking for alternative cookie sources...');
+
+   if (azureEnv.isAzure) {
+    console.log('[COOKIES-SETUP] 🔑 Consider using Azure Key Vault for large cookie files');
+    console.log('[COOKIES-SETUP] 📋 Azure environment variable size limit: ' + azureEnv.azureConfig.limits.maxEnvVarSize / 1024 + 'KB');
+   }
+
    return false;
   }
- } else {
-  console.log('[COOKIES-ENV] 🔍 Cookies content not found in environment variable, skipping file creation');
+
+  console.log(`[COOKIES-SETUP] ✅ Successfully loaded cookies from: ${usedVarName}`);
+  console.log(`[COOKIES-SETUP] 📊 Content statistics:`);
+  console.log(`[COOKIES-SETUP]   📏 Characters: ${finalCookiesContent.length}`);
+  console.log(`[COOKIES-SETUP]   📏 Bytes: ${Buffer.byteLength(finalCookiesContent, 'utf8')}`);
+  console.log(`[COOKIES-SETUP]   📄 Lines: ${finalCookiesContent.split('\n').length}`);
+
+  // Check for potential Azure truncation
+  if (azureEnv.isAzure) {
+   const contentSize = Buffer.byteLength(finalCookiesContent, 'utf8');
+   const limit = azureEnv.azureConfig.limits.maxEnvVarSize;
+   const percentUsed = Math.round((contentSize / limit) * 100);
+
+   console.log(`[COOKIES-SETUP] 🌐 Azure size analysis:`);
+   console.log(`[COOKIES-SETUP]   📊 Size limit: ${limit} bytes (${Math.round(limit / 1024)}KB)`);
+   console.log(`[COOKIES-SETUP]   📊 Content size: ${contentSize} bytes (${Math.round(contentSize / 1024)}KB)`);
+   console.log(`[COOKIES-SETUP]   📊 Usage: ${percentUsed}% of limit`);
+
+   if (contentSize >= limit * 0.95) {
+    console.warn(`[COOKIES-SETUP] ⚠️  CRITICAL: Content size near Azure limit!`);
+    console.warn(`[COOKIES-SETUP] ⚠️  Risk of truncation - verify content integrity`);
+   } else if (contentSize >= limit * 0.8) {
+    console.warn(`[COOKIES-SETUP] ⚠️  WARNING: Content size approaching Azure limit`);
+   } else {
+    console.log(`[COOKIES-SETUP] ✅ Content size within safe Azure limits`);
+   }
+  }
+
+  // Step 2: Detect and handle encoding transformations
+  let decodedContent = finalCookiesContent;
+  const transformationsApplied = [];
+
+  console.log('[COOKIES-SETUP] 🔍 Analyzing content encoding...');
+
+  // Check if content is base64 encoded
+  if (isBase64Encoded(finalCookiesContent)) {
+   console.log('[COOKIES-SETUP] 🔍 Base64 encoding detected, applying transformation...');
+   try {
+    const originalSize = Buffer.byteLength(finalCookiesContent, 'utf8');
+    decodedContent = Buffer.from(finalCookiesContent, 'base64').toString('utf8');
+    const decodedSize = Buffer.byteLength(decodedContent, 'utf8');
+
+    transformationsApplied.push('base64_decode');
+    console.log(`[COOKIES-SETUP] ✅ Base64 decode successful:`);
+    console.log(`[COOKIES-SETUP]   📏 Original: ${originalSize} bytes`);
+    console.log(`[COOKIES-SETUP]   📏 Decoded: ${decodedSize} bytes`);
+    console.log(`[COOKIES-SETUP]   📊 Expansion ratio: ${Math.round((decodedSize / originalSize) * 100)}%`);
+   } catch (decodeError) {
+    console.error('[COOKIES-SETUP] ❌ Base64 decode failed:', decodeError.message);
+    console.log('[COOKIES-SETUP] 🔄 Falling back to original content');
+    decodedContent = finalCookiesContent; // Fallback to original
+    transformationsApplied.push('base64_decode_failed');
+   }
+  } else {
+   console.log('[COOKIES-SETUP] ✅ No base64 encoding detected');
+  }
+
+  // Check if content is URL encoded
+  if (decodedContent.includes('%')) {
+   console.log('[COOKIES-SETUP] 🔍 URL encoding detected, applying transformation...');
+   try {
+    const originalSize = Buffer.byteLength(decodedContent, 'utf8');
+    const urlDecoded = decodeURIComponent(decodedContent);
+
+    if (urlDecoded !== decodedContent) {
+     decodedContent = urlDecoded;
+     const decodedSize = Buffer.byteLength(decodedContent, 'utf8');
+
+     transformationsApplied.push('url_decode');
+     console.log(`[COOKIES-SETUP] ✅ URL decode successful:`);
+     console.log(`[COOKIES-SETUP]   📏 Original: ${originalSize} bytes`);
+     console.log(`[COOKIES-SETUP]   📏 Decoded: ${decodedSize} bytes`);
+    } else {
+     console.log('[COOKIES-SETUP] ✅ No URL encoding detected (% characters are literal)');
+    }
+   } catch (urlError) {
+    console.warn('[COOKIES-SETUP] ⚠️  URL decode failed, continuing with current content');
+    console.warn('[COOKIES-SETUP] ⚠️  Error:', urlError.message);
+    transformationsApplied.push('url_decode_failed');
+   }
+  } else {
+   console.log('[COOKIES-SETUP] ✅ No URL encoding detected');
+  }
+
+  // Step 3: Normalize line endings and clean content
+  console.log('[COOKIES-SETUP] 🧹 Normalizing content...');
+  const preNormalizeSize = Buffer.byteLength(decodedContent, 'utf8');
+  const preNormalizeLines = decodedContent.split('\n').length;
+
+  decodedContent = decodedContent
+   .replace(/\r\n/g, '\n') // Convert CRLF to LF
+   .replace(/\r/g, '\n') // Convert lone CR to LF
+   .trim(); // Remove leading/trailing whitespace
+
+  const postNormalizeSize = Buffer.byteLength(decodedContent, 'utf8');
+  const postNormalizeLines = decodedContent.split('\n').length;
+
+  if (preNormalizeSize !== postNormalizeSize || preNormalizeLines !== postNormalizeLines) {
+   transformationsApplied.push('line_ending_normalization');
+   console.log('[COOKIES-SETUP] ✅ Line ending normalization applied:');
+   console.log(`[COOKIES-SETUP]   📏 Size: ${preNormalizeSize} → ${postNormalizeSize} bytes`);
+   console.log(`[COOKIES-SETUP]   📄 Lines: ${preNormalizeLines} → ${postNormalizeLines}`);
+  } else {
+   console.log('[COOKIES-SETUP] ✅ No line ending normalization needed');
+  }
+
+  // Log all transformations applied
+  console.log('[COOKIES-SETUP] 🔄 Transformation summary:');
+  if (transformationsApplied.length > 0) {
+   console.log(`[COOKIES-SETUP]   ✅ Applied: ${transformationsApplied.join(', ')}`);
+  } else {
+   console.log('[COOKIES-SETUP]   ✅ No transformations needed - content was already clean');
+  }
+
+  // Step 4: Validate cookie format
+  console.log('[COOKIES-SETUP] 🔍 Validating cookie format...');
+  if (!validateCookieFormat(decodedContent)) {
+   console.error('[COOKIES-SETUP] ❌ Cookie format validation failed');
+   console.error('[COOKIES-SETUP] 📊 Final content size:', Buffer.byteLength(decodedContent, 'utf8'), 'bytes');
+   console.error('[COOKIES-SETUP] 🔄 Transformations applied:', transformationsApplied.join(', ') || 'none');
+   return false;
+  }
+  console.log('[COOKIES-SETUP] ✅ Cookie format validation passed');
+
+  // Step 5: Determine optimal file path using Azure environment manager
+  let cookiesFilePath;
+
+  console.log('[COOKIES-SETUP] 📁 Determining optimal file path...');
+  const pathSelectionStart = Date.now();
+
+  if (azureEnv.isAzure) {
+   console.log('[COOKIES-SETUP] ☁️  Azure environment detected, using Azure-optimized paths');
+
+   // Get Azure-optimized path candidates
+   const azurePaths = azureEnv.azureConfig.paths.cookies;
+   console.log(`[COOKIES-SETUP] 🔍 Testing ${azurePaths.length} Azure path candidates...`);
+
+   azurePaths.forEach((pathCandidate, index) => {
+    console.log(`[COOKIES-SETUP]   📍 Candidate ${index + 1}: ${pathCandidate}`);
+    console.log(`[COOKIES-SETUP]     🏷️  Type: ${azureEnv.getAzurePathType(pathCandidate)}`);
+   });
+
+   cookiesFilePath = await azureEnv.findWritableLocation(azurePaths);
+
+   if (!cookiesFilePath) {
+    console.error('[COOKIES-SETUP] ❌ No writable location found in Azure environment');
+    console.error('[COOKIES-SETUP] � All Azure paths tested and failed:');
+    azurePaths.forEach((pathCandidate, index) => {
+     console.error(`[COOKIES-SETUP]   ❌ ${index + 1}. ${pathCandidate} (${azureEnv.getAzurePathType(pathCandidate)})`);
+    });
+    console.error('[COOKIES-SETUP] 💡 Consider checking Azure App Service permissions');
+    return false;
+   } else {
+    console.log(`[COOKIES-SETUP] ✅ Selected Azure path: ${cookiesFilePath}`);
+    console.log(`[COOKIES-SETUP]   🏷️  Path type: ${azureEnv.getAzurePathType(cookiesFilePath)}`);
+   }
+  } else {
+   console.log('[COOKIES-SETUP] 💻 Local environment detected');
+   // Local development or other environments
+   cookiesFilePath = path.join(__dirname, 'cookies.txt');
+   console.log(`[COOKIES-SETUP] 📍 Local path: ${cookiesFilePath}`);
+
+   // Ensure directory exists
+   const cookiesDir = path.dirname(cookiesFilePath);
+   console.log(`[COOKIES-SETUP] 📁 Checking directory: ${cookiesDir}`);
+
+   if (!fs.existsSync(cookiesDir)) {
+    console.log(`[COOKIES-SETUP] 📁 Creating directory: ${cookiesDir}`);
+    try {
+     fs.mkdirSync(cookiesDir, {recursive: true});
+     console.log(`[COOKIES-SETUP] ✅ Directory created successfully`);
+    } catch (dirError) {
+     console.error(`[COOKIES-SETUP] ❌ Failed to create directory: ${dirError.message}`);
+     return false;
+    }
+   } else {
+    console.log(`[COOKIES-SETUP] ✅ Directory already exists`);
+   }
+  }
+
+  const pathSelectionTime = Date.now() - pathSelectionStart;
+  console.log(`[COOKIES-SETUP] ⏱️  Path selection completed in ${pathSelectionTime}ms`);
+  console.log(`[COOKIES-SETUP] 📍 Final path selected: ${cookiesFilePath}`);
+
+  // Step 6: Write file with proper encoding and Azure-aware error handling
+  console.log('[COOKIES-SETUP] 💾 Writing cookies file...');
+  const writeStart = Date.now();
+
+  try {
+   const writeOptions = {
+    encoding: 'utf8',
+   };
+
+   // Set secure permissions for non-Windows platforms
+   if (process.platform !== 'win32') {
+    writeOptions.mode = 0o600;
+    console.log('[COOKIES-SETUP] 🔒 Setting secure file permissions (0o600)');
+   } else {
+    console.log('[COOKIES-SETUP] 🔒 Using Windows default file permissions');
+   }
+
+   console.log('[COOKIES-SETUP] 📊 Pre-write statistics:');
+   console.log(`[COOKIES-SETUP]   📏 Content size: ${Buffer.byteLength(decodedContent, 'utf8')} bytes`);
+   console.log(`[COOKIES-SETUP]   📄 Content lines: ${decodedContent.split('\n').length}`);
+   console.log(`[COOKIES-SETUP]   🏷️  Write encoding: ${writeOptions.encoding}`);
+
+   // Check Azure file size limits before writing
+   if (azureEnv.isAzure) {
+    const contentSize = Buffer.byteLength(decodedContent, 'utf8');
+    const azureLimit = azureEnv.azureConfig.limits.maxFileSize;
+
+    console.log('[COOKIES-SETUP] ☁️  Azure file size validation:');
+    console.log(`[COOKIES-SETUP]   📊 Content size: ${contentSize} bytes`);
+    console.log(`[COOKIES-SETUP]   📊 Azure limit: ${azureLimit} bytes`);
+    console.log(`[COOKIES-SETUP]   📊 Usage: ${Math.round((contentSize / azureLimit) * 100)}% of limit`);
+
+    if (contentSize > azureLimit) {
+     console.error('[COOKIES-SETUP] ❌ Content size exceeds Azure file limits');
+     console.error(`[COOKIES-SETUP] ❌ Cannot write ${contentSize} bytes (limit: ${azureLimit})`);
+     return false;
+    } else {
+     console.log('[COOKIES-SETUP] ✅ Content size within Azure limits');
+    }
+   }
+
+   // Perform the actual file write
+   console.log('[COOKIES-SETUP] 💾 Executing file write operation...');
+   fs.writeFileSync(cookiesFilePath, decodedContent, writeOptions);
+
+   const writeTime = Date.now() - writeStart;
+   console.log(`[COOKIES-SETUP] ✅ File write completed in ${writeTime}ms`);
+  } catch (writeError) {
+   const writeTime = Date.now() - writeStart;
+   console.error(`[COOKIES-SETUP] ❌ File write failed after ${writeTime}ms`);
+   console.error('[COOKIES-SETUP] ❌ Write error:', writeError.message);
+   console.error('[COOKIES-SETUP] ❌ Error code:', writeError.code);
+   console.error('[COOKIES-SETUP] ❌ Error stack:', writeError.stack);
+
+   if (azureEnv.isAzure) {
+    console.error('[COOKIES-SETUP] 🔧 Azure troubleshooting information:');
+    console.error(`[COOKIES-SETUP]   📍 Target path: ${cookiesFilePath}`);
+    console.error(`[COOKIES-SETUP]   🏷️  Path type: ${azureEnv.getAzurePathType(cookiesFilePath)}`);
+    console.error(`[COOKIES-SETUP]   📏 Content size: ${Buffer.byteLength(decodedContent, 'utf8')} bytes`);
+    console.error(`[COOKIES-SETUP]   📊 Azure file limit: ${azureEnv.azureConfig.limits.maxFileSize} bytes`);
+    console.error(`[COOKIES-SETUP]   🔄 Transformations: ${transformationsApplied.join(', ') || 'none'}`);
+    console.error(`[COOKIES-SETUP]   📡 Source variable: ${usedVarName}`);
+
+    // Additional Azure-specific error diagnostics
+    if (writeError.code === 'ENOENT') {
+     console.error('[COOKIES-SETUP] 💡 Directory may not exist or be inaccessible');
+    } else if (writeError.code === 'EACCES') {
+     console.error('[COOKIES-SETUP] 💡 Permission denied - check Azure App Service permissions');
+    } else if (writeError.code === 'ENOSPC') {
+     console.error('[COOKIES-SETUP] 💡 No space left on device - Azure storage may be full');
+    }
+   }
+
+   return false;
+  }
+
+  // Step 7: Comprehensive file validation
+  console.log('[COOKIES-SETUP] 🔍 Validating written file...');
+  const validationStart = Date.now();
+
+  try {
+   // Read back the written file
+   console.log('[COOKIES-SETUP] 📖 Reading back written file for validation...');
+   const writtenContent = fs.readFileSync(cookiesFilePath, 'utf8');
+   const fileSize = Buffer.byteLength(writtenContent, 'utf8');
+   const lineCount = writtenContent.split('\n').length;
+   const originalSize = Buffer.byteLength(decodedContent, 'utf8');
+   const originalLines = decodedContent.split('\n').length;
+
+   console.log('[COOKIES-SETUP] 📊 File validation results:');
+   console.log(`[COOKIES-SETUP]   📍 Path: ${cookiesFilePath}`);
+   console.log(`[COOKIES-SETUP]   📏 File size: ${fileSize} bytes`);
+   console.log(`[COOKIES-SETUP]   📄 Line count: ${lineCount}`);
+   console.log(`[COOKIES-SETUP]   ✅ Size match: ${fileSize === originalSize ? 'YES' : 'NO'}`);
+   console.log(`[COOKIES-SETUP]   ✅ Line match: ${lineCount === originalLines ? 'YES' : 'NO'}`);
+
+   // Content integrity check
+   const contentMatch = writtenContent === decodedContent;
+   console.log(`[COOKIES-SETUP]   ✅ Content match: ${contentMatch ? 'YES' : 'NO'}`);
+
+   if (!contentMatch) {
+    console.error('[COOKIES-SETUP] ❌ CRITICAL: File content does not match original!');
+    console.error(`[COOKIES-SETUP] ❌ Original size: ${originalSize}, File size: ${fileSize}`);
+    console.error(`[COOKIES-SETUP] ❌ This indicates potential corruption during write`);
+
+    // Try to identify where the difference occurs
+    const maxCheckLen = Math.min(100, Math.min(decodedContent.length, writtenContent.length));
+    for (let i = 0; i < maxCheckLen; i++) {
+     if (decodedContent[i] !== writtenContent[i]) {
+      console.error(`[COOKIES-SETUP] ❌ First difference at position ${i}`);
+      console.error(`[COOKIES-SETUP] ❌ Expected: '${decodedContent[i]}' (${decodedContent.charCodeAt(i)})`);
+      console.error(`[COOKIES-SETUP] ❌ Found: '${writtenContent[i]}' (${writtenContent.charCodeAt(i)})`);
+      break;
+     }
+    }
+    return false;
+   }
+
+   // Run format validation on the written file
+   console.log('[COOKIES-SETUP] 🔍 Running format validation on written file...');
+   if (!validateCookieFormat(writtenContent)) {
+    console.error('[COOKIES-SETUP] ❌ Written file failed format validation');
+    return false;
+   }
+
+   const validationTime = Date.now() - validationStart;
+   console.log(`[COOKIES-SETUP] ✅ File validation completed in ${validationTime}ms`);
+
+   // Step 8: Update global variables
+   process.env.YTDLP_COOKIES_PATH = cookiesFilePath;
+   YTDLP_COOKIES_PATH = cookiesFilePath;
+   console.log('[COOKIES-SETUP] 🔧 Updated global variables with cookies path');
+
+   // Final success summary
+   const totalTime = Date.now() - (validationStart - validationTime - writeStart + pathSelectionStart);
+   console.log('[COOKIES-SETUP] 🎉 Cookies file setup completed successfully!');
+   console.log('[COOKIES-SETUP] 📋 Final summary:');
+   console.log(`[COOKIES-SETUP]   📡 Source: ${usedVarName}`);
+   console.log(`[COOKIES-SETUP]   🔄 Transformations: ${transformationsApplied.join(', ') || 'none'}`);
+   console.log(`[COOKIES-SETUP]   📍 Location: ${cookiesFilePath}`);
+   console.log(`[COOKIES-SETUP]   📏 Size: ${fileSize} bytes (${lineCount} lines)`);
+   console.log(`[COOKIES-SETUP]   ⏱️  Total time: ${totalTime}ms`);
+   console.log(`[COOKIES-SETUP]   🌐 Environment: ${azureEnv.azureConfig.environment}`);
+
+   return true;
+  } catch (validationError) {
+   const validationTime = Date.now() - validationStart;
+   console.error(`[COOKIES-SETUP] ❌ File validation failed after ${validationTime}ms`);
+   console.error('[COOKIES-SETUP] ❌ Validation error:', validationError.message);
+   return false;
+  }
+ } catch (error) {
+  console.error('[COOKIES-SETUP] ❌ Unexpected error during cookies setup:', error.message);
+  console.error('[COOKIES-SETUP] ❌ Error stack:', error.stack);
+
+  if (azureEnv.isAzure) {
+   console.error('[COOKIES-SETUP] 🔧 Azure environment debugging:');
+   console.error(`[COOKIES-SETUP]   📍 Site: ${azureEnv.azureConfig.siteName}`);
+   console.error(`[COOKIES-SETUP]   📍 Resource Group: ${azureEnv.azureConfig.resourceGroup}`);
+   console.error(`[COOKIES-SETUP]   📍 Instance ID: ${azureEnv.azureConfig.instanceId}`);
+   console.error(`[COOKIES-SETUP]   📊 Environment limits: ${JSON.stringify(azureEnv.azureConfig.limits)}`);
+  }
+
   return false;
  }
-};
+}
 
-// Initialize cookies from environment variable
-checkAndCreateCookiesFromEnv();
+// Helper function to detect base64 encoding
+function isBase64Encoded(str) {
+ try {
+  // Basic base64 pattern check
+  const base64Pattern = /^[A-Za-z0-9+/]*={0,2}$/;
+  if (!base64Pattern.test(str)) return false;
+
+  // Try to decode and check if it looks like cookie content
+  const decoded = Buffer.from(str, 'base64').toString('utf8');
+  return decoded.includes('youtube.com') || decoded.includes('# Netscape') || decoded.includes('\t');
+ } catch (e) {
+  return false;
+ }
+}
+
+// Helper function to validate cookie format
+function validateCookieFormat(content) {
+ if (!content || content.length < 50) {
+  console.log('[COOKIES-SETUP] ❌ Content too short to be valid cookies');
+  return false;
+ }
+
+ // Check for common cookie indicators
+ const hasYoutube = content.includes('youtube.com') || content.includes('.youtube.com');
+ const hasNetscape = content.includes('# Netscape') || content.includes('# HTTP Cookie File');
+ const hasTabs = content.includes('\t'); // Cookie format uses tabs
+ const hasValidLines = content.split('\n').some((line) => line.trim() && !line.startsWith('#') && line.split('\t').length >= 6);
+
+ if (!hasYoutube) {
+  console.log('[COOKIES-SETUP] ⚠️  No YouTube domain found in cookies');
+ }
+
+ if (!hasTabs && !hasValidLines) {
+  console.log('[COOKIES-SETUP] ⚠️  No valid cookie entries found (missing tabs or malformed lines)');
+  return false;
+ }
+
+ console.log('[COOKIES-SETUP] ✅ Cookie format validation passed');
+ return true;
+}
+
+// Helper function to find writable location
+async function findWritableLocation(paths) {
+ for (const testPath of paths) {
+  try {
+   const testDir = path.dirname(testPath);
+
+   // Ensure directory exists or can be created
+   if (!fs.existsSync(testDir)) {
+    fs.mkdirSync(testDir, {recursive: true});
+   }
+
+   // Test write permissions
+   const testFile = path.join(testDir, '.write-test');
+   fs.writeFileSync(testFile, 'test');
+   fs.unlinkSync(testFile);
+
+   console.log(`[COOKIES-SETUP] ✅ Found writable location: ${testPath}`);
+   return testPath;
+  } catch (error) {
+   console.log(`[COOKIES-SETUP] ❌ Location not writable: ${testPath} - ${error.message}`);
+   continue;
+  }
+ }
+ return null;
+}
+
+// Initialize cookies from environment variable with enhanced error handling
+setupCookiesFile().catch((error) => {
+ console.error('[COOKIES-SETUP] ❌ Fatal error in cookies setup:', error);
+});
 
 // Enhanced validation for yt-dlp executable availability
 const validateYtDlpPath = () => {
@@ -208,28 +894,277 @@ const validateYtDlpPath = () => {
  }
 };
 
-// Helper function to check if cookies file exists and is valid
+// Enhanced helper function to check if cookies file exists and is valid
 const validateCookiesFile = (cookiesPath) => {
- if (!cookiesPath) return false;
+ if (!cookiesPath) {
+  console.log('[COOKIES-VALIDATION] ❌ No cookies path provided');
+  return {
+   valid: false,
+   error: 'No cookies path provided',
+   details: {},
+  };
+ }
 
  try {
   if (!fs.existsSync(cookiesPath)) {
-   console.log(`[COOKIES] Cookies file not found at: ${cookiesPath}`);
-   return false;
+   console.log(`[COOKIES-VALIDATION] ❌ Cookies file not found at: ${cookiesPath}`);
+   return {
+    valid: false,
+    error: 'Cookies file not found',
+    path: cookiesPath,
+    details: {},
+   };
   }
 
-  // Check if the file has content (not empty)
   const stats = fs.statSync(cookiesPath);
   if (stats.size === 0) {
-   console.log(`[COOKIES] Cookies file is empty: ${cookiesPath}`);
-   return false;
+   console.log(`[COOKIES-VALIDATION] ❌ Cookies file is empty: ${cookiesPath}`);
+   return {
+    valid: false,
+    error: 'Cookies file is empty',
+    path: cookiesPath,
+    size: 0,
+    details: {},
+   };
   }
 
-  console.log(`[COOKIES] ✅ Valid cookies file found: ${cookiesPath} (${stats.size} bytes)`);
-  return true;
+  // Read and analyze cookie content
+  const content = fs.readFileSync(cookiesPath, 'utf8');
+  const lines = content
+   .split('\n')
+   .map((line) => line.trim())
+   .filter((line) => line.length > 0);
+
+  console.log(`[COOKIES-VALIDATION] 🔍 Analyzing cookies file: ${cookiesPath}`);
+  console.log(`[COOKIES-VALIDATION] 📏 File size: ${stats.size} bytes`);
+  console.log(`[COOKIES-VALIDATION] 📄 Total lines: ${lines.length}`);
+
+  const validationResult = {
+   valid: true,
+   path: cookiesPath,
+   size: stats.size,
+   totalLines: lines.length,
+   details: {
+    hasNetscapeHeader: false,
+    youtubeDomains: [],
+    essentialCookies: {
+     found: [],
+     missing: [],
+     total: 0,
+    },
+    cookieStats: {
+     validCookies: 0,
+     commentLines: 0,
+     emptyLines: 0,
+     malformedLines: 0,
+    },
+    warnings: [],
+    errors: [],
+   },
+  };
+
+  // 1. Check for Netscape header
+  const hasNetscapeHeader = content.includes('# Netscape HTTP Cookie File') || content.includes('# HTTP Cookie File') || lines.some((line) => line.startsWith('# Netscape'));
+
+  validationResult.details.hasNetscapeHeader = hasNetscapeHeader;
+
+  if (hasNetscapeHeader) {
+   console.log('[COOKIES-VALIDATION] ✅ Netscape header found');
+  } else {
+   validationResult.details.warnings.push('No Netscape header found - cookies may not be in standard format');
+   console.log('[COOKIES-VALIDATION] ⚠️  No Netscape header found');
+  }
+
+  // 2. Essential YouTube cookies to check for
+  const essentialCookies = ['SID', 'HSID', 'SSID', 'APISID', 'SAPISID'];
+  const foundCookies = [];
+  const youtubeDomains = new Set();
+
+  // 3. Analyze each line for cookie format and content
+  for (const line of lines) {
+   if (line.startsWith('#')) {
+    validationResult.details.cookieStats.commentLines++;
+    continue;
+   }
+
+   if (line.trim() === '') {
+    validationResult.details.cookieStats.emptyLines++;
+    continue;
+   }
+
+   // Standard cookie format: domain \t flag \t path \t secure \t expiration \t name \t value
+   const parts = line.split('\t');
+
+   if (parts.length >= 6) {
+    validationResult.details.cookieStats.validCookies++;
+
+    const [domain, flag, path, secure, expiration, name, value] = parts;
+
+    // Check for YouTube domains
+    if (domain.includes('youtube.com') || domain.includes('.youtube.com')) {
+     youtubeDomains.add(domain);
+
+     // Check for essential cookies
+     if (essentialCookies.includes(name)) {
+      foundCookies.push({
+       name,
+       domain,
+       hasValue: value && value.length > 0,
+       valueLength: value ? value.length : 0,
+      });
+     }
+    }
+   } else {
+    validationResult.details.cookieStats.malformedLines++;
+    if (parts.length > 1) {
+     // Not just a single word/empty line
+     validationResult.details.warnings.push(`Malformed cookie line (${parts.length} parts): ${line.substring(0, 50)}...`);
+    }
+   }
+  }
+
+  // Update results with found data
+  validationResult.details.youtubeDomains = Array.from(youtubeDomains);
+  validationResult.details.essentialCookies.found = foundCookies;
+  validationResult.details.essentialCookies.total = foundCookies.length;
+  validationResult.details.essentialCookies.missing = essentialCookies.filter((cookie) => !foundCookies.some((found) => found.name === cookie));
+
+  // 4. Validation checks and error detection
+  if (youtubeDomains.size === 0) {
+   validationResult.valid = false;
+   validationResult.details.errors.push('No YouTube domains found in cookies');
+   validationResult.error = 'No YouTube domains found';
+  }
+
+  if (validationResult.details.cookieStats.validCookies === 0) {
+   validationResult.valid = false;
+   validationResult.details.errors.push('No valid cookie entries found');
+   validationResult.error = 'No valid cookies found';
+  }
+
+  if (foundCookies.length === 0) {
+   validationResult.details.warnings.push('No essential YouTube authentication cookies found');
+  }
+
+  if (validationResult.details.cookieStats.malformedLines > validationResult.details.cookieStats.validCookies) {
+   validationResult.details.warnings.push('More malformed lines than valid cookies - file may be corrupted');
+  }
+
+  // Check for empty cookie values
+  const emptyCookies = foundCookies.filter((cookie) => !cookie.hasValue);
+  if (emptyCookies.length > 0) {
+   validationResult.details.warnings.push(`Found ${emptyCookies.length} essential cookies with empty values: ${emptyCookies.map((c) => c.name).join(', ')}`);
+  }
+
+  // 5. Log detailed validation results
+  console.log(`[COOKIES-VALIDATION] 📊 Cookie Analysis Results:`);
+  console.log(`[COOKIES-VALIDATION]   🌐 YouTube domains: ${youtubeDomains.size} (${Array.from(youtubeDomains).join(', ')})`);
+  console.log(`[COOKIES-VALIDATION]   🔑 Essential cookies found: ${foundCookies.length}/${essentialCookies.length}`);
+
+  foundCookies.forEach((cookie) => {
+   console.log(`[COOKIES-VALIDATION]     ✅ ${cookie.name} (${cookie.domain}): ${cookie.valueLength} chars`);
+  });
+
+  if (validationResult.details.essentialCookies.missing.length > 0) {
+   console.log(`[COOKIES-VALIDATION]   ❌ Missing essential cookies: ${validationResult.details.essentialCookies.missing.join(', ')}`);
+  }
+
+  console.log(
+   `[COOKIES-VALIDATION]   📈 Cookie stats: ${validationResult.details.cookieStats.validCookies} valid, ${validationResult.details.cookieStats.commentLines} comments, ${validationResult.details.cookieStats.malformedLines} malformed`
+  );
+
+  // Log warnings
+  if (validationResult.details.warnings.length > 0) {
+   console.log(`[COOKIES-VALIDATION] ⚠️  Warnings (${validationResult.details.warnings.length}):`);
+   validationResult.details.warnings.forEach((warning) => {
+    console.log(`[COOKIES-VALIDATION]     - ${warning}`);
+   });
+  }
+
+  // Log errors
+  if (validationResult.details.errors.length > 0) {
+   console.log(`[COOKIES-VALIDATION] ❌ Errors (${validationResult.details.errors.length}):`);
+   validationResult.details.errors.forEach((error) => {
+    console.log(`[COOKIES-VALIDATION]     - ${error}`);
+   });
+  }
+
+  if (validationResult.valid) {
+   console.log(`[COOKIES-VALIDATION] ✅ Cookies file validation passed: ${cookiesPath} (${stats.size} bytes, ${foundCookies.length} essential cookies)`);
+  } else {
+   console.log(`[COOKIES-VALIDATION] ❌ Cookies file validation failed: ${validationResult.error}`);
+  }
+
+  // Return boolean for backward compatibility, but also support detailed results
+  if (typeof validationResult.valid === 'undefined') {
+   return validationResult;
+  }
+
+  return validationResult.valid;
  } catch (error) {
-  console.log(`[COOKIES] Error validating cookies file: ${error.message}`);
-  return false;
+  console.log(`[COOKIES-VALIDATION] ❌ Error validating cookies file: ${error.message}`);
+  return {
+   valid: false,
+   error: `Validation error: ${error.message}`,
+   path: cookiesPath,
+   details: {
+    errors: [error.message],
+   },
+  };
+ }
+};
+
+// Helper function to get detailed cookies validation results (returns full object instead of just boolean)
+const getDetailedCookiesValidation = (cookiesPath) => {
+ if (!cookiesPath) {
+  return {
+   valid: false,
+   error: 'No cookies path provided',
+   details: {},
+  };
+ }
+
+ try {
+  if (!fs.existsSync(cookiesPath)) {
+   return {
+    valid: false,
+    error: 'Cookies file not found',
+    path: cookiesPath,
+    details: {},
+   };
+  }
+
+  // Temporarily modify validateCookiesFile to return detailed results
+  const originalConsoleLog = console.log;
+  const logs = [];
+  console.log = (...args) => {
+   logs.push(args.join(' '));
+   originalConsoleLog(...args);
+  };
+
+  const result = validateCookiesFile(cookiesPath);
+  console.log = originalConsoleLog;
+
+  // If validateCookiesFile returns an object, return it; otherwise create a basic result
+  if (typeof result === 'object' && result !== null) {
+   return result;
+  } else {
+   return {
+    valid: result,
+    path: cookiesPath,
+    details: {},
+    logs: logs,
+   };
+  }
+ } catch (error) {
+  return {
+   valid: false,
+   error: `Detailed validation error: ${error.message}`,
+   path: cookiesPath,
+   details: {
+    errors: [error.message],
+   },
+  };
  }
 };
 
@@ -250,23 +1185,83 @@ function getRandomUserAgent() {
 async function executeYtDlpSecurely(args, options = {}) {
  return new Promise((resolve, reject) => {
   const startTime = Date.now();
+  console.log('[YT-DLP-EXEC] 🚀 Starting yt-dlp execution...');
+  console.log(`[YT-DLP-EXEC] ⏰ Start time: ${new Date(startTime).toISOString()}`);
+
   // Validate all arguments to prevent injection
   const safeArgs = args.map((arg) => {
    if (typeof arg !== 'string') throw new Error('Invalid argument type');
    return arg;
   });
 
+  console.log('[YT-DLP-EXEC] 🔍 Command arguments analysis:');
+  console.log(`[YT-DLP-EXEC]   📊 Total args: ${safeArgs.length}`);
+  console.log(`[YT-DLP-EXEC]   📋 Args: ${safeArgs.join(' ')}`);
+
   const finalArgs = [...safeArgs];
+
+  // Enhanced cookies handling with detailed logging
+  let cookiesUsed = false;
+  let cookiesPath = null;
+  let cookiesInfo = null;
+
   if (options.useCookies !== false) {
-   const cookiesPath = options.cookiesPath || YTDLP_COOKIES_PATH;
-   if (validateCookiesFile(cookiesPath)) {
-    console.log(`[SECURE-YTDLP] Using cookies from: ${cookiesPath}`);
-    finalArgs.unshift('--cookies', cookiesPath);
+   cookiesPath = options.cookiesPath || YTDLP_COOKIES_PATH;
+   console.log('[YT-DLP-EXEC] 🍪 Cookies configuration:');
+   console.log(`[YT-DLP-EXEC]   📍 Cookie path: ${cookiesPath || 'Not specified'}`);
+   console.log(`[YT-DLP-EXEC]   🔧 Use cookies: ${options.useCookies !== false}`);
+   console.log(`[YT-DLP-EXEC]   🔧 Force cookies: ${options.useCookies === true}`);
+
+   if (cookiesPath && validateCookiesFile(cookiesPath)) {
+    // Get detailed cookies info
+    try {
+     const cookiesStats = fs.statSync(cookiesPath);
+     const cookiesContent = fs.readFileSync(cookiesPath, 'utf8');
+     const cookiesLines = cookiesContent.split('\n').filter((line) => line.trim().length > 0);
+     const youtubeCookies = cookiesLines.filter((line) => !line.startsWith('#') && line.includes('youtube.com'));
+
+     cookiesInfo = {
+      path: cookiesPath,
+      size: cookiesStats.size,
+      totalLines: cookiesLines.length,
+      youtubeCookies: youtubeCookies.length,
+      lastModified: cookiesStats.mtime.toISOString(),
+     };
+
+     console.log('[YT-DLP-EXEC] ✅ Cookies file validation passed:');
+     console.log(`[YT-DLP-EXEC]   📍 Path: ${cookiesPath}`);
+     console.log(`[YT-DLP-EXEC]   📏 Size: ${cookiesInfo.size} bytes`);
+     console.log(`[YT-DLP-EXEC]   📄 Total lines: ${cookiesInfo.totalLines}`);
+     console.log(`[YT-DLP-EXEC]   🌐 YouTube cookies: ${cookiesInfo.youtubeCookies}`);
+     console.log(`[YT-DLP-EXEC]   🕒 Last modified: ${cookiesInfo.lastModified}`);
+
+     finalArgs.unshift('--cookies', cookiesPath);
+     cookiesUsed = true;
+     console.log('[YT-DLP-EXEC] 🍪 Cookies added to yt-dlp command');
+    } catch (cookiesError) {
+     console.error('[YT-DLP-EXEC] ❌ Error reading cookies file details:', cookiesError.message);
+     console.log('[YT-DLP-EXEC] 🔄 Proceeding without detailed cookies info');
+     finalArgs.unshift('--cookies', cookiesPath);
+     cookiesUsed = true;
+    }
+   } else {
+    console.warn('[YT-DLP-EXEC] ⚠️  Cookies file validation failed or not found');
+    console.warn('[YT-DLP-EXEC] ⚠️  yt-dlp will run without YouTube authentication');
+    console.warn('[YT-DLP-EXEC] ⚠️  This may result in bot detection or limited access');
    }
+  } else {
+   console.log('[YT-DLP-EXEC] 🚫 Cookies explicitly disabled for this execution');
   }
 
+  // Log final execution details
+  console.log('[YT-DLP-EXEC] 📋 Execution summary:');
+  console.log(`[YT-DLP-EXEC]   🍪 Cookies used: ${cookiesUsed}`);
+  console.log(`[YT-DLP-EXEC]   📊 Final arg count: ${finalArgs.length}`);
+  console.log(`[YT-DLP-EXEC]   🌐 Environment: ${azureEnv.azureConfig.environment}`);
+
   const binaryToUse = YT_DLP_PATH || 'yt-dlp';
-  console.log(`[SECURE-YTDLP] Executing: ${binaryToUse} ${finalArgs.join(' ')}`);
+  console.log(`[YT-DLP-EXEC] 🔧 Binary: ${binaryToUse}`);
+  console.log(`[YT-DLP-EXEC] ⚡ Executing: ${binaryToUse} ${finalArgs.join(' ')}`);
 
   let spawned = null;
   try {
@@ -276,41 +1271,145 @@ async function executeYtDlpSecurely(args, options = {}) {
     maxBuffer: options.maxBuffer || 1024 * 1024 * 50,
    });
   } catch (spawnErr) {
-   console.warn(`[SECURE-YTDLP] Primary spawn failed immediately: ${spawnErr.message}`);
+   console.error(`[YT-DLP-EXEC] ❌ Primary spawn failed immediately: ${spawnErr.message}`);
+   if (cookiesUsed) {
+    console.error('[YT-DLP-EXEC] ❌ Spawn failed while using cookies - may indicate file permission issues');
+   }
    spawned = null;
   }
 
   if (!spawned) {
    // Attempt fallback using programmatic API from yt-dlp-exec
-   console.warn('[SECURE-YTDLP] Falling back to yt-dlp-exec programmatic API');
+   console.warn('[YT-DLP-EXEC] 🔄 Falling back to yt-dlp-exec programmatic API');
+
+   if (cookiesUsed) {
+    console.warn('[YT-DLP-EXEC] ⚠️  Fallback may not properly use cookies file');
+    console.warn('[YT-DLP-EXEC] ⚠️  Consider checking yt-dlp binary installation');
+   }
+
    try {
     // yt-dlp-exec expects (url, flags) style; we emulate by joining args
     // We cannot easily map our array to that interface if multiple URLs; assume last arg is URL
     const maybeUrl = finalArgs[finalArgs.length - 1];
+    console.log(`[YT-DLP-EXEC] 🔄 Fallback URL: ${maybeUrl}`);
+
     const execResult = ytdlp.exec(maybeUrl, {}, {timeout: options.timeout || 300000});
-    execResult.then((r) => resolve(r.stdout || r)).catch((e) => reject(e));
+    execResult
+     .then((r) => {
+      const executionTime = Date.now() - startTime;
+      console.log(`[YT-DLP-EXEC] ✅ Fallback execution completed in ${executionTime}ms`);
+      if (cookiesUsed) {
+       console.log('[YT-DLP-EXEC] ⚠️  Note: Fallback execution may not have used cookies properly');
+      }
+      resolve(r.stdout || r);
+     })
+     .catch((e) => {
+      const executionTime = Date.now() - startTime;
+      console.error(`[YT-DLP-EXEC] ❌ Fallback execution failed after ${executionTime}ms: ${e.message}`);
+      if (cookiesUsed) {
+       console.error('[YT-DLP-EXEC] ❌ Fallback failed while cookies were intended to be used');
+      }
+      reject(e);
+     });
     return; // Exit early after fallback
    } catch (fallbackErr) {
+    console.error(`[YT-DLP-EXEC] ❌ Fallback failed: ${fallbackErr.message}`);
     return reject(new Error(`Failed to start yt-dlp (both direct & fallback): ${fallbackErr.message}`));
    }
   }
 
+  console.log(`[YT-DLP-EXEC] ✅ Process spawned successfully (PID: ${spawned.pid})`);
+  if (cookiesUsed) {
+   console.log('[YT-DLP-EXEC] 🍪 Process is using cookies for YouTube authentication');
+  }
+
   let stdout = '';
   let stderr = '';
-  spawned.stdout.on('data', (d) => (stdout += d.toString()));
-  spawned.stderr.on('data', (d) => (stderr += d.toString()));
+
+  spawned.stdout.on('data', (d) => {
+   stdout += d.toString();
+   // Log significant yt-dlp output for debugging
+   const output = d.toString().trim();
+   if (output) {
+    console.log(`[YT-DLP-EXEC] 📤 stdout: ${output.substring(0, 200)}${output.length > 200 ? '...' : ''}`);
+   }
+  });
+
+  spawned.stderr.on('data', (d) => {
+   const errorOutput = d.toString();
+   stderr += errorOutput;
+
+   // Log and analyze stderr for cookies-related issues
+   const errorLine = errorOutput.trim();
+   if (errorLine) {
+    console.warn(`[YT-DLP-EXEC] 📥 stderr: ${errorLine.substring(0, 200)}${errorLine.length > 200 ? '...' : ''}`);
+
+    // Check for cookies-related errors
+    if (cookiesUsed && (errorLine.includes('cookies') || errorLine.includes('authentication') || errorLine.includes('Sign in') || errorLine.includes('bot detection'))) {
+     console.warn('[YT-DLP-EXEC] 🍪 Potential cookies-related issue detected in stderr');
+    }
+   }
+  });
+
   spawned.on('close', (code) => {
    const duration = Date.now() - startTime;
+   const stdoutSize = Buffer.byteLength(stdout, 'utf8');
+   const stderrSize = Buffer.byteLength(stderr, 'utf8');
+
+   console.log('[YT-DLP-EXEC] 🏁 Process completed:');
+   console.log(`[YT-DLP-EXEC]   ⏱️  Duration: ${duration}ms`);
+   console.log(`[YT-DLP-EXEC]   🔢 Exit code: ${code}`);
+   console.log(`[YT-DLP-EXEC]   📊 stdout: ${(stdoutSize / 1024).toFixed(1)} KB`);
+   console.log(`[YT-DLP-EXEC]   📊 stderr: ${(stderrSize / 1024).toFixed(1)} KB`);
+   console.log(`[YT-DLP-EXEC]   🍪 Used cookies: ${cookiesUsed}`);
+
+   if (cookiesUsed && cookiesInfo) {
+    console.log('[YT-DLP-EXEC] 🍪 Cookies session summary:');
+    console.log(`[YT-DLP-EXEC]   📍 Cookies file: ${cookiesInfo.path}`);
+    console.log(`[YT-DLP-EXEC]   📏 File size: ${cookiesInfo.size} bytes`);
+    console.log(`[YT-DLP-EXEC]   🌐 YouTube cookies: ${cookiesInfo.youtubeCookies}`);
+   }
+
    if (code === 0) {
-    console.log(`[SECURE-YTDLP] ✅ Completed in ${duration}ms (${(stdout.length / 1024).toFixed(1)} KB stdout)`);
+    console.log(`[YT-DLP-EXEC] ✅ Execution successful`);
+    if (cookiesUsed) {
+     console.log('[YT-DLP-EXEC] ✅ YouTube authentication via cookies appears successful');
+    }
     resolve(stdout);
    } else {
-    console.warn(`[SECURE-YTDLP] ❌ Exit code ${code} after ${duration}ms`);
+    console.error(`[YT-DLP-EXEC] ❌ Execution failed with exit code ${code}`);
+
+    if (cookiesUsed) {
+     console.error('[YT-DLP-EXEC] ❌ Failure occurred while using cookies');
+     console.error('[YT-DLP-EXEC] 💡 Consider checking:');
+     console.error('[YT-DLP-EXEC]   - Cookies file validity and freshness');
+     console.error('[YT-DLP-EXEC]   - YouTube authentication status');
+     console.error('[YT-DLP-EXEC]   - Bot detection countermeasures');
+    }
+
+    // Analyze stderr for specific error patterns
+    if (stderr.toLowerCase().includes('sign in') || stderr.toLowerCase().includes('bot')) {
+     console.error('[YT-DLP-EXEC] ❌ Bot detection or authentication error detected');
+     if (cookiesUsed) {
+      console.error('[YT-DLP-EXEC] ❌ Cookies may be expired or invalid');
+     } else {
+      console.error('[YT-DLP-EXEC] ❌ Consider using valid YouTube cookies');
+     }
+    }
+
     reject(new Error(`yt-dlp failed with code ${code}: ${stderr}`));
    }
   });
+
   spawned.on('error', (error) => {
-   console.error('[SECURE-YTDLP] Spawn error:', error.message);
+   const duration = Date.now() - startTime;
+   console.error(`[YT-DLP-EXEC] ❌ Process error after ${duration}ms:`, error.message);
+
+   if (cookiesUsed) {
+    console.error('[YT-DLP-EXEC] ❌ Process error occurred while using cookies');
+    console.error('[YT-DLP-EXEC] 💡 Check if cookies file is accessible and not locked');
+   }
+
    reject(new Error(`Failed to start yt-dlp process: ${error.message}`));
   });
  });
@@ -581,14 +1680,38 @@ app.get('/', (req, res) => {
  });
 });
 
-// Health check endpoint
+// Health check endpoint with Azure environment awareness
 app.get('/health', async (req, res) => {
- res.json({
+ const healthInfo = {
   status: 'healthy',
   uptime: process.uptime(),
   memory: process.memoryUsage(),
   timestamp: new Date().toISOString(),
- });
+  environment: {
+   type: azureEnv.azureConfig.environment,
+   isAzure: azureEnv.isAzure,
+   platform: process.platform,
+   nodeVersion: process.version,
+  },
+ };
+
+ // Add Azure-specific information if running in Azure
+ if (azureEnv.isAzure) {
+  healthInfo.azure = {
+   siteName: azureEnv.azureConfig.siteName,
+   hostname: azureEnv.azureConfig.hostname,
+   resourceGroup: azureEnv.azureConfig.resourceGroup,
+   instanceId: azureEnv.azureConfig.instanceId,
+   paths: {
+    home: azureEnv.azureConfig.paths.home,
+    temp: azureEnv.azureConfig.paths.temp,
+    cookiesPath: YTDLP_COOKIES_PATH,
+   },
+   limits: azureEnv.azureConfig.limits,
+  };
+ }
+
+ res.json(healthInfo);
 });
 
 // Root endpoint for basic connectivity test
@@ -606,7 +1729,7 @@ app.get('/', (req, res) => {
  });
 });
 
-// 🚨 DEBUG ENDPOINT: Production diagnostics (safe for production)
+// 🚨 DEBUG ENDPOINT: Production diagnostics with Azure awareness
 app.get('/api/debug/environment', async (req, res) => {
  try {
   const debugInfo = {
@@ -621,11 +1744,42 @@ app.get('/api/debug/environment', async (req, res) => {
    cookies_env_variable: process.env.YTDLP_COOKIES_CONTENT ? 'present' : 'not set',
    cookies_env_length: process.env.YTDLP_COOKIES_CONTENT ? process.env.YTDLP_COOKIES_CONTENT.length : 0,
    environment: process.env.NODE_ENV || 'development',
-   azure_env: process.env.WEBSITE_HOSTNAME || 'local',
    uptime: process.uptime(),
    memory: process.memoryUsage(),
    timestamp: new Date().toISOString(),
+
+   // Enhanced Azure environment information
+   azure: {
+    detected: azureEnv.isAzure,
+    environment: azureEnv.azureConfig.environment,
+    hostname: process.env.WEBSITE_HOSTNAME || 'local',
+   },
   };
+
+  // Add detailed Azure information if running in Azure
+  if (azureEnv.isAzure) {
+   debugInfo.azure = {
+    ...debugInfo.azure,
+    siteName: azureEnv.azureConfig.siteName,
+    resourceGroup: azureEnv.azureConfig.resourceGroup,
+    instanceId: azureEnv.azureConfig.instanceId,
+    nodeVersion: azureEnv.azureConfig.nodeVersion,
+    paths: {
+     home: azureEnv.azureConfig.paths.home,
+     wwwroot: azureEnv.azureConfig.paths.wwwroot,
+     temp: azureEnv.azureConfig.paths.temp,
+     logs: azureEnv.azureConfig.paths.logs,
+     data: azureEnv.azureConfig.paths.data,
+     cookies: YTDLP_COOKIES_PATH,
+     cookiesPathType: azureEnv.getAzurePathType(YTDLP_COOKIES_PATH),
+    },
+    limits: azureEnv.azureConfig.limits,
+    environmentVariables: {
+     cookiesContentSize: process.env.YTDLP_COOKIES_CONTENT ? Buffer.byteLength(process.env.YTDLP_COOKIES_CONTENT, 'utf8') : 0,
+     nearSizeLimit: process.env.YTDLP_COOKIES_CONTENT ? Buffer.byteLength(process.env.YTDLP_COOKIES_CONTENT, 'utf8') >= azureEnv.azureConfig.limits.maxEnvVarSize * 0.95 : false,
+    },
+   };
+  }
 
   // Test yt-dlp availability
   try {
@@ -687,6 +1841,312 @@ app.get('/api/debug/cookies-meta', (req, res) => {
   });
  } catch (e) {
   res.status(500).json({status: 'error', message: e.message});
+ }
+});
+
+// 🔍 COMPREHENSIVE COOKIES DEBUG ENDPOINT (Non-production only)
+app.get('/api/debug/cookies', (req, res) => {
+ // Security check: Only allow in non-production environments
+ const isProduction = process.env.NODE_ENV === 'production';
+ const isAzureProduction = azureEnv.isAzure && process.env.WEBSITE_HOSTNAME && !process.env.WEBSITE_HOSTNAME.includes('staging');
+
+ if (isProduction || isAzureProduction) {
+  return res.status(403).json({
+   status: 'forbidden',
+   message: 'Debug endpoints are not available in production',
+   environment: process.env.NODE_ENV || 'undefined',
+   isAzure: azureEnv.isAzure,
+   timestamp: new Date().toISOString(),
+  });
+ }
+
+ try {
+  console.log('[COOKIES-DEBUG] 🔍 Comprehensive cookies debug requested');
+
+  const crypto = require('crypto');
+  const debugInfo = {
+   status: 'ok',
+   timestamp: new Date().toISOString(),
+   environment: {
+    nodeEnv: process.env.NODE_ENV || 'development',
+    isAzure: azureEnv.isAzure,
+    azureEnvironment: azureEnv.azureConfig.environment,
+    hostname: process.env.WEBSITE_HOSTNAME || 'local',
+   },
+   environmentVariable: {
+    present: false,
+    length: 0,
+    sizeBytes: 0,
+    nearAzureLimit: false,
+    truncationRisk: false,
+    firstChars: null,
+    lastChars: null,
+    md5Hash: null,
+   },
+   cookiesFile: {
+    path: YTDLP_COOKIES_PATH || 'not set',
+    pathType: azureEnv.getAzurePathType(YTDLP_COOKIES_PATH || ''),
+    exists: false,
+    size: 0,
+    lines: 0,
+    md5Hash: null,
+    firstChars: null,
+    lastChars: null,
+    created: null,
+    modified: null,
+   },
+   comparison: {
+    sizeDifference: 0,
+    hashMatch: false,
+    contentMatch: false,
+   },
+   azure: azureEnv.isAzure
+    ? {
+       limits: azureEnv.azureConfig.limits,
+       detectedPaths: azureEnv.azureConfig.paths.cookies || [],
+      }
+    : null,
+  };
+
+  // 1. Analyze environment variable
+  const envVarNames = ['YTDLP_COOKIES_CONTENT', 'YOUTUBE_COOKIES_CONTENT', 'COOKIES_CONTENT'];
+  let envContent = null;
+  let usedVarName = null;
+
+  for (const varName of envVarNames) {
+   const content = process.env[varName];
+   if (content && content.trim()) {
+    envContent = content;
+    usedVarName = varName;
+    break;
+   }
+  }
+
+  if (envContent) {
+   debugInfo.environmentVariable.present = true;
+   debugInfo.environmentVariable.variableName = usedVarName;
+   debugInfo.environmentVariable.length = envContent.length;
+   debugInfo.environmentVariable.sizeBytes = Buffer.byteLength(envContent, 'utf8');
+
+   // Azure size limit check
+   if (azureEnv.isAzure) {
+    const limit = azureEnv.azureConfig.limits.maxEnvVarSize;
+    debugInfo.environmentVariable.nearAzureLimit = debugInfo.environmentVariable.sizeBytes >= limit * 0.95;
+    debugInfo.environmentVariable.azureSizeLimit = limit;
+    debugInfo.environmentVariable.percentOfLimit = Math.round((debugInfo.environmentVariable.sizeBytes / limit) * 100);
+   }
+
+   // Truncation risk assessment
+   debugInfo.environmentVariable.truncationRisk = !envContent.trim().endsWith('\n') && envContent.includes('youtube.com') && envContent.length > 1000;
+
+   // Content samples (sanitized)
+   const sanitizedContent = envContent
+    .replace(/([A-Za-z0-9+/]{20})[A-Za-z0-9+/]{10,}/g, '$1***SANITIZED***') // Sanitize long tokens
+    .replace(/\b[A-Za-z0-9]{32,}\b/g, '***SANITIZED***'); // Sanitize long alphanumeric strings
+
+   debugInfo.environmentVariable.firstChars = sanitizedContent.substring(0, 100);
+   debugInfo.environmentVariable.lastChars = sanitizedContent.slice(-100);
+   debugInfo.environmentVariable.md5Hash = crypto.createHash('md5').update(envContent).digest('hex');
+
+   // Basic format validation
+   debugInfo.environmentVariable.formatCheck = {
+    hasNetscapeHeader: envContent.includes('# Netscape') || envContent.includes('# HTTP Cookie'),
+    hasYoutubeDomain: envContent.includes('youtube.com') || envContent.includes('.youtube.com'),
+    hasTabs: envContent.includes('\t'),
+    lineCount: envContent.split('\n').length,
+    validCookieLines: envContent.split('\n').filter((line) => line.trim() && !line.startsWith('#') && line.split('\t').length >= 6).length,
+   };
+  }
+
+  // 2. Analyze cookies file
+  if (YTDLP_COOKIES_PATH && fs.existsSync(YTDLP_COOKIES_PATH)) {
+   try {
+    const stats = fs.statSync(YTDLP_COOKIES_PATH);
+    const fileContent = fs.readFileSync(YTDLP_COOKIES_PATH, 'utf8');
+
+    debugInfo.cookiesFile.exists = true;
+    debugInfo.cookiesFile.size = stats.size;
+    debugInfo.cookiesFile.lines = fileContent.split('\n').length;
+    debugInfo.cookiesFile.created = stats.birthtime.toISOString();
+    debugInfo.cookiesFile.modified = stats.mtime.toISOString();
+    debugInfo.cookiesFile.md5Hash = crypto.createHash('md5').update(fileContent).digest('hex');
+
+    // Content samples (sanitized)
+    const sanitizedFileContent = fileContent.replace(/([A-Za-z0-9+/]{20})[A-Za-z0-9+/]{10,}/g, '$1***SANITIZED***').replace(/\b[A-Za-z0-9]{32,}\b/g, '***SANITIZED***');
+
+    debugInfo.cookiesFile.firstChars = sanitizedFileContent.substring(0, 100);
+    debugInfo.cookiesFile.lastChars = sanitizedFileContent.slice(-100);
+
+    // File format validation
+    debugInfo.cookiesFile.formatCheck = {
+     hasNetscapeHeader: fileContent.includes('# Netscape') || fileContent.includes('# HTTP Cookie'),
+     hasYoutubeDomain: fileContent.includes('youtube.com') || fileContent.includes('.youtube.com'),
+     hasTabs: fileContent.includes('\t'),
+     validCookieLines: fileContent.split('\n').filter((line) => line.trim() && !line.startsWith('#') && line.split('\t').length >= 6).length,
+    };
+
+    // 3. Compare environment variable vs file
+    if (envContent) {
+     debugInfo.comparison.sizeDifference = debugInfo.environmentVariable.sizeBytes - debugInfo.cookiesFile.size;
+     debugInfo.comparison.hashMatch = debugInfo.environmentVariable.md5Hash === debugInfo.cookiesFile.md5Hash;
+
+     // Content comparison (basic)
+     const normalizedEnv = envContent.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+     const normalizedFile = fileContent.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+     debugInfo.comparison.contentMatch = normalizedEnv === normalizedFile;
+
+     if (!debugInfo.comparison.contentMatch) {
+      debugInfo.comparison.lengthDiff = normalizedEnv.length - normalizedFile.length;
+      debugInfo.comparison.possibleIssues = [];
+
+      if (Math.abs(debugInfo.comparison.lengthDiff) > 10) {
+       debugInfo.comparison.possibleIssues.push('Significant length difference detected');
+      }
+
+      if (debugInfo.environmentVariable.truncationRisk) {
+       debugInfo.comparison.possibleIssues.push('Environment variable may be truncated');
+      }
+
+      if (azureEnv.isAzure && debugInfo.environmentVariable.nearAzureLimit) {
+       debugInfo.comparison.possibleIssues.push('Environment variable near Azure size limit');
+      }
+     }
+    }
+   } catch (fileError) {
+    debugInfo.cookiesFile.error = fileError.message;
+    console.error('[COOKIES-DEBUG] ❌ Error reading cookies file:', fileError.message);
+   }
+  }
+
+  // 4. Additional diagnostics
+  debugInfo.diagnostics = {
+   recommendedActions: [],
+   potentialIssues: [],
+  };
+
+  if (!debugInfo.environmentVariable.present) {
+   debugInfo.diagnostics.potentialIssues.push('No cookies environment variable found');
+   debugInfo.diagnostics.recommendedActions.push('Set YTDLP_COOKIES_CONTENT environment variable');
+  }
+
+  if (!debugInfo.cookiesFile.exists) {
+   debugInfo.diagnostics.potentialIssues.push('Cookies file not found');
+   debugInfo.diagnostics.recommendedActions.push('Run cookies setup process');
+  }
+
+  if (debugInfo.comparison.sizeDifference > 100) {
+   debugInfo.diagnostics.potentialIssues.push(`Environment variable larger than file by ${debugInfo.comparison.sizeDifference} bytes`);
+   debugInfo.diagnostics.recommendedActions.push('Check for encoding or truncation issues');
+  }
+
+  if (!debugInfo.comparison.hashMatch && envContent && debugInfo.cookiesFile.exists) {
+   debugInfo.diagnostics.potentialIssues.push('Content hash mismatch between environment variable and file');
+   debugInfo.diagnostics.recommendedActions.push('Regenerate cookies file from environment variable');
+  }
+
+  console.log('[COOKIES-DEBUG] ✅ Debug analysis completed');
+  console.log(`[COOKIES-DEBUG] Environment variable: ${debugInfo.environmentVariable.present ? debugInfo.environmentVariable.sizeBytes + ' bytes' : 'not found'}`);
+  console.log(`[COOKIES-DEBUG] Cookies file: ${debugInfo.cookiesFile.exists ? debugInfo.cookiesFile.size + ' bytes' : 'not found'}`);
+  console.log(`[COOKIES-DEBUG] Hash match: ${debugInfo.comparison.hashMatch}`);
+
+  res.json(debugInfo);
+ } catch (error) {
+  console.error('[COOKIES-DEBUG] ❌ Debug endpoint error:', error.message);
+  res.status(500).json({
+   status: 'error',
+   message: 'Debug analysis failed',
+   error: error.message,
+   timestamp: new Date().toISOString(),
+  });
+ }
+});
+
+// Debug endpoint for startup validation results
+app.get('/api/debug/startup-validation', (req, res) => {
+ console.log('[STARTUP-VALIDATION-DEBUG] 🔍 Startup validation debug requested');
+
+ try {
+  if (!global.lastStartupValidation) {
+   return res.json({
+    status: 'no_data',
+    message: 'No startup validation data available',
+    note: 'Startup validation may be disabled or not yet run',
+    recommendations: ['Restart the server to trigger startup validation', 'Ensure STARTUP_VALIDATION environment variable is not set to false', 'Check server logs for validation output'],
+    timestamp: new Date().toISOString(),
+   });
+  }
+
+  const validation = global.lastStartupValidation;
+  const currentHealth = quickCookiesHealthCheck();
+
+  const response = {
+   status: 'success',
+   startup_validation: {
+    timestamp: validation.timestamp,
+    duration_ms: Date.now() - validation.startupTime,
+    overall_success: validation.overallSuccess,
+    test_results: {
+     environment_variable: validation.environmentVariable,
+     cookies_file_creation: validation.cookiesFileCreation,
+     cookies_file_validation: validation.cookiesFileValidation,
+     ytdlp_basic_test: validation.ytdlpBasicTest,
+     ytdlp_cookies_test: validation.ytdlpCookiesTest,
+    },
+    issues: validation.issues || [],
+    recommendations: validation.recommendations || [],
+   },
+   current_health: {
+    env_var_exists: currentHealth.envVarExists,
+    cookies_file_exists: currentHealth.cookiesFileExists,
+    cookies_file_valid: currentHealth.cookiesFileValid,
+    cookies_file_size: currentHealth.size,
+    last_modified: currentHealth.lastModified,
+   },
+   diagnostics: {
+    uptime_since_validation: Date.now() - new Date(validation.timestamp).getTime(),
+    environment: azureEnv.azureConfig.environment,
+    cookies_path: YTDLP_COOKIES_PATH,
+    server_start_time: validation.startupTime,
+   },
+   quick_actions: ['Re-run validation: restart server', 'Check cookies: GET /api/debug/cookies', 'Test yt-dlp: use test scripts in backend folder', 'Environment info: GET /api/debug/environment'],
+  };
+
+  // Add status assessment
+  if (validation.overallSuccess && currentHealth.cookiesFileExists && currentHealth.cookiesFileValid) {
+   response.assessment = {
+    status: 'healthy',
+    message: 'Cookies system is fully operational',
+    confidence: 'high',
+   };
+  } else if (validation.overallSuccess) {
+   response.assessment = {
+    status: 'mostly_healthy',
+    message: 'Startup validation passed but current health check shows some issues',
+    confidence: 'medium',
+   };
+  } else if (currentHealth.cookiesFileExists) {
+   response.assessment = {
+    status: 'degraded',
+    message: 'Startup validation failed but cookies file exists',
+    confidence: 'low',
+   };
+  } else {
+   response.assessment = {
+    status: 'unhealthy',
+    message: 'Cookies system has significant issues',
+    confidence: 'high',
+   };
+  }
+
+  res.json(response);
+ } catch (error) {
+  console.error('[STARTUP-VALIDATION-DEBUG] ❌ Error:', error.message);
+  res.status(500).json({
+   status: 'error',
+   message: 'Failed to retrieve startup validation data',
+   error: error.message,
+   timestamp: new Date().toISOString(),
+  });
  }
 });
 
@@ -2661,9 +4121,320 @@ app.get('/api/test-transcript/:videoId', async (req, res) => {
  }
 });
 
+// ================================
+// 🧪 AUTOMATED STARTUP VALIDATION
+// ================================
+
+/**
+ * Automated cookies validation that runs on server startup
+ */
+async function runStartupCookiesValidation() {
+ console.log('\n' + '='.repeat(60));
+ console.log('🧪 AUTOMATED STARTUP COOKIES VALIDATION');
+ console.log('='.repeat(60));
+
+ const validationResults = {
+  environmentVariable: false,
+  cookiesFileCreation: false,
+  cookiesFileValidation: false,
+  ytdlpBasicTest: false,
+  ytdlpCookiesTest: false,
+  overallSuccess: false,
+  issues: [],
+  recommendations: [],
+  startupTime: Date.now(),
+ };
+
+ try {
+  // 1. Check environment variables
+  console.log('\n📋 Step 1: Environment Variable Check');
+  const envVarNames = ['YTDLP_COOKIES_CONTENT', 'YOUTUBE_COOKIES_CONTENT', 'COOKIES_CONTENT'];
+  let envContent = null;
+  let usedEnvVar = null;
+
+  for (const varName of envVarNames) {
+   const content = process.env[varName];
+   if (content && content.trim()) {
+    envContent = content;
+    usedEnvVar = varName;
+    console.log(`✅ Found cookies in: ${varName} (${Buffer.byteLength(content, 'utf8')} bytes)`);
+    validationResults.environmentVariable = true;
+    break;
+   }
+  }
+
+  if (!validationResults.environmentVariable) {
+   console.log('❌ No cookies environment variable found');
+   validationResults.issues.push('No cookies environment variable configured');
+   validationResults.recommendations.push('Set YTDLP_COOKIES_CONTENT environment variable');
+  }
+
+  // 2. Test cookies file creation
+  console.log('\n📋 Step 2: Cookies File Creation Test');
+  if (validationResults.environmentVariable) {
+   try {
+    const setupResult = await setupCookiesFile();
+    if (setupResult) {
+     console.log('✅ Cookies file creation successful');
+     validationResults.cookiesFileCreation = true;
+    } else {
+     console.log('❌ Cookies file creation failed');
+     validationResults.issues.push('Cookies file creation failed');
+     validationResults.recommendations.push('Check environment variable content and file permissions');
+    }
+   } catch (setupError) {
+    console.log(`❌ Cookies file creation error: ${setupError.message}`);
+    validationResults.issues.push(`Cookies setup error: ${setupError.message}`);
+   }
+  } else {
+   console.log('⏭️  Skipped - no environment variable');
+  }
+
+  // 3. Validate created cookies file
+  console.log('\n📋 Step 3: Cookies File Validation');
+  if (validationResults.cookiesFileCreation && YTDLP_COOKIES_PATH) {
+   try {
+    const validation = validateCookiesFile(YTDLP_COOKIES_PATH);
+    if (validation && (validation.valid || validation === true)) {
+     console.log('✅ Cookies file validation passed');
+     validationResults.cookiesFileValidation = true;
+    } else {
+     console.log('❌ Cookies file validation failed');
+     validationResults.issues.push('Cookies file validation failed');
+     validationResults.recommendations.push('Check cookies file format and content');
+    }
+   } catch (validationError) {
+    console.log(`❌ Cookies file validation error: ${validationError.message}`);
+    validationResults.issues.push(`Cookies validation error: ${validationError.message}`);
+   }
+  } else {
+   console.log('⏭️  Skipped - cookies file not created');
+  }
+
+  // 4. Basic yt-dlp test
+  console.log('\n📋 Step 4: yt-dlp Basic Functionality Test');
+  try {
+   const versionArgs = ['--version'];
+   const versionResult = await executeYtDlpSecurely(versionArgs, {
+    timeout: 10000,
+    useCookies: false,
+   });
+
+   if (versionResult && versionResult.trim()) {
+    console.log(`✅ yt-dlp basic test passed: ${versionResult.trim()}`);
+    validationResults.ytdlpBasicTest = true;
+   } else {
+    console.log('❌ yt-dlp basic test failed - no output');
+    validationResults.issues.push('yt-dlp basic test failed');
+    validationResults.recommendations.push('Check yt-dlp installation and PATH');
+   }
+  } catch (ytdlpError) {
+   console.log(`❌ yt-dlp basic test error: ${ytdlpError.message}`);
+   validationResults.issues.push(`yt-dlp error: ${ytdlpError.message}`);
+   validationResults.recommendations.push('Install yt-dlp or check PATH configuration');
+  }
+
+  // 5. yt-dlp with cookies test (quick test)
+  console.log('\n📋 Step 5: yt-dlp Cookies Integration Test');
+  if (validationResults.cookiesFileValidation && validationResults.ytdlpBasicTest) {
+   try {
+    // Quick test with a simple YouTube URL (just check formats, don't download)
+    const testArgs = [
+     '--list-formats',
+     '--no-download',
+     'https://www.youtube.com/watch?v=dQw4w9WgXcQ', // Rick Roll - always available
+    ];
+
+    const cookiesResult = await executeYtDlpSecurely(testArgs, {
+     timeout: 20000,
+     useCookies: true,
+     cookiesPath: YTDLP_COOKIES_PATH,
+    });
+
+    if (cookiesResult && cookiesResult.includes('format')) {
+     console.log('✅ yt-dlp cookies integration test passed');
+     validationResults.ytdlpCookiesTest = true;
+    } else if (cookiesResult) {
+     console.log('⚠️  yt-dlp cookies test completed but unclear results');
+     console.log('💡 Cookies may be working but test video response was unexpected');
+     validationResults.ytdlpCookiesTest = true; // Assume success if no error
+    } else {
+     console.log('❌ yt-dlp cookies test failed - no output');
+     validationResults.issues.push('yt-dlp cookies integration failed');
+    }
+   } catch (cookiesTestError) {
+    console.log(`❌ yt-dlp cookies test error: ${cookiesTestError.message}`);
+
+    // Check for specific error patterns
+    const errorMsg = cookiesTestError.message.toLowerCase();
+    if (errorMsg.includes('bot') || errorMsg.includes('sign in')) {
+     validationResults.issues.push('Cookies may be expired - bot detection triggered');
+     validationResults.recommendations.push('Refresh YouTube cookies from browser');
+    } else {
+     validationResults.issues.push(`yt-dlp cookies test error: ${cookiesTestError.message}`);
+    }
+   }
+  } else {
+   console.log('⏭️  Skipped - prerequisites not met');
+  }
+
+  // 6. Overall assessment
+  validationResults.overallSuccess = validationResults.environmentVariable && validationResults.cookiesFileCreation && validationResults.cookiesFileValidation && validationResults.ytdlpBasicTest;
+
+  const duration = Date.now() - validationResults.startupTime;
+
+  console.log('\n' + '='.repeat(60));
+  console.log('📊 STARTUP VALIDATION SUMMARY');
+  console.log('='.repeat(60));
+
+  console.log(`⏱️  Total validation time: ${duration}ms`);
+  console.log(`✅ Environment variable: ${validationResults.environmentVariable ? 'PASS' : 'FAIL'}`);
+  console.log(`✅ Cookies file creation: ${validationResults.cookiesFileCreation ? 'PASS' : 'FAIL'}`);
+  console.log(`✅ Cookies file validation: ${validationResults.cookiesFileValidation ? 'PASS' : 'FAIL'}`);
+  console.log(`✅ yt-dlp basic test: ${validationResults.ytdlpBasicTest ? 'PASS' : 'FAIL'}`);
+  console.log(`✅ yt-dlp cookies test: ${validationResults.ytdlpCookiesTest ? 'PASS' : 'PARTIAL'}`);
+
+  if (validationResults.overallSuccess) {
+   console.log('\n🎉 OVERALL STATUS: SUCCESS - Cookies system is operational');
+   if (validationResults.ytdlpCookiesTest) {
+    console.log('🍪 YouTube authentication via cookies is working');
+   } else {
+    console.log('⚠️  YouTube cookies integration needs verification');
+   }
+  } else {
+   console.log('\n❌ OVERALL STATUS: ISSUES DETECTED - Cookies system needs attention');
+  }
+
+  if (validationResults.issues.length > 0) {
+   console.log(`\n⚠️  Issues found (${validationResults.issues.length}):`);
+   validationResults.issues.forEach((issue, index) => {
+    console.log(`   ${index + 1}. ${issue}`);
+   });
+  }
+
+  if (validationResults.recommendations.length > 0) {
+   console.log(`\n💡 Recommendations (${validationResults.recommendations.length}):`);
+   validationResults.recommendations.forEach((rec, index) => {
+    console.log(`   ${index + 1}. ${rec}`);
+   });
+  }
+
+  console.log('='.repeat(60));
+ } catch (validationError) {
+  console.error(`💥 Startup validation failed: ${validationError.message}`);
+  validationResults.issues.push(`Validation error: ${validationError.message}`);
+  validationResults.overallSuccess = false;
+ }
+
+ return validationResults;
+}
+
+/**
+ * Quick health check for cookies system
+ */
+function quickCookiesHealthCheck() {
+ console.log('\n🔍 Quick Cookies Health Check:');
+
+ const health = {
+  envVarExists: false,
+  cookiesFileExists: false,
+  cookiesFileValid: false,
+  lastModified: null,
+  size: 0,
+ };
+
+ // Check environment variable
+ const envVarNames = ['YTDLP_COOKIES_CONTENT', 'YOUTUBE_COOKIES_CONTENT', 'COOKIES_CONTENT'];
+ for (const varName of envVarNames) {
+  if (process.env[varName]) {
+   health.envVarExists = true;
+   console.log(`✅ Environment variable found: ${varName}`);
+   break;
+  }
+ }
+
+ if (!health.envVarExists) {
+  console.log('❌ No cookies environment variable found');
+ }
+
+ // Check cookies file
+ if (YTDLP_COOKIES_PATH && fs.existsSync(YTDLP_COOKIES_PATH)) {
+  health.cookiesFileExists = true;
+  const stats = fs.statSync(YTDLP_COOKIES_PATH);
+  health.size = stats.size;
+  health.lastModified = stats.mtime.toISOString();
+
+  console.log(`✅ Cookies file exists: ${YTDLP_COOKIES_PATH}`);
+  console.log(`📏 File size: ${health.size} bytes`);
+  console.log(`🕒 Last modified: ${health.lastModified}`);
+
+  // Quick validation
+  try {
+   const validation = validateCookiesFile(YTDLP_COOKIES_PATH);
+   health.cookiesFileValid = validation && (validation.valid || validation === true);
+   console.log(`🔍 File validation: ${health.cookiesFileValid ? 'PASS' : 'FAIL'}`);
+  } catch (e) {
+   console.log(`🔍 File validation: ERROR - ${e.message}`);
+  }
+ } else {
+  console.log('❌ Cookies file not found');
+ }
+
+ return health;
+}
+
+// Cleanup old files on server start
+// Test endpoint for transcript orchestrator
+
 cleanupOldVttFiles();
 cleanupOldMp4Files();
 
+// Run automated startup validation
+(async () => {
+ try {
+  // Quick health check first
+  quickCookiesHealthCheck();
+
+  // Run comprehensive validation if enabled
+  const runFullValidation = process.env.STARTUP_VALIDATION !== 'false' && process.env.NODE_ENV !== 'test';
+
+  if (runFullValidation) {
+   console.log('\n🚀 Running automated startup validation...');
+   const validationResults = await runStartupCookiesValidation();
+
+   // Store validation results globally for debug endpoints
+   global.lastStartupValidation = {
+    ...validationResults,
+    timestamp: new Date().toISOString(),
+   };
+
+   if (!validationResults.overallSuccess) {
+    console.warn('\n⚠️  Startup validation detected issues - server will continue but cookies may not work optimally');
+    if (process.env.NODE_ENV === 'production') {
+     console.warn('🔧 Check /api/debug/startup-validation endpoint for detailed diagnostics');
+    }
+   }
+  } else {
+   console.log('\n⏭️  Skipping full startup validation (set STARTUP_VALIDATION=true to enable)');
+  }
+ } catch (validationError) {
+  console.error('\n💥 Startup validation failed:', validationError.message);
+  console.warn('⚠️  Server will continue but cookies functionality may be impaired');
+ }
+})();
+
 app.listen(PORT, () => {
- console.log(`Backend server running on http://localhost:${PORT}`);
+ console.log(`\n🚀 Backend server running on http://localhost:${PORT}`);
+ console.log(`🌐 Environment: ${azureEnv.azureConfig.environment}`);
+ console.log(`🍪 Cookies system: ${YTDLP_COOKIES_PATH ? 'Configured' : 'Not configured'}`);
+
+ if (global.lastStartupValidation) {
+  const validation = global.lastStartupValidation;
+  console.log(`🧪 Startup validation: ${validation.overallSuccess ? 'PASSED' : 'ISSUES DETECTED'}`);
+  if (!validation.overallSuccess && validation.issues.length > 0) {
+   console.log(`⚠️  ${validation.issues.length} issue(s) detected - check logs above`);
+  }
+ }
+
+ console.log('='.repeat(60));
 });

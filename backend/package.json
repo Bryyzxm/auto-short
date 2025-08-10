@@ -6,7 +6,11 @@
   "start": "node server.js",
   "dev": "NODE_ENV=development nodemon server.js",
   "verify-ytdlp": "yt-dlp --version && echo '✅ yt-dlp verified' || echo '❌ yt-dlp verification failed'",
-  "health-check": "curl -f http://localhost:${PORT:-5001}/health || exit 1"
+  "health-check": "curl -f http://localhost:${PORT:-5001}/health || exit 1",
+  "test-cookies": "node test-cookies-runner.js",
+  "test-cookies-compare": "node test-cookies-comparison.js",
+  "test-cookies-ytdlp": "node test-ytdlp-cookies.js",
+  "validate-cookies": "node -e \"require('./server.js').validateStartupCookies().then(r => console.log(JSON.stringify(r, null, 2)))\""
  },
  "dependencies": {
   "axios": "^1.11.0",
