@@ -11,7 +11,9 @@
   "test-cookies": "node test-cookies-runner.js",
   "test-cookies-compare": "node test-cookies-comparison.js",
   "test-cookies-ytdlp": "node test-ytdlp-cookies.js",
-  "validate-cookies": "node -e \"require('./server.js').validateStartupCookies().then(r => console.log(JSON.stringify(r, null, 2)))\""
+  "validate-cookies": "node -e \"require('./server.js').validateStartupCookies().then(r => console.log(JSON.stringify(r, null, 2)))\"",
+  "fix-azure-cookies": "node fix-azure-cookies.js",
+  "update-azure-cookies": "node update-azure-cookies.js"
  },
  "dependencies": {
   "axios": "^1.11.0",
