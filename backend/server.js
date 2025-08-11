@@ -376,9 +376,16 @@ try {
   YT_DLP_PATH = YOUTUBE_DL_PATH;
   YT_DLP_SOURCE = 'yt-dlp-exec';
  } else {
-  // Fallback to legacy heuristic (may fail on Azure if not installed)
-  YT_DLP_PATH = process.platform === 'win32' ? path.join(__dirname, 'yt-dlp.exe') : 'yt-dlp';
-  YT_DLP_SOURCE = 'fallback_path_or_system';
+  // Azure App Service fix: Try node_modules binary first
+  const nodeModulesBinary = path.join(__dirname, 'node_modules', 'yt-dlp-exec', 'bin', 'yt-dlp');
+  if (fs.existsSync(nodeModulesBinary)) {
+   YT_DLP_PATH = nodeModulesBinary;
+   YT_DLP_SOURCE = 'node_modules_binary';
+  } else {
+   // Fallback to legacy heuristic (may fail on Azure if not installed)
+   YT_DLP_PATH = process.platform === 'win32' ? path.join(__dirname, 'yt-dlp.exe') : 'yt-dlp';
+   YT_DLP_SOURCE = 'fallback_path_or_system';
+  }
  }
 } catch (e) {
  // As a last resort—should not normally happen unless package resolution fails
