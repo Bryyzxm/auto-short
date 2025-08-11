@@ -873,11 +873,18 @@ function validateCookieFormat(content) {
   const trimmed = line.trim();
   if (!trimmed || trimmed.startsWith('#')) return false;
   const parts = trimmed.split('\t');
-  return parts.length >= 6 && parts[0].includes('youtube.com');
+  // Netscape format should have 7 fields: domain, httpOnly, path, secure, expires, name, value
+  return parts.length >= 7 && parts[0].includes('youtube.com');
  });
 
  const essentialCookies = ['SID', 'HSID', 'SSID', 'APISID', 'SAPISID'];
- const foundEssentialCookies = essentialCookies.filter((cookieName) => validCookieLines.some((line) => line.includes(`\t${cookieName}\t`)));
+ const foundEssentialCookies = essentialCookies.filter((cookieName) => {
+  return validCookieLines.some((line) => {
+   const parts = line.split('\t');
+   // Cookie name is in the 6th field (index 5) in Netscape format
+   return parts.length >= 7 && parts[5] === cookieName;
+  });
+ });
 
  console.log(`[COOKIES-SETUP] 📊 Validation results:`);
  console.log(`[COOKIES-SETUP]   🌐 YouTube domain found: ${hasYoutube}`);
