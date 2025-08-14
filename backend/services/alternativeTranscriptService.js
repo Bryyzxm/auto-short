@@ -82,7 +82,23 @@ async function extract(videoId) {
  }
 
  try {
-  await ytdlp.exec(args);
+  const result = await ytdlp.exec(args);
+
+  // Check if ytdlp completed successfully but found no subtitles
+  if (result && result.stdout) {
+   const stdout = result.stdout.toLowerCase();
+   const stderr = result.stderr ? result.stderr.toLowerCase() : '';
+
+   // Check for various "no subtitles" messages in output
+   const noSubtitlesMessages = ['there are no subtitles for the requested languages', 'no automatic captions', 'no subtitles found', 'no suitable subtitles found', 'automatic captions for 1 languages are missing'];
+
+   const foundNoSubtitlesMessage = noSubtitlesMessages.some((msg) => stdout.includes(msg) || stderr.includes(msg));
+
+   if (foundNoSubtitlesMessage) {
+    console.log(`Alternative Transcript Service: Video ${videoId} has no English subtitles available`);
+    throw new Error('No English automatic captions available for this video.');
+   }
+  }
 
   if (await fs.pathExists(tempFile)) {
    const vttContent = await fs.readFile(tempFile, 'utf-8');
@@ -91,14 +107,24 @@ async function extract(videoId) {
    return {segments: transcript, source: 'yt-dlp-alternative'};
   } else {
    console.error('Alternative Transcript Service: Subtitle file was not created.');
-   throw new Error('Subtitle file not found after yt-dlp execution.');
+   throw new Error('No English automatic captions available for this video.');
   }
  } catch (error) {
   console.error('Alternative Transcript Service Error:', error.message);
-  // Check for specific yt-dlp errors if needed
-  if (error.stderr && error.stderr.includes('no suitable subtitles found')) {
-   throw new Error('No English automatic captions available for this video.');
+
+  // If it's already our custom "no captions" error, re-throw it
+  if (error.message.includes('No English automatic captions available')) {
+   throw error;
   }
+
+  // Check for specific yt-dlp errors in stderr
+  if (error.stderr) {
+   const stderr = error.stderr.toLowerCase();
+   if (stderr.includes('no suitable subtitles found') || stderr.includes('there are no subtitles') || stderr.includes('sign in to confirm')) {
+    throw new Error('No English automatic captions available for this video.');
+   }
+  }
+
   throw new Error(`Failed to extract subtitles using yt-dlp: ${error.message}`);
  } finally {
   if (await fs.pathExists(tempFile)) {

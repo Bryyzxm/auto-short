@@ -13,7 +13,11 @@
   "test-cookies-ytdlp": "node test-ytdlp-cookies.js",
   "validate-cookies": "node -e \"require('./server.js').validateStartupCookies().then(r => console.log(JSON.stringify(r, null, 2)))\"",
   "fix-azure-cookies": "node fix-azure-cookies.js",
-  "update-azure-cookies": "node update-azure-cookies.js"
+  "update-azure-cookies": "node update-azure-cookies.js",
+  "cookie-status": "node cookie-refresh-utility.js",
+  "cookie-refresh": "node cookie-refresh-utility.js --instructions",
+  "cookie-backup": "node cookie-refresh-utility.js --backup",
+  "test-bot-detection": "node enhanced-bot-detection-test.js"
  },
  "dependencies": {
   "axios": "^1.11.0",

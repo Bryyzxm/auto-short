@@ -855,7 +855,7 @@ function isBase64Encoded(str) {
  }
 }
 
-// Helper function to validate cookie format
+// Helper function to validate cookie format and check freshness
 function validateCookieFormat(content) {
  if (!content || content.length < 50) {
   console.log('[COOKIES-SETUP] ❌ Content too short to be valid cookies');
@@ -867,6 +867,12 @@ function validateCookieFormat(content) {
  const hasNetscape = content.includes('# Netscape') || content.includes('# HTTP Cookie File');
  const hasTabs = content.includes('\t'); // Cookie format uses tabs
 
+ // Enhanced expiration checking
+ const now = Date.now() / 1000; // Unix timestamp
+ let criticalExpired = 0;
+ let totalCritical = 0;
+ const expirationWarnings = [];
+
  // More robust validation: count actual cookie lines (non-comment, tab-separated)
  const lines = content.split('\n');
  const validCookieLines = lines.filter((line) => {
@@ -874,7 +880,31 @@ function validateCookieFormat(content) {
   if (!trimmed || trimmed.startsWith('#')) return false;
   const parts = trimmed.split('\t');
   // Netscape format should have 7 fields: domain, httpOnly, path, secure, expires, name, value
-  return parts.length >= 7 && parts[0].includes('youtube.com');
+  const isValid = parts.length >= 7 && parts[0].includes('youtube.com');
+
+  // Check expiration for critical cookies
+  if (isValid) {
+   const expirationTime = parseInt(parts[4]);
+   const cookieName = parts[5];
+
+   if (['__Secure-1PSIDTS', '__Secure-3PSIDTS', 'SIDCC', '__Secure-1PSIDCC', '__Secure-3PSIDCC'].includes(cookieName)) {
+    totalCritical++;
+    const hoursUntilExpiry = Math.round((expirationTime - now) / 3600);
+
+    if (expirationTime < now + 86400) {
+     // Expires within 24 hours
+     criticalExpired++;
+     expirationWarnings.push(`${cookieName} expires in ${hoursUntilExpiry} hours`);
+     console.log(`[COOKIES-SETUP] 🚨 CRITICAL: ${cookieName} expires in ${hoursUntilExpiry} hours`);
+    } else if (expirationTime < now + 259200) {
+     // Expires within 3 days
+     expirationWarnings.push(`${cookieName} expires in ${Math.round(hoursUntilExpiry / 24)} days`);
+     console.log(`[COOKIES-SETUP] ⚠️  WARNING: ${cookieName} expires in ${Math.round(hoursUntilExpiry / 24)} days`);
+    }
+   }
+  }
+
+  return isValid;
  });
 
  const essentialCookies = ['SID', 'HSID', 'SSID', 'APISID', 'SAPISID'];
@@ -890,6 +920,8 @@ function validateCookieFormat(content) {
  console.log(`[COOKIES-SETUP]   🌐 YouTube domain found: ${hasYoutube}`);
  console.log(`[COOKIES-SETUP]   📄 Valid cookie lines: ${validCookieLines.length}`);
  console.log(`[COOKIES-SETUP]   🔑 Essential cookies: ${foundEssentialCookies.length}/${essentialCookies.length}`);
+ console.log(`[COOKIES-SETUP]   ⏰ Critical cookies checked: ${totalCritical}`);
+ console.log(`[COOKIES-SETUP]   🚨 Critical cookies expiring soon: ${criticalExpired}`);
 
  if (foundEssentialCookies.length > 0) {
   console.log(`[COOKIES-SETUP]   ✅ Found: ${foundEssentialCookies.join(', ')}`);
@@ -898,6 +930,15 @@ function validateCookieFormat(content) {
  const missingEssential = essentialCookies.filter((cookie) => !foundEssentialCookies.includes(cookie));
  if (missingEssential.length > 0) {
   console.log(`[COOKIES-SETUP]   ❌ Missing: ${missingEssential.join(', ')}`);
+ }
+
+ // Alert for expired cookies
+ if (criticalExpired > 0) {
+  console.error(`[COOKIES-SETUP] 🚨 URGENT: ${criticalExpired} critical cookies expiring within 24 hours!`);
+  console.error(`[COOKIES-SETUP] 🚨 RECOMMENDATION: Refresh cookies IMMEDIATELY to prevent bot detection`);
+  expirationWarnings.forEach((warning) => {
+   console.error(`[COOKIES-SETUP] 🚨 ${warning}`);
+  });
  }
 
  // Allow validation to pass even without essential cookies for development/testing
@@ -1512,64 +1553,155 @@ function isSignInBotError(message = '') {
 }
 
 async function executeWithFallbackStrategies(baseArgs, {purpose = 'generic', timeout = 300000, maxBuffer, allowCookies = true} = {}) {
- const strategies = [];
+ async function executeWithFallbackStrategies(baseArgs, {purpose = 'generic', timeout = 300000, maxBuffer, allowCookies = true} = {}) {
+  const strategies = [];
 
- // Strategy 1: Original args (already includes cookies if validated)
- strategies.push({label: 'original', args: baseArgs.slice(), useCookies: allowCookies});
+  // Strategy 1: Original args (already includes cookies if validated)
+  strategies.push({label: 'original', args: baseArgs.slice(), useCookies: allowCookies});
 
- // Strategy 2: Force android client only
- strategies.push({
-  label: 'android-client',
-  mutate: true,
-  transform: (a) => replaceOrInsertExtractorArgs(a, 'youtube:player_client=android'),
-  useCookies: allowCookies,
- });
+  // Strategy 2: Force android client only (most reliable for bot bypass)
+  strategies.push({
+   label: 'android-client',
+   mutate: true,
+   transform: (a) => replaceOrInsertExtractorArgs(a, 'youtube:player_client=android'),
+   useCookies: allowCookies,
+  });
 
- // Strategy 3: Embedded web client + android (some bypass)
- strategies.push({
-  label: 'embedded-web',
-  mutate: true,
-  transform: (a) => replaceOrInsertExtractorArgs(a, 'youtube:player_client=web_embedded,android'),
-  useCookies: allowCookies,
- });
+  // Strategy 3: Android + TV clients (enhanced bypass)
+  strategies.push({
+   label: 'android-tv',
+   mutate: true,
+   transform: (a) => replaceOrInsertExtractorArgs(a, 'youtube:player_client=android,tv'),
+   useCookies: allowCookies,
+  });
 
- // Strategy 4: Disable cookies (sometimes stale cookies trigger challenge)
- strategies.push({
-  label: 'no-cookies',
-  mutate: false,
-  useCookies: false,
- });
+  // Strategy 4: Embedded web client + android (some bypass)
+  strategies.push({
+   label: 'embedded-web',
+   mutate: true,
+   transform: (a) => replaceOrInsertExtractorArgs(a, 'youtube:player_client=web_embedded,android'),
+   useCookies: allowCookies,
+  });
 
- // Strategy 5: Force IPv4 + android
- strategies.push({
-  label: 'ipv4-android',
-  mutate: true,
-  transform: (a) => addArgsIfMissing(replaceOrInsertExtractorArgs(a, 'youtube:player_client=android'), ['--force-ipv4']),
-  useCookies: allowCookies,
- });
+  // Strategy 5: iOS client (another mobile bypass)
+  strategies.push({
+   label: 'ios-client',
+   mutate: true,
+   transform: (a) => replaceOrInsertExtractorArgs(a, 'youtube:player_client=ios'),
+   useCookies: allowCookies,
+  });
 
- let lastError;
- for (const strat of strategies) {
-  try {
-   let workingArgs = strat.mutate ? strat.transform(baseArgs.slice()) : baseArgs.slice();
-   console.log(`[YTDLP-FALLBACK] Attempting strategy=${strat.label} purpose=${purpose}`);
-   const out = await executeYtDlpSecurely(workingArgs, {timeout, maxBuffer, useCookies: strat.useCookies});
-   if (strat.label !== 'original') {
-    console.log(`[YTDLP-FALLBACK] ✅ Strategy succeeded: ${strat.label}`);
+  // Strategy 6: Android + force IPv4 + random user agent
+  strategies.push({
+   label: 'android-ipv4-ua',
+   mutate: true,
+   transform: (a) => {
+    let args = replaceOrInsertExtractorArgs(a, 'youtube:player_client=android');
+    args = addArgsIfMissing(args, ['--force-ipv4']);
+    args = addArgsIfMissing(args, ['--user-agent', getRandomUserAgent()]);
+    return args;
+   },
+   useCookies: allowCookies,
+  });
+
+  // Strategy 7: Disable cookies entirely (sometimes stale cookies trigger challenge)
+  strategies.push({
+   label: 'no-cookies-android',
+   mutate: true,
+   transform: (a) => replaceOrInsertExtractorArgs(a, 'youtube:player_client=android'),
+   useCookies: false,
+  });
+
+  // Strategy 8: Aggressive bypass - multiple clients + no cookies
+  strategies.push({
+   label: 'aggressive-bypass',
+   mutate: true,
+   transform: (a) => {
+    let args = replaceOrInsertExtractorArgs(a, 'youtube:player_client=android,tv,ios');
+    args = addArgsIfMissing(args, ['--force-ipv4']);
+    args = addArgsIfMissing(args, ['--user-agent', getRandomUserAgent()]);
+    args = addArgsIfMissing(args, ['--sleep-requests', '1']);
+    return args;
+   },
+   useCookies: false,
+  });
+
+  // Strategy 9: Last resort - minimal extraction
+  strategies.push({
+   label: 'minimal-extraction',
+   mutate: true,
+   transform: (a) => {
+    let args = replaceOrInsertExtractorArgs(a, 'youtube:player_client=android');
+    args = addArgsIfMissing(args, ['--no-check-certificate']);
+    args = addArgsIfMissing(args, ['--user-agent', 'Mozilla/5.0 (Linux; Android 10; SM-G975F) AppleWebKit/537.36']);
+    return args;
+   },
+   useCookies: false,
+  });
+
+  let lastError;
+  let strategyResults = [];
+
+  for (const strat of strategies) {
+   try {
+    let workingArgs = strat.mutate ? strat.transform(baseArgs.slice()) : baseArgs.slice();
+    console.log(`[YTDLP-FALLBACK] 🚀 Attempting strategy=${strat.label} purpose=${purpose} cookies=${strat.useCookies}`);
+
+    const startTime = Date.now();
+    const out = await executeYtDlpSecurely(workingArgs, {timeout, maxBuffer, useCookies: strat.useCookies});
+    const duration = Date.now() - startTime;
+
+    strategyResults.push({
+     strategy: strat.label,
+     success: true,
+     duration,
+     outputSize: out ? out.length : 0,
+    });
+
+    if (strat.label !== 'original') {
+     console.log(`[YTDLP-FALLBACK] ✅ Strategy succeeded: ${strat.label} (${duration}ms, ${out?.length || 0} chars)`);
+    }
+    return {output: out, strategy: strat.label, attempts: strategyResults};
+   } catch (err) {
+    lastError = err;
+    const signIn = isSignInBotError(err.message);
+    const duration = Date.now() - (Date.now() - 5000); // rough estimate
+
+    strategyResults.push({
+     strategy: strat.label,
+     success: false,
+     duration,
+     error: err.message.substring(0, 100),
+     botDetection: signIn,
+    });
+
+    console.warn(`[YTDLP-FALLBACK] ❌ Strategy failed (${strat.label}) botDetection=${signIn} err=${err.message.substring(0, 140)}`);
+
+    if (!signIn && strat.label === 'original') {
+     // Non sign-in error at first attempt -> break early (not a bot issue)
+     console.log(`[YTDLP-FALLBACK] 💡 Non-bot error detected, skipping remaining strategies`);
+     break;
+    }
+    // Continue loop for sign-in errors or if we are exploring strategies
    }
-   return {output: out, strategy: strat.label};
-  } catch (err) {
-   lastError = err;
-   const signIn = isSignInBotError(err.message);
-   console.warn(`[YTDLP-FALLBACK] ❌ Strategy failed (${strat.label}) signIn=${signIn} err=${err.message.substring(0, 140)}`);
-   if (!signIn && strat.label === 'original') {
-    // Non sign-in error at first attempt -> break early (not a bot issue)
-    break;
-   }
-   // Continue loop for sign-in errors or if we are exploring strategies
   }
+
+  // Log comprehensive failure analysis
+  console.error(`[YTDLP-FALLBACK] 💀 All strategies failed. Attempted ${strategyResults.length} strategies:`);
+  strategyResults.forEach((result, index) => {
+   const status = result.success ? '✅' : '❌';
+   const extra = result.botDetection ? ' [BOT-DETECTED]' : '';
+   console.error(`[YTDLP-FALLBACK]   ${index + 1}. ${status} ${result.strategy}${extra}`);
+  });
+
+  // Enhanced error with strategy context
+  const errorWithContext = new Error(lastError.message);
+  errorWithContext.originalError = lastError;
+  errorWithContext.strategiesAttempted = strategyResults;
+  errorWithContext.botDetectionCount = strategyResults.filter((r) => r.botDetection).length;
+
+  throw errorWithContext;
  }
- throw lastError;
 }
 
 // Utility: replace or inject --extractor-args value
@@ -1892,8 +2024,10 @@ app.get('/api/debug/cookies-meta', (req, res) => {
   let lines = 0;
   let hash = null;
   let sampleFirst = null;
+  let cookieFreshness = null;
   const requiredKeys = ['CONSENT', 'SOCS', 'SID', 'HSID', 'SSID', 'APISID', 'SAPISID', 'PREF', 'VISITOR_INFO1_LIVE', 'VISITOR_PRIVACY_METADATA', 'YSC'];
   const presence = {};
+
   if (exists) {
    const content = fs.readFileSync(cookiesPath, 'utf8');
    size = Buffer.byteLength(content);
@@ -1901,10 +2035,55 @@ app.get('/api/debug/cookies-meta', (req, res) => {
    const crypto = require('crypto');
    hash = crypto.createHash('sha256').update(content).digest('hex');
    sampleFirst = content.split(/\r?\n/).slice(0, 5);
+
    for (const key of requiredKeys) {
     presence[key] = content.includes(`\t${key}\t`) || content.includes(`\t${key}\n`);
    }
+
+   // Enhanced: Check cookie freshness
+   const now = Date.now() / 1000;
+   let criticalExpired = 0;
+   let totalCritical = 0;
+   const expirationDetails = [];
+
+   const cookieLines = content.split(/\r?\n/);
+   for (const line of cookieLines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+
+    const parts = trimmed.split('\t');
+    if (parts.length >= 7 && parts[0].includes('youtube.com')) {
+     const expirationTime = parseInt(parts[4]);
+     const cookieName = parts[5];
+
+     if (['__Secure-1PSIDTS', '__Secure-3PSIDTS', 'SIDCC', '__Secure-1PSIDCC', '__Secure-3PSIDCC'].includes(cookieName)) {
+      totalCritical++;
+      const hoursUntilExpiry = Math.round((expirationTime - now) / 3600);
+      const daysUntilExpiry = Math.round(hoursUntilExpiry / 24);
+
+      expirationDetails.push({
+       name: cookieName,
+       expiresIn: hoursUntilExpiry > 0 ? `${daysUntilExpiry} days (${hoursUntilExpiry}h)` : 'EXPIRED',
+       urgent: expirationTime < now + 86400,
+       warning: expirationTime < now + 259200,
+      });
+
+      if (expirationTime < now + 86400) {
+       criticalExpired++;
+      }
+     }
+    }
+   }
+
+   cookieFreshness = {
+    totalCritical,
+    criticalExpired,
+    needsRefresh: criticalExpired > 0,
+    expirationDetails,
+    status: criticalExpired > 0 ? 'URGENT' : expirationDetails.some((d) => d.warning) ? 'WARNING' : 'OK',
+   };
   }
+
   res.json({
    status: 'ok',
    cookiesPath,
@@ -1916,6 +2095,7 @@ app.get('/api/debug/cookies-meta', (req, res) => {
    missingKeys: Object.entries(presence)
     .filter(([, v]) => !v)
     .map(([k]) => k),
+   cookieFreshness,
    sampleFirst,
    timestamp: new Date().toISOString(),
   });
