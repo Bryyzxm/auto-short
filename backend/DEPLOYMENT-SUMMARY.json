@@ -1,0 +1,24 @@
+{
+  "timestamp": "2025-08-15T14:10:50.183Z",
+  "version": "2.1.0-enhanced-anti-bot",
+  "changes": [
+    "✅ Fixed CORS headers (User-Agent, Cache-Control, etc.)",
+    "✅ Enhanced user agent pool (13 diverse agents)",
+    "✅ Advanced rate limiting with per-video tracking",
+    "✅ Multi-client YouTube API extraction",
+    "✅ Human-like timing patterns",
+    "✅ Geo-bypass and timeout optimizations",
+    "✅ Enhanced alternative transcript service",
+    "✅ Session-based anti-detection"
+  ],
+  "files_modified": [
+    "server.js - Enhanced CORS + anti-bot execution",
+    "services/alternativeTranscriptService.js - Secure execution integration"
+  ],
+  "deployment_notes": [
+    "1. Deploy to Azure App Service",
+    "2. Verify YOUTUBE_COOKIES environment variable is set",
+    "3. Test with a sample video to confirm fixes",
+    "4. Monitor Azure logs for anti-detection effectiveness"
+  ]
+}

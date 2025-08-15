@@ -1357,20 +1357,131 @@ const getDetailedCookiesValidation = (cookiesPath) => {
 
 // Enhanced user agent rotation to avoid YouTube bot detection
 const USER_AGENTS = [
- 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
- 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
- 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
- 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0',
- 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:124.0) Gecko/20100101 Firefox/124.0',
+ // Chrome Windows - Latest versions
+ 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+ 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36',
+ 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+
+ // Chrome macOS - Latest versions
+ 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+ 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36',
+
+ // Firefox - Latest versions
+ 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0',
+ 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:132.0) Gecko/20100101 Firefox/132.0',
+ 'Mozilla/5.0 (X11; Linux x86_64; rv:132.0) Gecko/20100101 Firefox/132.0',
+
+ // Safari - Latest versions
+ 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15',
+ 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15',
+
+ // Edge - Latest versions
+ 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0',
+ 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36 Edg/129.0.0.0',
 ];
+
+// Anti-bot detection session pool
+const SESSION_POOL = {
+ sessionCount: 0,
+ lastRotation: Date.now(),
+ currentSession: null,
+
+ getSessionId() {
+  const now = Date.now();
+  // Rotate session every 5 minutes to mimic human behavior
+  if (!this.currentSession || now - this.lastRotation > 300000) {
+   this.currentSession = Math.random().toString(36).substring(2, 15);
+   this.lastRotation = now;
+   this.sessionCount++;
+  }
+  return this.currentSession;
+ },
+};
 
 function getRandomUserAgent() {
  return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
 }
 
+// Enhanced anti-bot techniques
+function getAntiDetectionHeaders() {
+ const sessionId = SESSION_POOL.getSessionId();
+ return {
+  Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+  'Accept-Language': 'en-US,en;q=0.9,id;q=0.8',
+  'Accept-Encoding': 'gzip, deflate, br, zstd',
+  DNT: '1',
+  'Upgrade-Insecure-Requests': '1',
+  'Sec-Fetch-Dest': 'document',
+  'Sec-Fetch-Mode': 'navigate',
+  'Sec-Fetch-Site': 'none',
+  'Sec-Fetch-User': '?1',
+  'Cache-Control': 'max-age=0',
+  Connection: 'keep-alive',
+  'X-Session-ID': sessionId,
+ };
+}
+
+// Helper function to extract video ID from arguments
+function extractVideoId(args) {
+ const urlArg = args.find((arg) => arg.includes('youtube.com/watch?v=') || arg.includes('youtu.be/'));
+ if (!urlArg) return null;
+
+ const match = urlArg.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+ return match ? match[1] : null;
+}
+
+// Enhanced rate limiting to prevent bot detection
+const RATE_LIMITER = {
+ requests: new Map(), // videoId -> { lastRequest, attempts }
+ globalLastRequest: 0,
+
+ async checkAndWait(videoId) {
+  const now = Date.now();
+  const globalCooldown = 2000; // 2 seconds between any requests
+  const videoCooldown = 30000; // 30 seconds between same video requests
+  const maxAttemptsPerHour = 10; // Max 10 attempts per video per hour
+
+  // Global rate limiting
+  const timeSinceLastGlobal = now - this.globalLastRequest;
+  if (timeSinceLastGlobal < globalCooldown) {
+   const waitTime = globalCooldown - timeSinceLastGlobal;
+   console.log(`[RATE-LIMITER] 🕰️ Global cooldown: waiting ${waitTime}ms`);
+   await new Promise((resolve) => setTimeout(resolve, waitTime));
+  }
+
+  // Video-specific rate limiting
+  const videoData = this.requests.get(videoId) || {lastRequest: 0, attempts: []};
+  const timeSinceLastVideo = now - videoData.lastRequest;
+
+  // Clean old attempts (older than 1 hour)
+  videoData.attempts = videoData.attempts.filter((time) => now - time < 3600000);
+
+  // Check attempt limits
+  if (videoData.attempts.length >= maxAttemptsPerHour) {
+   console.log(`[RATE-LIMITER] ⚠️ Video ${videoId} reached hourly limit (${maxAttemptsPerHour} attempts)`);
+   throw new Error('Rate limit exceeded for this video. Please try again later.');
+  }
+
+  // Wait for video cooldown
+  if (timeSinceLastVideo < videoCooldown) {
+   const waitTime = videoCooldown - timeSinceLastVideo;
+   console.log(`[RATE-LIMITER] 🕰️ Video cooldown: waiting ${waitTime}ms for ${videoId}`);
+   await new Promise((resolve) => setTimeout(resolve, waitTime));
+  }
+
+  // Update tracking
+  this.globalLastRequest = Date.now();
+  videoData.lastRequest = Date.now();
+  videoData.attempts.push(Date.now());
+  this.requests.set(videoId, videoData);
+
+  console.log(`[RATE-LIMITER] ✅ Rate limit check passed for ${videoId} (${videoData.attempts.length}/${maxAttemptsPerHour} attempts)`);
+ },
+};
+
 // Secure yt-dlp execution helper using spawn to prevent shell injection
 async function executeYtDlpSecurely(args, options = {}) {
- return new Promise((resolve, reject) => {
+ return new Promise(async (resolve, reject) => {
   const startTime = Date.now();
   console.log('[YT-DLP-EXEC] 🚀 Starting yt-dlp execution...');
   console.log(`[YT-DLP-EXEC] ⏰ Start time: ${new Date(startTime).toISOString()}`);
@@ -1386,6 +1497,57 @@ async function executeYtDlpSecurely(args, options = {}) {
   console.log(`[YT-DLP-EXEC]   📋 Args: ${safeArgs.join(' ')}`);
 
   const finalArgs = [...safeArgs];
+
+  // 🛡️ ENHANCED ANTI-BOT DETECTION LAYER
+  console.log('[YT-DLP-EXEC] 🛡️ Applying enhanced anti-detection measures...');
+
+  // Extract video ID for rate limiting
+  const videoId = extractVideoId(finalArgs);
+  if (videoId) {
+   try {
+    await RATE_LIMITER.checkAndWait(videoId);
+   } catch (error) {
+    console.log(`[YT-DLP-EXEC] ❌ Rate limiting failed: ${error.message}`);
+    return reject(new Error(`Rate limiting: ${error.message}`));
+   }
+  }
+
+  // Add advanced anti-detection arguments if not present
+  if (!finalArgs.includes('--user-agent')) {
+   finalArgs.push('--user-agent', getRandomUserAgent());
+   console.log('[YT-DLP-EXEC] 🕶️ Added randomized user-agent');
+  }
+
+  if (!finalArgs.includes('--extractor-args')) {
+   finalArgs.push('--extractor-args', 'youtube:player_client=android,web,tv,ios;innertube_host=youtubei.googleapis.com');
+   console.log('[YT-DLP-EXEC] 🔧 Added multi-client extractor args');
+  }
+
+  // Add delay mechanism to mimic human behavior
+  if (!finalArgs.includes('--sleep-interval')) {
+   finalArgs.push('--sleep-interval', '1');
+   console.log('[YT-DLP-EXEC] 😴 Added sleep interval for human-like behavior');
+  }
+
+  // Add retry mechanism with exponential backoff
+  if (!finalArgs.includes('--retries')) {
+   finalArgs.push('--retries', '3');
+   console.log('[YT-DLP-EXEC] 🔄 Added retry mechanism');
+  }
+
+  // Add socket timeout
+  if (!finalArgs.includes('--socket-timeout')) {
+   finalArgs.push('--socket-timeout', '60');
+   console.log('[YT-DLP-EXEC] ⏱️ Added socket timeout');
+  }
+
+  // Add geo bypass
+  if (!finalArgs.includes('--geo-bypass')) {
+   finalArgs.push('--geo-bypass');
+   console.log('[YT-DLP-EXEC] 🌍 Added geo bypass');
+  }
+
+  console.log('[YT-DLP-EXEC] ✅ Anti-detection layer applied successfully');
 
   // Enhanced cookies handling with detailed logging
   let cookiesUsed = false;
@@ -1916,7 +2078,7 @@ const corsOptions = {
  },
  credentials: true,
  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
- allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+ allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'User-Agent', 'Cache-Control', 'Accept', 'Accept-Language', 'Accept-Encoding', 'Origin', 'Referer'],
  optionsSuccessStatus: 200, // Some legacy browsers (IE11, various SmartTVs) choke on 204
 };
 
