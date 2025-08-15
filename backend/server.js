@@ -1525,8 +1525,26 @@ const RATE_LIMITER = {
 async function executeYtDlpSecurely(args, options = {}) {
  // AZURE EMERGENCY TIMEOUT: Wrap the entire function in a timeout for Azure environments
  if (azureEnv.isAzure) {
-  const emergencyTimeout = options.timeout ? Math.min(options.timeout, 30000) : 15000; // Max 30s in Azure, default 15s
-  return Promise.race([executeYtDlpSecurelyCore(args, options), new Promise((_, reject) => setTimeout(() => reject(new Error('Azure emergency timeout: yt-dlp execution took too long')), emergencyTimeout))]);
+  // Intelligent timeout based on operation type
+  let emergencyTimeout = 15000; // Default 15s
+
+  // Adjust timeout based on args
+  if (args.includes('--dump-json')) {
+   emergencyTimeout = 20000; // 20s for metadata
+  } else if (args.includes('--version')) {
+   emergencyTimeout = 5000; // 5s for version check
+  } else if (args.includes('--list-formats')) {
+   emergencyTimeout = 25000; // 25s for format listing
+  }
+
+  // Apply user override with cap
+  if (options.timeout) {
+   emergencyTimeout = Math.min(options.timeout, 30000);
+  }
+
+  console.log(`[YT-DLP-EXEC] ⏰ Azure timeout set to ${emergencyTimeout}ms`);
+
+  return Promise.race([executeYtDlpSecurelyCore(args, options), new Promise((_, reject) => setTimeout(() => reject(new Error(`Azure emergency timeout: yt-dlp execution exceeded ${emergencyTimeout}ms`)), emergencyTimeout))]);
  } else {
   return executeYtDlpSecurelyCore(args, options);
  }
@@ -2203,10 +2221,20 @@ async function validateStartup() {
 
   console.log(`✅ YT-DLP executable test passed: ${testResult.trim()}`);
 
-  if (testResult.trim() === '2025.07.21') {
-   console.log('🎉 Running latest yt-dlp version (2025.07.21)');
+  const currentVersion = testResult.trim();
+  const expectedLatestVersion = '2025.08.11';
+
+  if (currentVersion === expectedLatestVersion) {
+   console.log(`🎉 Running latest yt-dlp version (${currentVersion})`);
   } else {
-   console.warn(`⚠️  Not running latest version. Current: ${testResult.trim()}, Latest: 2025.07.21`);
+   console.warn(`⚠️  Version mismatch detected. Current: ${currentVersion}, Expected Latest: ${expectedLatestVersion}`);
+
+   // Check if we have a newer version than expected
+   if (currentVersion > expectedLatestVersion) {
+    console.log(`🚀 Running newer version than expected: ${currentVersion}`);
+   } else {
+    console.warn(`📦 Consider updating yt-dlp binary from ${currentVersion} to ${expectedLatestVersion}`);
+   }
   }
  } catch (testError) {
   console.error('❌ YT-DLP executable test failed:', testError.message);
@@ -4366,9 +4394,35 @@ app.post('/api/intelligent-segments', async (req, res) => {
   console.log(`[INTELLIGENT-SEGMENTS] 🚀 Starting enhanced AI segmentation for ${videoId}`);
 
   // Step 1: Get transcript with real timing using enhanced orchestrator
-  const transcriptData = await enhancedTranscriptOrchestrator.extract(videoId, {
-   lang: ['id', 'en'],
-  });
+  let transcriptData;
+  try {
+   transcriptData = await enhancedTranscriptOrchestrator.extract(videoId, {
+    lang: ['id', 'en'],
+   });
+  } catch (transcriptError) {
+   console.error(`[INTELLIGENT-SEGMENTS] ❌ Transcript extraction failed for ${videoId}:`, transcriptError);
+
+   // Check if it's a transcript disabled error
+   if (transcriptError.message && transcriptError.message.includes('disabled')) {
+    return res.status(404).json({
+     error: 'TRANSCRIPT_DISABLED',
+     message: 'Transcript is disabled by the video owner.',
+     videoId: videoId,
+     userFriendly: true,
+     errorType: 'transcript_disabled',
+    });
+   }
+
+   // Generic transcript error
+   return res.status(404).json({
+    error: 'TRANSCRIPT_NOT_AVAILABLE',
+    message: 'Could not extract transcript for this video.',
+    videoId: videoId,
+    details: transcriptError.message,
+    userFriendly: true,
+    errorType: 'transcript_unavailable',
+   });
+  }
 
   if (!transcriptData.hasRealTiming) {
    throw new Error('Real timing data required for intelligent segmentation');

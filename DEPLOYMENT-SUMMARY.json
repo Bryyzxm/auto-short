@@ -1,0 +1,26 @@
+{
+  "timestamp": "2025-08-15T15:13:26.043Z",
+  "version": "2025.08.11",
+  "fixes": [
+    "Enhanced intelligent-segments error handling",
+    "Azure-specific timeout management (5s version, 20s metadata, 25s formats)",
+    "Updated yt-dlp version detection to 2025.08.11",
+    "Improved transcript-disabled video handling",
+    "Enhanced CORS error responses",
+    "Better emergency timeout detection",
+    "Robust binary resolution for Azure paths"
+  ],
+  "endpoints": {
+    "intelligent-segments": "Enhanced error handling for transcript-disabled videos",
+    "video-metadata": "Azure timeout optimization",
+    "yt-transcript": "Improved error recovery",
+    "health": "Enhanced monitoring with version info"
+  },
+  "expectedImprovements": [
+    "Reduced 500 errors from intelligent-segments",
+    "Better handling of transcript-disabled videos",
+    "Faster Azure startup with timeout optimization",
+    "More reliable video processing",
+    "Improved frontend error messages"
+  ]
+}
