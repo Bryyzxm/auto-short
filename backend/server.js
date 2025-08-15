@@ -366,33 +366,99 @@ class NoValidTranscriptError extends Error {
 
 let YT_DLP_PATH; // resolved absolute path (or fallback string)
 let YT_DLP_SOURCE = 'unresolved';
-try {
- const {YOUTUBE_DL_PATH} = require('yt-dlp-exec/src/constants');
- const overridePath = process.env.YT_DLP_PATH && process.env.YT_DLP_PATH.trim();
- if (overridePath && fs.existsSync(overridePath)) {
-  YT_DLP_PATH = overridePath;
-  YT_DLP_SOURCE = 'env_override';
- } else if (fs.existsSync(YOUTUBE_DL_PATH)) {
-  YT_DLP_PATH = YOUTUBE_DL_PATH;
-  YT_DLP_SOURCE = 'yt-dlp-exec';
- } else {
-  // Azure App Service fix: Try node_modules binary first
-  const nodeModulesBinary = path.join(__dirname, 'node_modules', 'yt-dlp-exec', 'bin', 'yt-dlp');
-  if (fs.existsSync(nodeModulesBinary)) {
-   YT_DLP_PATH = nodeModulesBinary;
-   YT_DLP_SOURCE = 'node_modules_binary';
+
+// Enhanced Azure-compatible yt-dlp binary resolution
+function resolveYtDlpBinary() {
+ console.log('[YT-DLP-RESOLVE] 🔍 Starting enhanced binary resolution...');
+
+ // Priority 1: Environment variable override (Azure)
+ const overridePath = process.env.YT_DLP_PATH || process.env.YT_DLP_FORCE_PATH;
+ if (overridePath && overridePath.trim()) {
+  const cleanPath = overridePath.trim();
+  console.log(`[YT-DLP-RESOLVE] 🔧 Testing environment override: ${cleanPath}`);
+  if (fs.existsSync(cleanPath)) {
+   console.log('[YT-DLP-RESOLVE] ✅ Environment override path exists');
+   return {path: cleanPath, source: 'env_override'};
   } else {
-   // Fallback to legacy heuristic (may fail on Azure if not installed)
-   YT_DLP_PATH = process.platform === 'win32' ? path.join(__dirname, 'yt-dlp.exe') : 'yt-dlp';
-   YT_DLP_SOURCE = 'fallback_path_or_system';
+   console.log('[YT-DLP-RESOLVE] ❌ Environment override path not found');
   }
  }
-} catch (e) {
- // As a last resort—should not normally happen unless package resolution fails
+
+ // Priority 2: Azure-specific paths
+ const azurePaths = [
+  '/home/site/wwwroot/backend/node_modules/yt-dlp-exec/bin/yt-dlp',
+  '/home/site/wwwroot/node_modules/yt-dlp-exec/bin/yt-dlp',
+  '/opt/node_modules/yt-dlp-exec/bin/yt-dlp',
+  path.join(__dirname, 'node_modules', 'yt-dlp-exec', 'bin', 'yt-dlp'),
+  path.join(process.cwd(), 'node_modules', 'yt-dlp-exec', 'bin', 'yt-dlp'),
+  path.join(process.cwd(), 'backend', 'node_modules', 'yt-dlp-exec', 'bin', 'yt-dlp'),
+ ];
+
+ console.log('[YT-DLP-RESOLVE] 🔍 Testing Azure-specific paths...');
+ for (const testPath of azurePaths) {
+  console.log(`[YT-DLP-RESOLVE] 📍 Testing: ${testPath}`);
+  if (fs.existsSync(testPath)) {
+   try {
+    const stats = fs.statSync(testPath);
+    console.log(`[YT-DLP-RESOLVE] ✅ Found binary: ${testPath}`);
+    console.log(`[YT-DLP-RESOLVE] 📊 Size: ${stats.size} bytes`);
+    console.log(`[YT-DLP-RESOLVE] 🔐 Mode: ${stats.mode.toString(8)}`);
+    console.log(`[YT-DLP-RESOLVE] 🕒 Modified: ${stats.mtime.toISOString()}`);
+    return {path: testPath, source: 'azure_paths'};
+   } catch (statError) {
+    console.log(`[YT-DLP-RESOLVE] ⚠️  Path exists but stat failed: ${statError.message}`);
+   }
+  }
+ }
+
+ // Priority 3: yt-dlp-exec package constants
+ try {
+  console.log('[YT-DLP-RESOLVE] 🔍 Testing yt-dlp-exec constants...');
+  const {YOUTUBE_DL_PATH} = require('yt-dlp-exec/src/constants');
+  console.log(`[YT-DLP-RESOLVE] 📦 Package constant: ${YOUTUBE_DL_PATH}`);
+  if (fs.existsSync(YOUTUBE_DL_PATH)) {
+   console.log('[YT-DLP-RESOLVE] ✅ Package constant path exists');
+   return {path: YOUTUBE_DL_PATH, source: 'yt-dlp-exec'};
+  } else {
+   console.log('[YT-DLP-RESOLVE] ❌ Package constant path not found');
+  }
+ } catch (constantError) {
+  console.log(`[YT-DLP-RESOLVE] ❌ Failed to load yt-dlp-exec constants: ${constantError.message}`);
+ }
+
+ // Priority 4: System PATH lookup
+ console.log('[YT-DLP-RESOLVE] 🔍 Testing system PATH...');
+ const systemBinary = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp';
+ try {
+  // Test if yt-dlp is in system PATH
+  const testCommand = process.platform === 'win32' ? 'where yt-dlp' : 'which yt-dlp';
+  const {execSync} = require('child_process');
+  const systemPath = execSync(testCommand, {encoding: 'utf8', timeout: 5000}).trim();
+  if (systemPath && fs.existsSync(systemPath)) {
+   console.log(`[YT-DLP-RESOLVE] ✅ Found in system PATH: ${systemPath}`);
+   return {path: systemPath, source: 'system_path'};
+  }
+ } catch (pathError) {
+  console.log(`[YT-DLP-RESOLVE] ❌ Not found in system PATH: ${pathError.message}`);
+ }
+
+ // Priority 5: Fallback (may not work)
+ console.log('[YT-DLP-RESOLVE] ⚠️  Using fallback path - may not work');
+ const fallbackPath = process.platform === 'win32' ? path.join(__dirname, 'yt-dlp.exe') : 'yt-dlp';
+ return {path: fallbackPath, source: 'fallback'};
+}
+
+try {
+ const resolution = resolveYtDlpBinary();
+ YT_DLP_PATH = resolution.path;
+ YT_DLP_SOURCE = resolution.source;
+ console.log(`[YT-DLP-RESOLVE] 🎯 Final resolution: ${YT_DLP_PATH} (source=${YT_DLP_SOURCE})`);
+} catch (resolutionError) {
+ console.error(`[YT-DLP-RESOLVE] ❌ Resolution failed: ${resolutionError.message}`);
  YT_DLP_PATH = process.platform === 'win32' ? path.join(__dirname, 'yt-dlp.exe') : 'yt-dlp';
  YT_DLP_SOURCE = 'exception_fallback';
- console.warn('[YT-DLP] Failed to resolve yt-dlp-exec constants:', e.message);
 }
+
 console.log(`[YT-DLP] Resolved binary path: ${YT_DLP_PATH} (source=${YT_DLP_SOURCE})`);
 
 // Configurable cookies path for bypassing YouTube bot detection
@@ -1386,12 +1452,57 @@ async function executeYtDlpSecurely(args, options = {}) {
 
   let spawned = null;
   try {
+   // Enhanced pre-spawn validation for Azure debugging
+   console.log(`[YT-DLP-EXEC] 🔍 Pre-spawn validation:`);
+   console.log(`[YT-DLP-EXEC]   📍 Binary path: ${binaryToUse}`);
+   console.log(`[YT-DLP-EXEC]   📁 Current working directory: ${process.cwd()}`);
+   console.log(`[YT-DLP-EXEC]   👤 Process UID: ${process.getuid ? process.getuid() : 'N/A'}`);
+   console.log(`[YT-DLP-EXEC]   👥 Process GID: ${process.getgid ? process.getgid() : 'N/A'}`);
+   console.log(`[YT-DLP-EXEC]   🌍 Environment PATH: ${process.env.PATH || 'undefined'}`);
+
+   // Check if binary exists and is executable
+   if (fs.existsSync(binaryToUse)) {
+    const binaryStats = fs.statSync(binaryToUse);
+    console.log(`[YT-DLP-EXEC]   ✅ Binary exists: ${binaryToUse}`);
+    console.log(`[YT-DLP-EXEC]   📊 Binary size: ${binaryStats.size} bytes`);
+    console.log(`[YT-DLP-EXEC]   🔐 Binary permissions: ${binaryStats.mode.toString(8)}`);
+    console.log(`[YT-DLP-EXEC]   🕒 Binary modified: ${binaryStats.mtime.toISOString()}`);
+
+    // Check if file is executable (Unix-like systems)
+    if (process.platform !== 'win32') {
+     try {
+      fs.accessSync(binaryToUse, fs.constants.F_OK | fs.constants.X_OK);
+      console.log(`[YT-DLP-EXEC]   ✅ Binary is executable`);
+     } catch (accessError) {
+      console.log(`[YT-DLP-EXEC]   ❌ Binary is not executable: ${accessError.message}`);
+     }
+    }
+   } else {
+    console.log(`[YT-DLP-EXEC]   ❌ Binary does not exist: ${binaryToUse}`);
+   }
+
    spawned = spawn(binaryToUse, finalArgs, {
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout: options.timeout || 300000,
     maxBuffer: options.maxBuffer || 1024 * 1024 * 50,
    });
   } catch (spawnErr) {
+   console.error(`[YT-DLP-EXEC] ❌ Spawn failed with detailed error:`);
+   console.error(`[YT-DLP-EXEC]   🔥 Error name: ${spawnErr.name}`);
+   console.error(`[YT-DLP-EXEC]   💬 Error message: ${spawnErr.message}`);
+   console.error(`[YT-DLP-EXEC]   📍 Error code: ${spawnErr.code || 'undefined'}`);
+   console.error(`[YT-DLP-EXEC]   🔧 Error errno: ${spawnErr.errno || 'undefined'}`);
+   console.error(`[YT-DLP-EXEC]   📂 Error path: ${spawnErr.path || 'undefined'}`);
+   console.error(`[YT-DLP-EXEC]   ⚙️  Error syscall: ${spawnErr.syscall || 'undefined'}`);
+   console.error(`[YT-DLP-EXEC]   📊 Full error: ${JSON.stringify(spawnErr, null, 2)}`);
+
+   if (spawnErr.code === 'ENOENT') {
+    console.error(`[YT-DLP-EXEC] 🚨 ENOENT: Binary not found - ${binaryToUse}`);
+    console.error(`[YT-DLP-EXEC] 💡 This usually means yt-dlp is not installed or not in PATH`);
+   } else if (spawnErr.code === 'EACCES') {
+    console.error(`[YT-DLP-EXEC] 🚨 EACCES: Permission denied - ${binaryToUse}`);
+    console.error(`[YT-DLP-EXEC] 💡 Binary exists but is not executable - check permissions`);
+   }
    console.error(`[YT-DLP-EXEC] ❌ Primary spawn failed immediately: ${spawnErr.message}`);
    if (cookiesUsed) {
     console.error('[YT-DLP-EXEC] ❌ Spawn failed while using cookies - may indicate file permission issues');
