@@ -3,10 +3,10 @@
  * Production-ready solution for accurate transcript extraction
  */
 
-import fetch from 'node-fetch';
-import fs from 'fs';
-import path from 'path';
-import {YoutubeTranscript} from 'youtube-transcript';
+const fetch = require('node-fetch');
+const fs = require('fs');
+const path = require('path');
+const {YoutubeTranscript} = require('youtube-transcript');
 
 class RobustTranscriptService {
  constructor() {
@@ -317,4 +317,12 @@ class RobustTranscriptService {
  }
 }
 
-export default new RobustTranscriptService();
+const robustTranscriptService = new RobustTranscriptService();
+
+// Export with an extract method for compatibility
+module.exports = {
+ extract: async (videoId, options = {}) => {
+  return await robustTranscriptService.extractWithRealTiming(videoId, options);
+ },
+ service: robustTranscriptService,
+};

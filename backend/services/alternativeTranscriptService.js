@@ -1,29 +1,7 @@
 const fs = require('fs-extra');
 const path = require('path');
 const {v4: uuidv4} = require('uuid');
-
-// Import the enhanced execution function from main server
-let executeYtDlpSecurely = null;
-
-// Dynamic import of the secure execution function
-async function getSecureExecutor() {
- if (!executeYtDlpSecurely) {
-  try {
-   // Try to import from the main server module
-   const serverModule = require('../server.js');
-   if (serverModule && serverModule.executeYtDlpSecurely) {
-    executeYtDlpSecurely = serverModule.executeYtDlpSecurely;
-   }
-  } catch (error) {
-   console.log('[ALT-TRANSCRIPT] Fallback to yt-dlp-exec due to import error:', error.message);
-   const ytdlp = require('yt-dlp-exec');
-   executeYtDlpSecurely = async (args, options = {}) => {
-    return await ytdlp.exec(args);
-   };
-  }
- }
- return executeYtDlpSecurely;
-}
+const {executeYtDlpSecurely} = require('./ytdlpSecureExecutor');
 
 // Cookies path configuration
 const COOKIES_PATH = process.env.YTDLP_COOKIES_PATH || path.join(__dirname, '..', 'cookies.txt');
@@ -105,10 +83,9 @@ async function extract(videoId) {
 
  try {
   // Use the enhanced secure executor with anti-detection
-  const secureExecutor = await getSecureExecutor();
   console.log('[ALT-TRANSCRIPT] Using enhanced anti-detection execution');
 
-  const result = await secureExecutor(args, {
+  const result = await executeYtDlpSecurely(args, {
    timeout: 30000,
    maxBuffer: 1024 * 1024 * 10, // 10MB buffer
    useCookies: true,

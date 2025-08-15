@@ -5153,3 +5153,9 @@ app.listen(PORT, () => {
 
 // Remove the blocking startup validation
 // validateStartup().catch(console.error);
+
+// Export essential functions for use by other modules
+module.exports = {
+ executeYtDlpSecurely,
+ app,
+};
