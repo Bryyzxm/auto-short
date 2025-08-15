@@ -104,7 +104,7 @@ class AzureEnvironmentManager {
   */
  getOptimalCookiesPath(config) {
   const candidatePaths = [
-   path.join(config.paths.data, 'cookies.txt'), // Persistent data folder
+   path.join(config.paths.data, 'cookies.txt'), // Persistent data folder (PREFERRED)
    path.join(config.paths.home, 'cookies.txt'), // Home directory
    path.join(config.paths.temp, 'cookies.txt'), // Temp directory
    path.join(config.paths.wwwroot, 'cookies.txt'), // WWW root
@@ -112,9 +112,19 @@ class AzureEnvironmentManager {
    path.join(process.cwd(), 'cookies.txt'), // Process working directory
   ];
 
+  // CRITICAL FIX: Force Azure to use the preferred path for cookies
+  // This helps avoid path conflicts in production
+  const preferredPath = candidatePaths[0]; // /home/data/cookies.txt
+  console.log(`[AZURE-CONFIG] 🎯 Preferred cookies path: ${preferredPath}`);
+
+  // Set environment variable to ensure consistency
+  if (!process.env.YTDLP_COOKIES_PATH) {
+   process.env.YTDLP_COOKIES_PATH = preferredPath;
+   console.log(`[AZURE-CONFIG] 🔧 Set YTDLP_COOKIES_PATH environment variable: ${preferredPath}`);
+  }
+
   return candidatePaths;
  }
-
  /**
   * Handle Azure environment variable size limitations
   */
@@ -867,9 +877,41 @@ async function setupCookiesFile() {
    const validationTime = Date.now() - validationStart;
    console.log(`[COOKIES-SETUP] ✅ File validation completed in ${validationTime}ms`);
 
-   // Step 8: Update global variables
-   process.env.YTDLP_COOKIES_PATH = cookiesFilePath;
-   YTDLP_COOKIES_PATH = cookiesFilePath;
+   // Step 8: Update global variables with Azure precedence fix
+   console.log('[COOKIES-SETUP] 🔧 Updating global variables with cookies path...');
+
+   // CRITICAL FIX: In Azure, ensure yt-dlp always uses the valid cookies file
+   if (azureEnv.isAzure) {
+    // Force yt-dlp to use the valid cookies file path
+    console.log(`[COOKIES-SETUP] 🔧 Azure path precedence fix: forcing ${cookiesFilePath}`);
+
+    // Update both environment and global variables
+    process.env.YTDLP_COOKIES_PATH = cookiesFilePath;
+    YTDLP_COOKIES_PATH = cookiesFilePath;
+
+    // Also check if there are old cookies files that might interfere
+    const potentialConflictPaths = ['/home/site/wwwroot/backend/cookies.txt', '/home/site/wwwroot/cookies.txt', path.join(__dirname, 'cookies.txt')];
+
+    for (const conflictPath of potentialConflictPaths) {
+     if (conflictPath !== cookiesFilePath && fs.existsSync(conflictPath)) {
+      try {
+       const conflictStats = fs.statSync(conflictPath);
+       console.log(`[COOKIES-SETUP] ⚠️  Found potential conflict file: ${conflictPath} (${conflictStats.size} bytes)`);
+
+       // Rename conflicting file to avoid interference
+       const backupPath = conflictPath + '.backup.' + Date.now();
+       fs.renameSync(conflictPath, backupPath);
+       console.log(`[COOKIES-SETUP] 🔄 Moved conflicting file to: ${backupPath}`);
+      } catch (conflictError) {
+       console.log(`[COOKIES-SETUP] ⚠️  Could not move conflict file ${conflictPath}: ${conflictError.message}`);
+      }
+     }
+    }
+   } else {
+    process.env.YTDLP_COOKIES_PATH = cookiesFilePath;
+    YTDLP_COOKIES_PATH = cookiesFilePath;
+   }
+
    console.log('[COOKIES-SETUP] 🔧 Updated global variables with cookies path');
 
    // Final success summary
@@ -1518,10 +1560,7 @@ async function executeYtDlpSecurely(args, options = {}) {
    console.log('[YT-DLP-EXEC] 🕶️ Added randomized user-agent');
   }
 
-  if (!finalArgs.includes('--extractor-args')) {
-   finalArgs.push('--extractor-args', 'youtube:player_client=android,web,tv,ios;innertube_host=youtubei.googleapis.com');
-   console.log('[YT-DLP-EXEC] 🔧 Added multi-client extractor args');
-  }
+  // Note: Extractor args will be added after cookies validation for optimal client selection
 
   // Add delay mechanism to mimic human behavior
   if (!finalArgs.includes('--sleep-interval')) {
@@ -1600,6 +1639,24 @@ async function executeYtDlpSecurely(args, options = {}) {
    }
   } else {
    console.log('[YT-DLP-EXEC] 🚫 Cookies explicitly disabled for this execution');
+  }
+
+  // CRITICAL FIX: Add optimized extractor args based on cookies availability
+  if (!finalArgs.includes('--extractor-args')) {
+   let extractorArgs;
+   if (cookiesUsed) {
+    // When cookies are available, use only web and tv clients (avoid android/ios)
+    // Azure logs show: "Skipping client 'android' since it does not support cookies"
+    extractorArgs = 'youtube:player_client=web,tv;innertube_host=youtubei.googleapis.com';
+    console.log('[YT-DLP-EXEC] 🔧 Using cookies-compatible clients: web,tv (excluding android,ios)');
+   } else {
+    // When no cookies, use all clients for maximum compatibility
+    extractorArgs = 'youtube:player_client=android,web,tv,ios;innertube_host=youtubei.googleapis.com';
+    console.log('[YT-DLP-EXEC] 🔧 Using all clients: android,web,tv,ios (no cookies mode)');
+   }
+
+   finalArgs.push('--extractor-args', extractorArgs);
+   console.log('[YT-DLP-EXEC] 🔧 Added optimized multi-client extractor args');
   }
 
   // Log final execution details
@@ -4960,6 +5017,50 @@ app.listen(PORT, () => {
  console.log(`\n🚀 Backend server running on http://localhost:${PORT}`);
  console.log(`🌐 Environment: ${azureEnv.azureConfig.environment}`);
  console.log(`🍪 Cookies system: ${YTDLP_COOKIES_PATH ? 'Configured' : 'Not configured'}`);
+
+ // ENHANCED AZURE DEBUGGING: Log environment variables and paths
+ if (azureEnv.isAzure) {
+  console.log('\n🔍 AZURE ENVIRONMENT DEBUG INFORMATION:');
+  console.log(`📍 YTDLP_COOKIES_PATH (env): ${process.env.YTDLP_COOKIES_PATH || 'not set'}`);
+  console.log(`📍 YTDLP_COOKIES_PATH (global): ${YTDLP_COOKIES_PATH || 'not set'}`);
+  console.log(`📍 HOME: ${process.env.HOME || 'not set'}`);
+  console.log(`📍 TEMP: ${process.env.TEMP || 'not set'}`);
+  console.log(`📍 PWD: ${process.env.PWD || 'not set'}`);
+  console.log(`📍 __dirname: ${__dirname}`);
+  console.log(`📍 process.cwd(): ${process.cwd()}`);
+
+  // Check if the cookies file actually exists
+  if (YTDLP_COOKIES_PATH) {
+   try {
+    const cookiesExists = fs.existsSync(YTDLP_COOKIES_PATH);
+    console.log(`📂 Cookies file exists at ${YTDLP_COOKIES_PATH}: ${cookiesExists}`);
+    if (cookiesExists) {
+     const cookiesStats = fs.statSync(YTDLP_COOKIES_PATH);
+     console.log(`📊 Cookies file size: ${cookiesStats.size} bytes`);
+     console.log(`🕒 Cookies file modified: ${cookiesStats.mtime.toISOString()}`);
+    }
+   } catch (pathError) {
+    console.log(`❌ Error checking cookies path: ${pathError.message}`);
+   }
+  }
+
+  // Check Azure-specific paths
+  const azurePaths = ['/home/data/cookies.txt', '/home/site/wwwroot/backend/cookies.txt', '/home/site/wwwroot/cookies.txt'];
+
+  console.log('\n🔍 AZURE COOKIES PATH ANALYSIS:');
+  azurePaths.forEach((testPath) => {
+   try {
+    const exists = fs.existsSync(testPath);
+    console.log(`📍 ${testPath}: ${exists ? 'EXISTS' : 'NOT FOUND'}`);
+    if (exists) {
+     const stats = fs.statSync(testPath);
+     console.log(`  📊 Size: ${stats.size} bytes, Modified: ${stats.mtime.toISOString()}`);
+    }
+   } catch (error) {
+    console.log(`  ❌ Error checking ${testPath}: ${error.message}`);
+   }
+  });
+ }
 
  if (global.lastStartupValidation) {
   const validation = global.lastStartupValidation;
