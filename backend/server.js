@@ -1523,6 +1523,16 @@ const RATE_LIMITER = {
 
 // Secure yt-dlp execution helper using spawn to prevent shell injection
 async function executeYtDlpSecurely(args, options = {}) {
+ // AZURE EMERGENCY TIMEOUT: Wrap the entire function in a timeout for Azure environments
+ if (azureEnv.isAzure) {
+  const emergencyTimeout = options.timeout ? Math.min(options.timeout, 30000) : 15000; // Max 30s in Azure, default 15s
+  return Promise.race([executeYtDlpSecurelyCore(args, options), new Promise((_, reject) => setTimeout(() => reject(new Error('Azure emergency timeout: yt-dlp execution took too long')), emergencyTimeout))]);
+ } else {
+  return executeYtDlpSecurelyCore(args, options);
+ }
+}
+
+async function executeYtDlpSecurelyCore(args, options = {}) {
  return new Promise(async (resolve, reject) => {
   const startTime = Date.now();
   console.log('[YT-DLP-EXEC] 🚀 Starting yt-dlp execution...');
@@ -2185,10 +2195,11 @@ async function validateStartup() {
   console.log('💡 Set YTDLP_COOKIES_PATH environment variable to specify cookies file location');
  }
 
- // Test yt-dlp execution
+ // Test yt-dlp execution with reduced timeout for Azure
  try {
   const versionArgs = ['--version'];
-  const testResult = await executeYtDlpSecurely(versionArgs, {timeout: 10000, useCookies: false});
+  // Reduced timeout for Azure compatibility - prevent startup blocking
+  const testResult = await executeYtDlpSecurely(versionArgs, {timeout: 5000, useCookies: false});
 
   console.log(`✅ YT-DLP executable test passed: ${testResult.trim()}`);
 
@@ -2200,11 +2211,15 @@ async function validateStartup() {
  } catch (testError) {
   console.error('❌ YT-DLP executable test failed:', testError.message);
   console.warn('🔄 This may cause download failures. Check deployment configuration.');
+  // In Azure, don't fail startup on yt-dlp test failure
+  if (azureEnv.isAzure) {
+   console.log('🌐 Azure environment detected - continuing startup despite yt-dlp test failure');
+  }
  }
 }
 
-// Run startup validation
-validateStartup().catch(console.error);
+// Startup validation is now non-blocking and runs after server starts
+// validateStartup().catch(console.error);
 
 // Root endpoint
 app.get('/', (req, res) => {
@@ -5013,6 +5028,7 @@ cleanupOldMp4Files();
  }
 })();
 
+// Start server first, then run validation asynchronously
 app.listen(PORT, () => {
  console.log(`\n🚀 Backend server running on http://localhost:${PORT}`);
  console.log(`🌐 Environment: ${azureEnv.azureConfig.environment}`);
@@ -5071,4 +5087,15 @@ app.listen(PORT, () => {
  }
 
  console.log('='.repeat(60));
+
+ // Run validation asynchronously after server starts (non-blocking)
+ setTimeout(() => {
+  validateStartup().catch((validationError) => {
+   console.error('\n💥 Startup validation failed:', validationError.message);
+   console.warn('⚠️  Server is running but some functionality may be impaired');
+  });
+ }, 1000); // Wait 1 second after server starts
 });
+
+// Remove the blocking startup validation
+// validateStartup().catch(console.error);
