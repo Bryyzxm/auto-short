@@ -2009,6 +2009,11 @@ async function executeWithFallbackStrategies(baseArgs, {purpose = 'generic', tim
     const out = await executeYtDlpSecurely(workingArgs, {timeout, maxBuffer, useCookies: strat.useCookies});
     const duration = Date.now() - startTime;
 
+    // Validate output exists
+    if (out === undefined || out === null) {
+     throw new Error(`Strategy ${strat.label} returned undefined/null output`);
+    }
+
     strategyResults.push({
      strategy: strat.label,
      success: true,
@@ -2053,7 +2058,7 @@ async function executeWithFallbackStrategies(baseArgs, {purpose = 'generic', tim
   });
 
   // Enhanced error with strategy context
-  const errorWithContext = new Error(lastError.message);
+  const errorWithContext = new Error(lastError ? lastError.message : 'All strategies failed with unknown error');
   errorWithContext.originalError = lastError;
   errorWithContext.strategiesAttempted = strategyResults;
   errorWithContext.botDetectionCount = strategyResults.filter((r) => r.botDetection).length;
@@ -2908,7 +2913,10 @@ async function checkVideoFormats(id, youtubeUrl) {
 
   let formatCheck;
   try {
-   const {output, strategy} = await executeWithFallbackStrategies(formatCheckArgs, {purpose: 'list-formats', timeout: 30000});
+   const fallbackResult = await executeWithFallbackStrategies(formatCheckArgs, {purpose: 'list-formats', timeout: 30000});
+
+   // Safely destructure with fallback values
+   const {output = '', strategy = 'unknown'} = fallbackResult || {};
    formatCheck = output;
    console.log(`[${id}] list-formats strategy used: ${strategy}`);
   } catch (e) {
@@ -3150,7 +3158,10 @@ app.post('/api/shorts', async (req, res) => {
 
  try {
   try {
-   const {output, strategy} = await executeWithFallbackStrategies(ytDlpArgs, {purpose: 'download', timeout: 300000, maxBuffer: 1024 * 1024 * 50});
+   const fallbackResult = await executeWithFallbackStrategies(ytDlpArgs, {purpose: 'download', timeout: 300000, maxBuffer: 1024 * 1024 * 50});
+
+   // Safely destructure with fallback values
+   const {output = '', strategy = 'unknown'} = fallbackResult || {};
    console.log(`[${id}] download strategy used: ${strategy}`);
   } catch (downloadErr) {
    // Re-throw to existing catch below
