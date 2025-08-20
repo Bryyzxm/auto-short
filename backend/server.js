@@ -9,6 +9,9 @@ const multer = require('multer');
 const {execFile, execSync, spawn} = require('child_process');
 const {v4: uuidv4} = require('uuid');
 const path = require('path');
+
+// Import enhanced error handling
+const errorHandler = require('./services/errorHandler');
 const fs = require('fs');
 const ytdlp = require('yt-dlp-exec');
 const {YoutubeTranscript} = require('youtube-transcript');
@@ -290,6 +293,9 @@ class AzureEnvironmentManager {
 const azureEnv = new AzureEnvironmentManager();
 const alternativeTranscriptService = require('./services/alternativeTranscriptService.js');
 const emergencyTranscriptService = require('./services/emergencyTranscriptService.js');
+
+// Import Azure health monitoring
+const azureHealthMonitor = require('./services/azureHealthMonitor');
 
 // BULLETPROOF SERVICE LOADING - Handle missing services gracefully
 let enhancedTranscriptOrchestrator;
@@ -2009,22 +2015,25 @@ async function executeWithFallbackStrategies(baseArgs, {purpose = 'generic', tim
     const out = await executeYtDlpSecurely(workingArgs, {timeout, maxBuffer, useCookies: strat.useCookies});
     const duration = Date.now() - startTime;
 
-    // Validate output exists
-    if (out === undefined || out === null) {
-     throw new Error(`Strategy ${strat.label} returned undefined/null output`);
+    // Enhanced validation with error handler
+    const validationResult = errorHandler.normalizeYtDlpOutput(out);
+    if (!validationResult.valid) {
+     throw new Error(`Strategy ${strat.label} returned invalid output: ${validationResult.error}`);
     }
 
     strategyResults.push({
      strategy: strat.label,
      success: true,
      duration,
-     outputSize: out ? out.length : 0,
+     outputSize: validationResult.output ? validationResult.output.length : 0,
     });
 
     if (strat.label !== 'original') {
-     console.log(`[YTDLP-FALLBACK] ✅ Strategy succeeded: ${strat.label} (${duration}ms, ${out?.length || 0} chars)`);
+     console.log(`[YTDLP-FALLBACK] ✅ Strategy succeeded: ${strat.label} (${duration}ms, ${validationResult.output?.length || 0} chars)`);
     }
-    return {output: out, strategy: strat.label, attempts: strategyResults};
+
+    // Return safely structured result
+    return errorHandler.safeDestructure({output: validationResult.output, strategy: strat.label, attempts: strategyResults}, {output: '', strategy: 'unknown', attempts: []});
    } catch (err) {
     lastError = err;
     const signIn = isSignInBotError(err.message);
@@ -5092,6 +5101,44 @@ cleanupOldMp4Files();
   console.warn('⚠️  Server will continue but cookies functionality may be impaired');
  }
 })();
+
+// AZURE HEALTH MONITORING ENDPOINTS
+app.get('/api/azure-health', async (req, res) => {
+ try {
+  const healthCheck = await azureHealthMonitor.performHealthCheck();
+  res.json(healthCheck);
+ } catch (error) {
+  res.status(500).json({
+   error: 'Health check failed',
+   message: error.message,
+   timestamp: new Date().toISOString(),
+  });
+ }
+});
+
+app.get('/api/azure-health/summary', (req, res) => {
+ try {
+  const summary = azureHealthMonitor.getHealthSummary();
+  res.json(summary);
+ } catch (error) {
+  res.status(500).json({
+   error: 'Health summary failed',
+   message: error.message,
+  });
+ }
+});
+
+app.get('/api/azure-health/errors', (req, res) => {
+ try {
+  const errorStats = errorHandler.getStats();
+  res.json(errorStats);
+ } catch (error) {
+  res.status(500).json({
+   error: 'Error stats failed',
+   message: error.message,
+  });
+ }
+});
 
 // Start server first, then run validation asynchronously
 app.listen(PORT, () => {

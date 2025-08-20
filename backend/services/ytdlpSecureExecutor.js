@@ -1,13 +1,26 @@
 /**
- * YT-DLP Secure Execution Utility
+ * YT-DLP Secure Execution Utility - Enhanced Azure Edition
  *
- * Shared execution function that can be used by all transcript services
- * without creating circular dependencies
+ * Comprehensive execution function with Azure-optimized error handling,
+ * authentication management, and defensive programming practices
  */
 
 const ytDlpExec = require('yt-dlp-exec');
 const fs = require('fs');
 const path = require('path');
+const errorHandler = require('./errorHandler');
+
+// Azure-optimized configuration
+const AZURE_CONFIG = {
+ maxRetries: 5,
+ baseTimeout: 15000,
+ maxTimeout: 45000,
+ retryMultiplier: 1.5,
+ authRetryLimit: 2,
+ cookieRefreshThreshold: 3, // Refresh cookies after 3 auth failures
+};
+
+let consecutiveAuthFailures = 0;
 
 // Determine Azure environment
 function isAzureEnvironment() {
@@ -22,34 +35,98 @@ function isAzureEnvironment() {
  );
 }
 
-// Get operation-specific timeout
+// Get operation-specific timeout with Azure optimization
 function getOperationTimeout(args) {
  const argsString = Array.isArray(args) ? args.join(' ') : args.toString();
  const isAzure = isAzureEnvironment();
 
- if (argsString.includes('--version')) {
-  return isAzure ? 5000 : 10000; // Fast version check
- } else if (argsString.includes('--dump-json')) {
-  return isAzure ? 20000 : 30000; // Metadata extraction
- } else if (argsString.includes('--list-formats')) {
-  return isAzure ? 25000 : 40000; // Format listing
- } else if (argsString.includes('--write-auto-sub') || argsString.includes('--write-sub')) {
-  return isAzure ? 30000 : 45000; // Subtitle extraction
- } else {
-  return isAzure ? 20000 : 30000; // Default
- }
+ // Base timeouts optimized for Azure performance
+ const timeouts = {
+  version: isAzure ? 8000 : 10000,
+  metadata: isAzure ? 25000 : 30000,
+  formats: isAzure ? 30000 : 40000,
+  subtitles: isAzure ? 35000 : 45000,
+  default: isAzure ? 25000 : 30000,
+ };
+
+ if (argsString.includes('--version')) return timeouts.version;
+ if (argsString.includes('--dump-json')) return timeouts.metadata;
+ if (argsString.includes('--list-formats')) return timeouts.formats;
+ if (argsString.includes('--write-auto-sub') || argsString.includes('--write-sub')) return timeouts.subtitles;
+
+ return timeouts.default;
 }
 
-// Enhanced secure execution with anti-detection
+// Helper function to build enhanced arguments
+function buildEnhancedArgs(normalizedArgs, options) {
+ const userAgents = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+ ];
+
+ const randomUserAgent = userAgents[Math.floor(Math.random() * userAgents.length)];
+
+ const enhancedArgs = [
+  ...normalizedArgs,
+  '--user-agent',
+  randomUserAgent,
+  '--sleep-interval',
+  '2',
+  '--max-sleep-interval',
+  '5',
+  '--retries',
+  '5',
+  '--socket-timeout',
+  '60',
+  '--geo-bypass',
+  '--geo-bypass-country',
+  'US',
+  '--extractor-retries',
+  '3',
+  '--fragment-retries',
+  '3',
+  '--force-ipv4',
+ ];
+
+ // Add multi-client support
+ if (!enhancedArgs.some((arg) => arg.includes('--extractor-args'))) {
+  enhancedArgs.push('--extractor-args', 'youtube:player_client=android,web,tv,ios;innertube_host=youtubei.googleapis.com');
+ }
+
+ console.log('[YT-DLP-SECURE] 🛡️ Enhanced arguments built with Azure optimizations');
+ return enhancedArgs;
+}
+
+// Helper function to add cookies
+function addCookiesIfAvailable(enhancedArgs) {
+ const cookiesPaths = ['/home/data/cookies.txt', path.join(__dirname, '..', 'cookies.txt'), './cookies.txt'];
+
+ for (const testPath of cookiesPaths) {
+  if (fs.existsSync(testPath) && !enhancedArgs.includes('--cookies')) {
+   enhancedArgs.push('--cookies', testPath);
+   console.log('[YT-DLP-SECURE] 🍪 Added cookies from:', testPath);
+   return;
+  }
+ }
+ console.log('[YT-DLP-SECURE] 🚫 No cookies file found or cookies already added');
+}
+
+// Helper function to execute with timeout
+async function executeWithTimeout(enhancedArgs, timeout) {
+ const emergencyTimeout = Math.max(timeout, AZURE_CONFIG.maxTimeout);
+
+ return Promise.race([ytDlpExec(enhancedArgs), new Promise((_, reject) => setTimeout(() => reject(new Error(`Azure timeout: yt-dlp execution exceeded ${emergencyTimeout}ms`)), emergencyTimeout))]);
+}
+
+// Enhanced secure execution with Azure optimizations and error handling
 async function executeYtDlpSecurely(args, options = {}) {
- const timeout = options.timeout || getOperationTimeout(args);
- const isAzure = isAzureEnvironment();
-
- console.log(`[YT-DLP-SECURE] ⏰ ${isAzure ? 'Azure' : 'Local'} timeout set to ${timeout}ms`);
-
- const emergencyTimeout = Math.max(timeout, isAzure ? 20000 : 30000);
-
- return Promise.race([executeYtDlpSecurelyCore(args, options), new Promise((_, reject) => setTimeout(() => reject(new Error(`Azure emergency timeout: yt-dlp execution exceeded ${emergencyTimeout}ms`)), emergencyTimeout))]);
+ return errorHandler.executeWithRetry(() => executeYtDlpSecurelyCore(args, options), {
+  maxRetries: AZURE_CONFIG.maxRetries,
+  retryDelay: 2000,
+  context: 'yt-dlp-execution',
+  fallbackValue: {output: '', error: 'All execution attempts failed'},
+ });
 }
 
 async function executeYtDlpSecurelyCore(args, options = {}) {
