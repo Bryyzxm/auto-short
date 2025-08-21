@@ -1528,34 +1528,6 @@ const RATE_LIMITER = {
 };
 
 // Secure yt-dlp execution helper using spawn to prevent shell injection
-async function executeYtDlpSecurely(args, options = {}) {
- // AZURE EMERGENCY TIMEOUT: Wrap the entire function in a timeout for Azure environments
- if (azureEnv.isAzure) {
-  // Intelligent timeout based on operation type
-  let emergencyTimeout = 15000; // Default 15s
-
-  // Adjust timeout based on args
-  if (args.includes('--dump-json')) {
-   emergencyTimeout = 20000; // 20s for metadata
-  } else if (args.includes('--version')) {
-   emergencyTimeout = 5000; // 5s for version check
-  } else if (args.includes('--list-formats')) {
-   emergencyTimeout = 25000; // 25s for format listing
-  }
-
-  // Apply user override with cap
-  if (options.timeout) {
-   emergencyTimeout = Math.min(options.timeout, 30000);
-  }
-
-  console.log(`[YT-DLP-EXEC] ⏰ Azure timeout set to ${emergencyTimeout}ms`);
-
-  return Promise.race([executeYtDlpSecurelyCore(args, options), new Promise((_, reject) => setTimeout(() => reject(new Error(`Azure emergency timeout: yt-dlp execution exceeded ${emergencyTimeout}ms`)), emergencyTimeout))]);
- } else {
-  return executeYtDlpSecurelyCore(args, options);
- }
-}
-
 async function executeYtDlpSecurelyCore(args, options = {}) {
  return new Promise(async (resolve, reject) => {
   const startTime = Date.now();
@@ -1567,6 +1539,11 @@ async function executeYtDlpSecurelyCore(args, options = {}) {
    if (typeof arg !== 'string') throw new Error('Invalid argument type');
    return arg;
   });
+
+  // Initialize variables
+  let cookiesUsed = false;
+  let cookiesPath = null;
+  let cookiesInfo = null;
 
   console.log('[YT-DLP-EXEC] 🔍 Command arguments analysis:');
   console.log(`[YT-DLP-EXEC]   📊 Total args: ${safeArgs.length}`);
@@ -1594,39 +1571,7 @@ async function executeYtDlpSecurelyCore(args, options = {}) {
    console.log('[YT-DLP-EXEC] 🕶️ Added randomized user-agent');
   }
 
-  // Note: Extractor args will be added after cookies validation for optimal client selection
-
-  // Add delay mechanism to mimic human behavior
-  if (!finalArgs.includes('--sleep-interval')) {
-   finalArgs.push('--sleep-interval', '1');
-   console.log('[YT-DLP-EXEC] 😴 Added sleep interval for human-like behavior');
-  }
-
-  // Add retry mechanism with exponential backoff
-  if (!finalArgs.includes('--retries')) {
-   finalArgs.push('--retries', '3');
-   console.log('[YT-DLP-EXEC] 🔄 Added retry mechanism');
-  }
-
-  // Add socket timeout
-  if (!finalArgs.includes('--socket-timeout')) {
-   finalArgs.push('--socket-timeout', '60');
-   console.log('[YT-DLP-EXEC] ⏱️ Added socket timeout');
-  }
-
-  // Add geo bypass
-  if (!finalArgs.includes('--geo-bypass')) {
-   finalArgs.push('--geo-bypass');
-   console.log('[YT-DLP-EXEC] 🌍 Added geo bypass');
-  }
-
-  console.log('[YT-DLP-EXEC] ✅ Anti-detection layer applied successfully');
-
-  // Enhanced cookies handling with detailed logging
-  let cookiesUsed = false;
-  let cookiesPath = null;
-  let cookiesInfo = null;
-
+  // Determine cookies usage FIRST
   if (options.useCookies !== false) {
    cookiesPath = options.cookiesPath || YTDLP_COOKIES_PATH;
    console.log('[YT-DLP-EXEC] 🍪 Cookies configuration:');
@@ -1635,54 +1580,33 @@ async function executeYtDlpSecurelyCore(args, options = {}) {
    console.log(`[YT-DLP-EXEC]   🔧 Force cookies: ${options.useCookies === true}`);
 
    if (cookiesPath && validateCookiesFile(cookiesPath)) {
-    // Get detailed cookies info
-    try {
-     const cookiesStats = fs.statSync(cookiesPath);
-     const cookiesContent = fs.readFileSync(cookiesPath, 'utf8');
-     const cookiesLines = cookiesContent.split('\n').filter((line) => line.trim().length > 0);
-     const youtubeCookies = cookiesLines.filter((line) => !line.startsWith('#') && line.includes('youtube.com'));
+    cookiesUsed = true;
+    console.log('[YT-DLP-EXEC] ✅ Cookies will be used');
 
+    // Store cookies info for later use
+    try {
+     const stats = fs.statSync(cookiesPath);
      cookiesInfo = {
       path: cookiesPath,
-      size: cookiesStats.size,
-      totalLines: cookiesLines.length,
-      youtubeCookies: youtubeCookies.length,
-      lastModified: cookiesStats.mtime.toISOString(),
+      size: stats.size,
+      youtubeCookies: true,
      };
-
-     console.log('[YT-DLP-EXEC] ✅ Cookies file validation passed:');
-     console.log(`[YT-DLP-EXEC]   📍 Path: ${cookiesPath}`);
-     console.log(`[YT-DLP-EXEC]   📏 Size: ${cookiesInfo.size} bytes`);
-     console.log(`[YT-DLP-EXEC]   📄 Total lines: ${cookiesInfo.totalLines}`);
-     console.log(`[YT-DLP-EXEC]   🌐 YouTube cookies: ${cookiesInfo.youtubeCookies}`);
-     console.log(`[YT-DLP-EXEC]   🕒 Last modified: ${cookiesInfo.lastModified}`);
-
-     finalArgs.unshift('--cookies', cookiesPath);
-     cookiesUsed = true;
-     console.log('[YT-DLP-EXEC] 🍪 Cookies added to yt-dlp command');
-    } catch (cookiesError) {
-     console.error('[YT-DLP-EXEC] ❌ Error reading cookies file details:', cookiesError.message);
-     console.log('[YT-DLP-EXEC] 🔄 Proceeding without detailed cookies info');
-     finalArgs.unshift('--cookies', cookiesPath);
-     cookiesUsed = true;
+    } catch (e) {
+     console.warn('[YT-DLP-EXEC] ⚠️ Could not get cookies file stats');
     }
    } else {
     console.warn('[YT-DLP-EXEC] ⚠️  Cookies file validation failed or not found');
-    console.warn('[YT-DLP-EXEC] ⚠️  yt-dlp will run without YouTube authentication');
-    console.warn('[YT-DLP-EXEC] ⚠️  This may result in bot detection or limited access');
+    cookiesUsed = false;
    }
-  } else {
-   console.log('[YT-DLP-EXEC] 🚫 Cookies explicitly disabled for this execution');
   }
 
   // CRITICAL FIX: Add optimized extractor args based on cookies availability
   if (!finalArgs.includes('--extractor-args')) {
    let extractorArgs;
    if (cookiesUsed) {
-    // When cookies are available, use only web and tv clients (avoid android/ios)
-    // Azure logs show: "Skipping client 'android' since it does not support cookies"
-    extractorArgs = 'youtube:player_client=web,tv;innertube_host=youtubei.googleapis.com';
-    console.log('[YT-DLP-EXEC] 🔧 Using cookies-compatible clients: web,tv (excluding android,ios)');
+    // When cookies are available, use only web client (most reliable)
+    extractorArgs = 'youtube:player_client=web;innertube_host=youtubei.googleapis.com';
+    console.log('[YT-DLP-EXEC] 🔧 Using cookies-compatible client: web only (avoiding TV client auth issues)');
    } else {
     // When no cookies, use all clients for maximum compatibility
     extractorArgs = 'youtube:player_client=android,web,tv,ios;innertube_host=youtubei.googleapis.com';
@@ -1690,7 +1614,13 @@ async function executeYtDlpSecurelyCore(args, options = {}) {
    }
 
    finalArgs.push('--extractor-args', extractorArgs);
-   console.log('[YT-DLP-EXEC] 🔧 Added optimized multi-client extractor args');
+   console.log('[YT-DLP-EXEC] 🔧 Added optimized extractor args');
+  }
+
+  // Add cookies to args if being used
+  if (cookiesUsed && cookiesPath && !finalArgs.includes('--cookies')) {
+   finalArgs.push('--cookies', cookiesPath);
+   console.log('[YT-DLP-EXEC] 🍪 Added cookies argument to command');
   }
 
   // Log final execution details
