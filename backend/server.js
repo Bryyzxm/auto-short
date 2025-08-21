@@ -1528,7 +1528,7 @@ const RATE_LIMITER = {
 };
 
 // Secure yt-dlp execution helper using spawn to prevent shell injection
-async function executeYtDlpSecurelyCore(args, options = {}) {
+async function executeYtDlpSecurelyCoreCore(args, options = {}) {
  return new Promise(async (resolve, reject) => {
   const startTime = Date.now();
   console.log('[YT-DLP-EXEC] 🚀 Starting yt-dlp execution...');
@@ -1942,7 +1942,7 @@ async function executeWithFallbackStrategies(baseArgs, {purpose = 'generic', tim
     console.log(`[YTDLP-FALLBACK] 🚀 Attempting strategy=${strat.label} purpose=${purpose} cookies=${strat.useCookies}`);
 
     const startTime = Date.now();
-    const out = await executeYtDlpSecurely(workingArgs, {timeout, maxBuffer, useCookies: strat.useCookies});
+    const out = await executeYtDlpSecurelyCore(workingArgs, {timeout, maxBuffer, useCookies: strat.useCookies});
     const duration = Date.now() - startTime;
 
     // Enhanced validation with error handler
@@ -2161,7 +2161,7 @@ async function validateStartup() {
  try {
   const versionArgs = ['--version'];
   // Reduced timeout for Azure compatibility - prevent startup blocking
-  const testResult = await executeYtDlpSecurely(versionArgs, {timeout: 5000, useCookies: false});
+  const testResult = await executeYtDlpSecurelyCore(versionArgs, {timeout: 5000, useCookies: false});
 
   console.log(`✅ YT-DLP executable test passed: ${testResult.trim()}`);
 
@@ -2313,7 +2313,7 @@ app.get('/api/debug/environment', async (req, res) => {
   // Test yt-dlp availability
   try {
    const versionArgs = ['--version'];
-   const testResult = await executeYtDlpSecurely(versionArgs, {timeout: 5000, useCookies: false});
+   const testResult = await executeYtDlpSecurelyCore(versionArgs, {timeout: 5000, useCookies: false});
 
    debugInfo.ytdlp_version = testResult.trim();
    debugInfo.ytdlp_status = 'available';
@@ -2767,7 +2767,7 @@ app.post('/api/video-quality-check', async (req, res) => {
   console.log(`[quality-check] yt-dlp command: ${YT_DLP_PATH} ${qualityCheckArgs.join(' ')}`);
 
   // Check available formats with yt-dlp using secure execution
-  const formatsResult = await executeYtDlpSecurely(qualityCheckArgs, {
+  const formatsResult = await executeYtDlpSecurelyCore(qualityCheckArgs, {
    timeout: 30000, // 30 second timeout
   });
   // If returned fine, continue; fallback executor not needed here unless sign-in
@@ -3679,7 +3679,7 @@ app.get('/api/video-metadata', async (req, res) => {
   console.log(`[video-metadata] yt-dlp command: ${YT_DLP_PATH} ${args.join(' ')}`);
 
   // Gunakan yt-dlp untuk mendapatkan metadata tanpa download
-  const result = await executeYtDlpSecurely(args, {
+  const result = await executeYtDlpSecurelyCore(args, {
    timeout: 60000, // Increase timeout to 60 seconds
    maxBuffer: 1024 * 1024 * 10, // 10MB buffer
   });
@@ -4824,7 +4824,7 @@ async function runStartupCookiesValidation() {
   console.log('\n📋 Step 4: yt-dlp Basic Functionality Test');
   try {
    const versionArgs = ['--version'];
-   const versionResult = await executeYtDlpSecurely(versionArgs, {
+   const versionResult = await executeYtDlpSecurelyCore(versionArgs, {
     timeout: 10000,
     useCookies: false,
    });
@@ -4854,7 +4854,7 @@ async function runStartupCookiesValidation() {
      'https://www.youtube.com/watch?v=dQw4w9WgXcQ', // Rick Roll - always available
     ];
 
-    const cookiesResult = await executeYtDlpSecurely(testArgs, {
+    const cookiesResult = await executeYtDlpSecurelyCore(testArgs, {
      timeout: 20000,
      useCookies: true,
      cookiesPath: YTDLP_COOKIES_PATH,
@@ -5144,6 +5144,6 @@ app.listen(PORT, () => {
 
 // Export essential functions for use by other modules
 module.exports = {
- executeYtDlpSecurely,
+ executeYtDlpSecurelyCore,
  app,
 };
