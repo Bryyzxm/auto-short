@@ -1528,7 +1528,7 @@ const RATE_LIMITER = {
 };
 
 // Secure yt-dlp execution helper using spawn to prevent shell injection
-async function executeYtDlpSecurelyCoreCore(args, options = {}) {
+async function executeYtDlpSecurelyCore(args, options = {}) {
  return new Promise(async (resolve, reject) => {
   const startTime = Date.now();
   console.log('[YT-DLP-EXEC] 🚀 Starting yt-dlp execution...');
