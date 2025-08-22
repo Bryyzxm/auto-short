@@ -1,32 +1,42 @@
 {
- "name": "ai-youtube-to-shorts-segmenter",
- "private": true,
- "version": "0.0.0",
- "type": "module",
- "scripts": {
-  "dev": "vite",
-  "build": "tsc && vite build",
-  "preview": "vite preview",
-  "type-check": "tsc --noEmit",
-  "start": "cd backend && npm install && npm start"
- },
- "dependencies": {
-  "@google/genai": "^1.4.0",
-  "@tailwindcss/cli": "^4.1.11",
-  "@tailwindcss/vite": "^4.1.11",
-  "form-data": "^4.0.4",
-  "groq-sdk": "^0.27.0",
-  "multer": "^2.0.1",
-  "node-fetch": "^3.3.2",
-  "react": "^19.1.0",
-  "react-dom": "^19.1.0",
-  "tailwindcss": "^4.1.11"
- },
- "devDependencies": {
-  "@types/node": "^22.14.0",
-  "@types/react": "^19.1.6",
-  "@types/react-dom": "^19.1.6",
-  "typescript": "~5.7.2",
-  "vite": "^6.2.0"
- }
+  "name": "ai-youtube-to-shorts-segmenter",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "type-check": "tsc --noEmit",
+    "start": "cd backend && npm install && npm start"
+  },
+  "dependencies": {
+    "@google/genai": "^1.4.0",
+    "@tailwindcss/cli": "^4.1.11",
+    "@tailwindcss/vite": "^4.1.11",
+    "form-data": "^4.0.4",
+    "groq-sdk": "^0.27.0",
+    "multer": "^2.0.1",
+    "node-fetch": "^3.3.2",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "tailwindcss": "^4.1.11"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "@types/react": "^19.1.6",
+    "@types/react-dom": "^19.1.6",
+    "typescript": "~5.7.2",
+    "vite": "^6.2.0"
+  },
+  "deployment": {
+    "lastDeployment": "2025-08-22T10:26:57.760Z",
+    "deploymentReason": "Azure bot detection fix",
+    "fixes": [
+      "Disabled YouTube tests in Azure environment",
+      "Added SKIP_YOUTUBE_TESTS environment variable",
+      "Enhanced startup validation error handling",
+      "Prevented container termination on startup"
+    ]
+  }
 }
