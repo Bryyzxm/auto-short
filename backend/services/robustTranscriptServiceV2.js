@@ -5,6 +5,7 @@ const path = require('path');
 const AdvancedTranscriptExtractor = require('./advancedTranscriptExtractor');
 const OfficialYtDlpFixService = require('./officialYtDlpFixService');
 const OfficialPoTokenService = require('./officialPoTokenService');
+const EnhancedOfficialPoTokenService = require('./enhancedOfficialPoTokenService');
 
 /**
  * Robust Transcript Service V2 - Multiple extraction strategies
@@ -119,7 +120,8 @@ async function extractWithPoToken(videoId) {
  console.log(`[ROBUST-V2] 🏆 Using official PO token methods from: https://github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide`);
 
  try {
-  const poTokenService = new OfficialPoTokenService();
+  // 🚨 CRITICAL FIX: Use enhanced PO token service with HTTP 429 recovery
+  const poTokenService = new EnhancedOfficialPoTokenService();
   const result = await poTokenService.extractWithPoToken(videoId);
 
   if (result && result.segments && result.segments.length > 0) {

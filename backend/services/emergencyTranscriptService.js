@@ -1,7 +1,10 @@
 const {YoutubeTranscript} = require('youtube-transcript');
+const fs = require('fs');
+const path = require('path');
 
 /**
- * Last-resort transcript service using the 'youtube-transcript' library.
+ * ENHANCED Emergency transcript service with VTT file recovery capability
+ * Last-resort transcript service using the 'youtube-transcript' library + existing VTT files.
  * @param {string} videoId The YouTube video ID.
  * @returns {Promise<Array<{text: string, start: number, duration: number}>>} A promise that resolves to the transcript segments.
  */
@@ -11,6 +14,14 @@ async function extract(videoId) {
  stats.lastRequestTime = new Date().toISOString();
 
  console.log(`Emergency Transcript Service: Attempting to fetch transcript for videoId: ${videoId}`);
+
+ // 🚨 FIRST ATTEMPT: Check for existing VTT files from previous failed attempts
+ const vttRecoveryResult = await attemptVttFileRecovery(videoId);
+ if (vttRecoveryResult) {
+  console.log(`Emergency Transcript Service: ✅ VTT file recovery successful`);
+  stats.successfulRequests++;
+  return vttRecoveryResult;
+ }
 
  // Try multiple languages in order of preference
  const languages = ['en', 'id', 'es', 'fr', 'de', 'pt', 'ja'];
@@ -64,6 +75,140 @@ async function extract(videoId) {
 
  console.error('Emergency Transcript Service: No transcript found in any supported language.');
  throw new Error('No transcript found by emergency service.');
+}
+
+/**
+ * 🚨 VTT FILE RECOVERY FUNCTION
+ * Attempt to recover transcript from existing VTT files left by failed yt-dlp attempts
+ */
+async function attemptVttFileRecovery(videoId) {
+ console.log(`Emergency Transcript Service: 🩹 Attempting VTT file recovery for ${videoId}`);
+
+ const tempDir = path.join(__dirname, '../temp');
+ if (!fs.existsSync(tempDir)) {
+  return null;
+ }
+
+ // Check for existing VTT files with various patterns
+ const vttPatterns = [
+  `${videoId}_plugin.id.vtt`,
+  `${videoId}_tv_embedded.id.vtt`,
+  `${videoId}_web_embedded.id.vtt`,
+  `${videoId}.id.vtt`,
+  `${videoId}_plugin.en.vtt`,
+  `${videoId}_tv_embedded.en.vtt`,
+  `${videoId}_web_embedded.en.vtt`,
+  `${videoId}.en.vtt`,
+  `${videoId}.vtt`,
+ ];
+
+ for (const pattern of vttPatterns) {
+  const vttPath = path.join(tempDir, pattern);
+
+  if (fs.existsSync(vttPath)) {
+   console.log(`Emergency Transcript Service: 🎉 Found existing VTT file: ${pattern}`);
+
+   try {
+    const segments = parseVttFile(vttPath);
+    const isIndonesian = pattern.includes('.id.vtt');
+
+    if (segments && segments.length > 0) {
+     console.log(`Emergency Transcript Service: ✅ Parsed ${segments.length} segments from ${pattern}`);
+
+     return {
+      segments: segments.map((seg) => ({
+       text: seg.text,
+       start: seg.start,
+       duration: seg.end - seg.start,
+      })),
+      language: isIndonesian ? 'indonesian' : 'english',
+      source: 'vtt-file-recovery',
+      method: 'emergency-vtt-recovery',
+      originalFile: pattern,
+     };
+    }
+   } catch (parseError) {
+    console.log(`Emergency Transcript Service: ❌ Failed to parse ${pattern}: ${parseError.message}`);
+   }
+  }
+ }
+
+ console.log(`Emergency Transcript Service: ❌ No recoverable VTT files found`);
+ return null;
+}
+
+/**
+ * Parse VTT file content into segments
+ */
+function parseVttFile(vttFilePath) {
+ try {
+  const content = fs.readFileSync(vttFilePath, 'utf8');
+
+  if (!content || !content.includes('WEBVTT')) {
+   return [];
+  }
+
+  const segments = [];
+  const lines = content.split('\n');
+
+  for (let i = 0; i < lines.length; i++) {
+   const line = lines[i].trim();
+
+   if (line.includes('-->')) {
+    const [startTime, endTimeRaw] = line.split(' --> ');
+    const endTime = endTimeRaw.split(' ')[0];
+    const textLines = [];
+
+    for (let j = i + 1; j < lines.length; j++) {
+     const textLine = lines[j].trim();
+     if (!textLine || textLine.includes('-->')) {
+      break;
+     }
+     textLines.push(textLine);
+    }
+
+    if (textLines.length > 0) {
+     const start = parseTime(startTime);
+     const end = parseTime(endTime);
+     const text = textLines
+      .join(' ')
+      .replace(/<[^>]*>/g, '')
+      .trim();
+
+     if (text && text.length > 0 && start >= 0 && end > start) {
+      segments.push({
+       start: start,
+       end: end,
+       text: text,
+      });
+     }
+    }
+   }
+  }
+
+  return segments;
+ } catch (error) {
+  console.log(`Emergency Transcript Service: Parse error: ${error.message}`);
+  return [];
+ }
+}
+
+/**
+ * Parse time string to seconds
+ */
+function parseTime(timeStr) {
+ try {
+  const parts = timeStr.split(':');
+  if (parts.length !== 3) return 0;
+
+  const hours = parseInt(parts[0], 10) || 0;
+  const minutes = parseInt(parts[1], 10) || 0;
+  const seconds = parseFloat(parts[2]) || 0;
+
+  return hours * 3600 + minutes * 60 + seconds;
+ } catch (error) {
+  return 0;
+ }
 }
 
 // Add stats tracking for server.js compatibility
