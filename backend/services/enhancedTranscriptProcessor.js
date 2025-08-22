@@ -534,12 +534,25 @@ class EnhancedTranscriptProcessor {
   console.log(`[TRANSCRIPT-PROCESSOR] 🎯 Generating new segments from ${transcriptSegments.length} transcript segments using AI`);
 
   try {
+   // CRITICAL FIX: Ensure all transcript segments have proper end values
+   const normalizedSegments = transcriptSegments.map((segment) => {
+    if (!segment.end || isNaN(segment.end)) {
+     return {
+      ...segment,
+      end: segment.start + (segment.duration || 0),
+     };
+    }
+    return segment;
+   });
+
+   console.log(`[TRANSCRIPT-PROCESSOR] 🔧 Normalized ${normalizedSegments.length} segments with proper end values`);
+
    // ALWAYS use AI-powered analysis for finding interesting moments
    // Remove the "large transcript" shortcut that bypasses AI
    console.log(`[TRANSCRIPT-PROCESSOR] 🧠 Using FULL AI analysis to find interesting moments`);
 
    // Use full AI processing with strict parameters for finding viral moments
-   const aiResult = await enhancedAISegmenter.generateIntelligentSegments(transcriptSegments, {
+   const aiResult = await enhancedAISegmenter.generateIntelligentSegments(normalizedSegments, {
     targetCount: 12, // Target exactly 12 segments (minimum requirement)
     minDuration: 30, // Minimum 30 seconds (good for shorts)
     maxDuration: 90, // Maximum 90 seconds (max for shorts)
@@ -551,7 +564,7 @@ class EnhancedTranscriptProcessor {
    // STRICT enforcement - never exceed 15 segments
    if (!aiResult || !aiResult.segments || aiResult.segments.length === 0) {
     console.log(`[TRANSCRIPT-PROCESSOR] ⚠️ AI returned no segments, using emergency fallback`);
-    return this.generateEmergencySegments(transcriptSegments, videoId);
+    return this.generateEmergencySegments(normalizedSegments, videoId);
    }
 
    // Enforce strict segment count limit
@@ -570,18 +583,23 @@ class EnhancedTranscriptProcessor {
       ...segment,
       end: newEnd,
       duration: 90,
-      text: this.extractSegmentText(transcriptSegments, segment.start, newEnd),
+      text: this.extractSegmentText(normalizedSegments, segment.start, newEnd),
      };
     }
 
     if (segment.duration < 30) {
      console.log(`[TRANSCRIPT-PROCESSOR] ⚠️ Segment ${index + 1} too short (${segment.duration}s), extending to 30s`);
-     const newEnd = Math.min(segment.start + 30, Math.max(...transcriptSegments.map((s) => s.end)));
+
+     // Calculate total duration safely
+     const maxEnd = Math.max(...normalizedSegments.filter((s) => s.end && !isNaN(s.end)).map((s) => s.end));
+     const totalDuration = !isNaN(maxEnd) ? maxEnd : 600; // fallback to 600s
+
+     const newEnd = Math.min(segment.start + 30, totalDuration);
      return {
       ...segment,
       end: newEnd,
       duration: Math.round(newEnd - segment.start),
-      text: this.extractSegmentText(transcriptSegments, segment.start, newEnd),
+      text: this.extractSegmentText(normalizedSegments, segment.start, newEnd),
      };
     }
 
@@ -599,7 +617,7 @@ class EnhancedTranscriptProcessor {
     },
    };
 
-   return this.formatSegmentResults(validatedSegments, videoId, finalResult, transcriptSegments);
+   return this.formatSegmentResults(validatedSegments, videoId, finalResult, normalizedSegments);
   } catch (error) {
    console.error('[TRANSCRIPT-PROCESSOR] ❌ AI processing failed:', error);
    // Fallback to emergency simple segmentation
@@ -863,77 +881,6 @@ class EnhancedTranscriptProcessor {
   */
  async generateRuleBasedSegments(transcriptSegments, videoId) {
   return this.generateFallbackSegments(transcriptSegments, videoId);
- }
-
- /**
-  * FALLBACK: Rule-based segment generation
-  */
- generateRuleBasedSegments(transcriptSegments, videoId) {
-  console.log(`[TRANSCRIPT-PROCESSOR] 🔧 Generating rule-based segments`);
-
-  const segments = [];
-  const totalDuration = this.calculateTotalDuration(transcriptSegments);
-  const targetSegmentDuration = 60; // 60 seconds per segment
-
-  let currentStart = 0;
-  let segmentIndex = 1;
-
-  while (currentStart < totalDuration) {
-   const segmentEnd = Math.min(currentStart + targetSegmentDuration, totalDuration);
-
-   // Find transcript segments in this time range (allow overlap)
-   const segmentTranscripts = transcriptSegments.filter((t) => t.start < segmentEnd && t.end > currentStart);
-
-   if (segmentTranscripts.length > 0) {
-    const combinedText = segmentTranscripts
-     .map((t) => t.text)
-     .join(' ')
-     .trim();
-
-    if (combinedText.length > 50) {
-     // Ensure meaningful content
-     const duration = segmentEnd - currentStart;
-
-     segments.push({
-      id: `rule-based-${Date.now()}-${segmentIndex}`,
-      title: `Segment ${segmentIndex}`,
-      description: `Rule-based segment with ${Math.round(duration)}s duration`,
-      startTimeSeconds: currentStart,
-      endTimeSeconds: segmentEnd,
-      youtubeVideoId: videoId,
-      transcriptExcerpt: combinedText, // Use full text instead of truncated excerpt
-      transcriptFull: combinedText,
-      hasManualTranscript: true,
-      hasAIGenerated: false,
-      thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
-      duration: Math.round(duration),
-      segmentIndex: segmentIndex,
-      fallback: true,
-     });
-
-     segmentIndex++;
-    }
-   }
-
-   currentStart += targetSegmentDuration;
-  }
-
-  console.log(`[TRANSCRIPT-PROCESSOR] ✅ Generated ${segments.length} rule-based segments`);
-
-  return {
-   success: true,
-   mode: 'generate',
-   data: {
-    videoId: videoId,
-    segments: segments,
-    stats: {
-     totalSegments: segments.length,
-     transcriptEntries: transcriptSegments.length,
-     averageDuration: segments.length > 0 ? Math.round(segments.reduce((sum, s) => sum + s.duration, 0) / segments.length) : 0,
-     processingMethod: 'rule-based-fallback',
-    },
-   },
-  };
  }
 
  // ===== HELPER METHODS =====

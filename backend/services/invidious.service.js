@@ -130,8 +130,8 @@ function shuffleArray(array) {
  * @returns {Object|null} Selected caption object or null if none suitable
  */
 function selectBestCaptions(captions) {
- // Priority language codes (can be configured)
- const preferredLanguages = ['en', 'id', 'en-US', 'en-GB'];
+ // 🇮🇩 INDONESIAN-FIRST PRIORITY: Put Indonesian first for Indonesian content
+ const preferredLanguages = ['id', 'en', 'en-US', 'en-GB'];
 
  // Try to find captions in preferred languages
  for (const langCode of preferredLanguages) {
