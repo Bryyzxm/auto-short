@@ -19,43 +19,45 @@ class BotDetectionBypass {
   ];
 
   this.extractorConfigs = [
-   // Configuration 1: OFFICIAL FIX - Use as primary strategy
+   // Configuration 1: TV Simply only (NO COOKIES) - Most reliable based on GitHub research
    {
-    name: 'official-fix-primary',
-    clients: 'default,tv_simply,web,android',
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-    // 🚨 CRITICAL FIX: Use the official solution from GitHub issue #13930, PR #14081
-    extraArgs: ['--extractor-args', 'youtube:player_client=default,tv_simply,web,android;bypass_native_jsi;formats=all'],
-   },
-   // Configuration 2: TV Simply only (known to work)
-   {
-    name: 'tv-simply-only',
+    name: 'tv-simply-no-cookies',
     clients: 'tv_simply',
     userAgent: 'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version TV Safari/537.36',
     extraArgs: ['--extractor-args', 'youtube:player_client=tv_simply;bypass_native_jsi'],
+    skipCookies: true, // TV clients don't support cookies - this is the key fix
    },
-   // Configuration 3: Default client only
+   // Configuration 2: Default client only (with cookies for authentication)
    {
-    name: 'default-only',
+    name: 'default-with-cookies',
     clients: 'default',
     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-    extraArgs: ['--extractor-args', 'youtube:player_client=default;bypass_native_jsi;formats=all'],
+    extraArgs: ['--extractor-args', 'youtube:player_client=default;bypass_native_jsi'],
+    skipCookies: false, // Default client supports cookies
    },
-   // Configuration 4: Web client fallback
+   // Configuration 3: Web client (with cookies)
    {
-    name: 'web-fallback',
+    name: 'web-with-cookies',
     clients: 'web',
     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
     extraArgs: ['--extractor-args', 'youtube:player_client=web;bypass_native_jsi'],
-    skipCookies: true,
+    skipCookies: false, // Web client supports cookies
    },
-   // Configuration 5: Android fallback (without iOS to avoid cookie issues)
+   // Configuration 4: Android fallback (NO COOKIES)
    {
-    name: 'android-fallback',
+    name: 'android-no-cookies',
     clients: 'android',
     userAgent: 'com.google.android.youtube/19.50.37 (Linux; U; Android 14; SM-G998B Build/UP1A.231005.007) gzip',
     extraArgs: ['--extractor-args', 'youtube:player_client=android;bypass_native_jsi'],
-    skipCookies: true, // Android and iOS don't support cookies in current yt-dlp
+    skipCookies: true, // Android client doesn't support cookies
+   },
+   // Configuration 5: TV Embedded fallback (NO COOKIES)
+   {
+    name: 'tv-embedded-no-cookies',
+    clients: 'tv_embedded',
+    userAgent: 'Mozilla/5.0 (SMART-TV; LINUX; Tizen 2.4.0) AppleWebKit/538.1 (KHTML, like Gecko) Version/2.4.0 TV Safari/538.1',
+    extraArgs: ['--extractor-args', 'youtube:player_client=tv_embedded;bypass_native_jsi'],
+    skipCookies: true, // TV embedded doesn't support cookies
    },
   ];
 

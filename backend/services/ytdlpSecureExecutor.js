@@ -89,11 +89,19 @@ function buildEnhancedArgs(normalizedArgs, options) {
   '--force-ipv4',
  ];
 
- // Add multi-client support with OFFICIAL FIX from GitHub issue #13930
+ // Add single-client support optimized for Azure with proper cookie handling
  if (!enhancedArgs.some((arg) => arg.includes('--extractor-args'))) {
-  // 🚨 CRITICAL FIX: Use the official solution from PR #14081
-  // This fixes "The following content is not available on this app" error
-  enhancedArgs.push('--extractor-args', 'youtube:player_client=default,tv_simply,web,android;bypass_native_jsi;formats=all');
+  // 🚨 CRITICAL FIX: Use single client approach to avoid cookie conflicts
+  // Based on GitHub issue #13930 analysis - don't mix cookie-supporting and non-cookie clients
+  if (options.skipCookies || options.client === 'tv_simply' || options.client === 'android') {
+   // For TV/mobile clients that don't support cookies
+   enhancedArgs.push('--extractor-args', `youtube:player_client=${options.client || 'tv_simply'};bypass_native_jsi`);
+   console.log('[YT-DLP-SECURE] 🔧 Using no-cookie client strategy');
+  } else {
+   // For web/default clients that support cookies
+   enhancedArgs.push('--extractor-args', 'youtube:player_client=default;bypass_native_jsi');
+   console.log('[YT-DLP-SECURE] 🔧 Using cookie-compatible client strategy');
+  }
  }
 
  console.log('[YT-DLP-SECURE] 🛡️ Enhanced arguments built with Azure optimizations');
@@ -206,12 +214,19 @@ async function executeYtDlpSecurelyCore(args, options = {}) {
   console.log('[YT-DLP-SECURE] 🚫 Cookies explicitly disabled for this execution');
  }
 
- // Add multi-client support for better reliability with OFFICIAL FIX
+ // Add single-client support for better reliability with proper cookie handling
  if (!enhancedArgs.some((arg) => arg.includes('--extractor-args'))) {
-  // 🚨 CRITICAL FIX: Use the official solution from GitHub issue #13930, PR #14081
-  // This fixes "The following content is not available on this app" error
-  enhancedArgs.push('--extractor-args', 'youtube:player_client=default,tv_simply,web,android;bypass_native_jsi;formats=all');
-  console.log('[YT-DLP-SECURE] 🔧 Added OFFICIAL FIX multi-client extractor args (GitHub issue #13930)');
+  // 🚨 CRITICAL FIX: Use single client approach to avoid cookie conflicts
+  // Based on GitHub issue #13930 analysis - separate cookie-supporting from non-cookie clients
+  if (options.useCookies === false || options.skipCookies) {
+   // For clients that don't support cookies (tv_simply, android, tv_embedded)
+   enhancedArgs.push('--extractor-args', 'youtube:player_client=tv_simply;bypass_native_jsi');
+   console.log('[YT-DLP-SECURE] 🔧 Added TV_SIMPLY client (no cookies) - GitHub issue #13930 fix');
+  } else {
+   // For clients that support cookies (default, web)
+   enhancedArgs.push('--extractor-args', 'youtube:player_client=default;bypass_native_jsi');
+   console.log('[YT-DLP-SECURE] 🔧 Added DEFAULT client (with cookies) - GitHub issue #13930 fix');
+  }
  }
 
  console.log('[YT-DLP-SECURE] 📋 Execution summary:');
