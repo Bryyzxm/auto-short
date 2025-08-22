@@ -68,26 +68,54 @@ class OfficialYtDlpFixService {
    skipDownload: true,
    output: outputPath,
 
-   // OFFICIAL FIX: Updated client configurations
-   // This addresses the "content not available on this app" error
-   extractorArgs: 'youtube:player_client=default',
+   // 🚨 CRITICAL FIX: Latest configuration from GitHub issue #13930
+   // Fixed by PR #14081: https://github.com/yt-dlp/yt-dlp/pull/14081
+   // Use multiple client strategies as fallbacks - EXACTLY as specified in the fix
+   extractorArgs: 'youtube:player_client=default,tv_simply,web,android;bypass_native_jsi;formats=all',
 
-   // Network and retry settings
-   retries: 3,
+   // Enhanced network and retry settings for Azure
+   retries: 8, // Increased from 3
    fragmentRetries: 5,
-   extractorRetries: 3,
-   socketTimeout: 30,
+   extractorRetries: 5, // Increased from 3
+   socketTimeout: 60, // Increased from 30
+
+   // Force IPv4 to avoid Azure networking issues
+   forceIpv4: true,
 
    // Anti-detection measures (official recommendations)
-   userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+   userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+
+   // Enhanced headers for better compatibility
+   addHeader: [
+    'Accept-Language: en-US,en;q=0.9,id;q=0.8,*;q=0.7',
+    'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+    'Accept-Encoding: gzip, deflate, br',
+    'Cache-Control: no-cache',
+    'Pragma: no-cache',
+    'Sec-Fetch-Dest: document',
+    'Sec-Fetch-Mode: navigate',
+    'Sec-Fetch-Site: none',
+    'Upgrade-Insecure-Requests: 1',
+   ],
+
    geoBypass: true,
    geoBypassCountry: 'US',
    noCheckCertificate: true,
+   noCallHome: true,
+   noCheckExtensions: true,
 
-   // Performance optimizations
-   sleepInterval: 1,
-   maxSleepInterval: 5,
-   sleepSubtitles: 1,
+   // Performance optimizations for Azure
+   sleepInterval: 2, // Increased from 1
+   maxSleepInterval: 8, // Increased from 5
+   sleepSubtitles: 2, // Increased from 1
+   sleepRequests: 1,
+
+   // Concurrent settings optimized for Azure
+   concurrentFragments: 3,
+   keepFragments: true,
+   maxDownloads: 1,
+   progressDelta: 5,
+   noColor: true,
   };
 
   // Add cookies if available

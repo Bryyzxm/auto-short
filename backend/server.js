@@ -29,6 +29,7 @@ class AzureEnvironmentManager {
  constructor() {
   this.isAzure = this.detectAzureEnvironment();
   this.azureConfig = this.getAzureConfiguration();
+  this.ytdlpConfig = this.getYtdlpConfiguration();
   this.logEnvironmentInfo();
  }
 
@@ -100,6 +101,115 @@ class AzureEnvironmentManager {
   config.paths.cookies = this.getOptimalCookiesPath(config);
 
   return config;
+ }
+
+ /**
+  * Get yt-dlp configuration for Azure environment with latest fixes
+  */
+ getYtdlpConfiguration() {
+  console.log('[AZURE-YTDLP] 🔧 Configuring yt-dlp for Azure environment...');
+  
+  // Critical: Based on GitHub issue #13930 - fixed by #14081
+  const config = {
+   // Force update to latest version that includes the fix
+   updateOptions: {
+    updateToMaster: true,
+    forceUpdate: true
+   },
+   
+   // Extractor arguments - CRITICAL FIX for "content not available on this app"
+   extractorArgs: {
+    youtube: [
+     // Use multiple clients as fallbacks - critical for Azure environment
+     'player-client=default,tv_simply,web,android',
+     
+     // Bypass native JSI to avoid bot detection
+     'bypass_native_jsi',
+     
+     // Enable all available formats including those requiring PO tokens
+     'formats=all',
+     
+     // Disable problematic clients that trigger "content not available"
+     'exclude=tv_embedded',
+     
+     // Force IPv4 to avoid Azure networking issues
+     'force_ipv4',
+     
+     // Skip problematic verification steps
+     'skip_verification'
+    ]
+   },
+   
+   // Rate limiting and retry configuration for Azure
+   rateLimit: {
+    maxRetries: 5,
+    retryInterval: 2000,
+    backoffMultiplier: 1.5,
+    maxBackoffTime: 30000
+   },
+   
+   // Network configuration optimized for Azure
+   network: {
+    timeout: 60000,
+    connectTimeout: 30000,
+    readTimeout: 45000,
+    maxRedirects: 10,
+    userAgent: this.getRotatingUserAgent()
+   },
+   
+   // Azure-specific paths
+   paths: {
+    binary: this.getYtdlpBinaryPath(),
+    cookies: this.azureConfig.paths.cookies,
+    tempDir: this.azureConfig.paths.temp,
+    cacheDir: path.join(this.azureConfig.paths.temp, 'yt-dlp-cache')
+   },
+   
+   // Output configuration
+   output: {
+    format: 'best[height<=1080]',
+    extractAudio: true,
+    audioFormat: 'mp3',
+    noVideoDownload: true // We only need transcripts
+   }
+  };
+  
+  console.log('[AZURE-YTDLP] ✅ yt-dlp configuration completed');
+  return config;
+ }
+
+ /**
+  * Get rotating user agent to avoid detection
+  */
+ getRotatingUserAgent() {
+  const userAgents = [
+   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+   'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+   'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0'
+  ];
+  
+  const index = Math.floor(Math.random() * userAgents.length);
+  return userAgents[index];
+ }
+
+ /**
+  * Get yt-dlp binary path for Azure
+  */
+ getYtdlpBinaryPath() {
+  if (this.isAzure) {
+   // Azure App Service binary locations
+   const candidatePaths = [
+    '/usr/local/bin/yt-dlp',
+    '/usr/bin/yt-dlp',
+    '/opt/python/bin/yt-dlp',
+    path.join(this.azureConfig.paths.home, 'node_modules/.bin/yt-dlp'),
+    'yt-dlp' // Use PATH
+   ];
+   return candidatePaths;
+  }
+  
+  return 'yt-dlp'; // Local development
  }
 
  /**
@@ -2893,7 +3003,11 @@ async function checkVideoFormats(id, youtubeUrl) {
 
 // Build yt-dlp arguments for video download
 function buildYtDlpArgs(tempFile, youtubeUrl) {
- return [
+ console.log('[YT-DLP-ARGS] 🔧 Building yt-dlp arguments with Azure optimizations...');
+ 
+ // CRITICAL FIX: Based on GitHub issue #13930 - fixed by #14081
+ // Use the new extractor configuration to solve "content not available on this app"
+ const baseArgs = [
   '-f',
   'bestvideo[height>=720][vcodec^=avc1]+bestaudio[acodec^=mp4a]/' +
    'bestvideo[height>=720][ext=mp4]+bestaudio[ext=m4a]/' +
@@ -2914,23 +3028,96 @@ function buildYtDlpArgs(tempFile, youtubeUrl) {
   'mp4',
   '--user-agent',
   getRandomUserAgent(),
+  
+  // =============================================
+  // 🚨 CRITICAL FIX FOR "CONTENT NOT AVAILABLE"
+  // =============================================
+  // Use multiple client strategies as fallbacks
   '--extractor-args',
-  'youtube:player_client=web,android,ios',
+  'youtube:player_client=default,tv_simply,web,android;bypass_native_jsi;formats=all',
+  
+  // Enhanced retry configuration for Azure
   '--retries',
-  '5',
+  '8', // Increased from 5
   '--socket-timeout',
-  '45',
+  '60', // Increased from 45
   '--fragment-retries',
-  '3',
+  '5', // Increased from 3
+  
+  // Enhanced headers for better compatibility
   '--add-header',
-  'Accept-Language: en-US,en;q=0.9,id;q=0.8',
+  'Accept-Language: en-US,en;q=0.9,id;q=0.8,*;q=0.7',
   '--add-header',
   'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+  '--add-header',
+  'Accept-Encoding: gzip, deflate, br',
+  '--add-header',
+  'Cache-Control: no-cache',
+  '--add-header',
+  'Pragma: no-cache',
+  '--add-header',
+  'Sec-Fetch-Dest: document',
+  '--add-header',
+  'Sec-Fetch-Mode: navigate',
+  '--add-header',
+  'Sec-Fetch-Site: none',
+  '--add-header',
+  'Upgrade-Insecure-Requests: 1',
+  
+  // Azure-specific network optimizations
+  '--concurrent-fragments',
+  '3',
+  '--keep-fragments',
+  '--max-downloads',
+  '1',
+  
+  // Force IPv4 to avoid Azure networking issues
+  '--force-ipv4',
+  
+  // Disable problematic features that trigger bot detection
   '--no-check-certificate',
+  '--no-call-home',
+  '--no-check-extensions',
+  
+  // Output configuration
   '-o',
   tempFile,
   youtubeUrl,
  ];
+
+ // Add Azure-specific configurations
+ if (azureEnv.isAzure) {
+  console.log('[YT-DLP-ARGS] 🌐 Adding Azure-specific configurations...');
+  
+  // Add Azure optimizations
+  const azureArgs = [
+   '--sleep-requests', '1', // Add delay between requests
+   '--sleep-interval', '2', // Sleep between fragment downloads
+   '--max-sleep-interval', '5', // Maximum sleep interval
+   '--no-color', // Disable colored output
+   '--progress-delta', '5', // Reduce progress updates
+  ];
+  
+  // Insert Azure args before output and URL
+  const insertIndex = baseArgs.length - 2; // Before -o and URL
+  baseArgs.splice(insertIndex, 0, ...azureArgs);
+  
+  console.log('[YT-DLP-ARGS] ✅ Azure configurations added');
+ }
+ 
+ // Log the configuration for debugging
+ console.log('[YT-DLP-ARGS] 📋 Final arguments count:', baseArgs.length);
+ console.log('[YT-DLP-ARGS] 🔍 Key configurations:');
+ console.log('[YT-DLP-ARGS]   - Multiple client fallbacks: default,tv_simply,web,android');
+ console.log('[YT-DLP-ARGS]   - Bypass native JSI: enabled');
+ console.log('[YT-DLP-ARGS]   - All formats: enabled');
+ console.log('[YT-DLP-ARGS]   - Enhanced retries: 8 attempts');
+ console.log('[YT-DLP-ARGS]   - Socket timeout: 60s');
+ console.log('[YT-DLP-ARGS]   - Fragment retries: 5 attempts');
+ console.log('[YT-DLP-ARGS]   - Force IPv4: enabled');
+ console.log('[YT-DLP-ARGS]   - Azure optimizations:', azureEnv.isAzure ? 'enabled' : 'disabled');
+ 
+ return baseArgs;
 }
 
 // Handle yt-dlp download errors with user-friendly messages

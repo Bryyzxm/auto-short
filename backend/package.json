@@ -3,7 +3,7 @@
  "version": "1.0.0",
  "main": "server.js",
  "scripts": {
-  "prestart": "chmod +x node_modules/yt-dlp-exec/bin/yt-dlp 2>/dev/null || true",
+  "prestart": "chmod +x node_modules/yt-dlp-exec/bin/yt-dlp 2>/dev/null || true && node scripts/azure-startup-fix.js",
   "start": "export PATH=\"$PATH:$(pwd)/node_modules/.bin\" && node server.js",
   "dev": "NODE_ENV=development nodemon server.js",
   "verify-ytdlp": "yt-dlp --version && echo '✅ yt-dlp verified' || echo '❌ yt-dlp verification failed'",
@@ -17,7 +17,9 @@
   "cookie-status": "node cookie-refresh-utility.js",
   "cookie-refresh": "node cookie-refresh-utility.js --instructions",
   "cookie-backup": "node cookie-refresh-utility.js --backup",
-  "test-bot-detection": "node enhanced-bot-detection-test.js"
+  "test-bot-detection": "node enhanced-bot-detection-test.js",
+  "azure-fix": "node scripts/azure-startup-fix.js",
+  "azure-test": "node scripts/azure-startup-fix.js && yt-dlp --list-formats --extractor-args 'youtube:player_client=default,tv_simply,web,android;bypass_native_jsi' https://www.youtube.com/watch?v=dQw4w9WgXcQ"
  },
  "dependencies": {
   "axios": "^1.11.0",
