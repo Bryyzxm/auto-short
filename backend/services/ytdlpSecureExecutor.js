@@ -89,9 +89,11 @@ function buildEnhancedArgs(normalizedArgs, options) {
   '--force-ipv4',
  ];
 
- // Add multi-client support
+ // Add multi-client support with OFFICIAL FIX from GitHub issue #13930
  if (!enhancedArgs.some((arg) => arg.includes('--extractor-args'))) {
-  enhancedArgs.push('--extractor-args', 'youtube:player_client=android,web,tv,ios;innertube_host=youtubei.googleapis.com');
+  // 🚨 CRITICAL FIX: Use the official solution from PR #14081
+  // This fixes "The following content is not available on this app" error
+  enhancedArgs.push('--extractor-args', 'youtube:player_client=default,tv_simply,web,android;bypass_native_jsi;formats=all');
  }
 
  console.log('[YT-DLP-SECURE] 🛡️ Enhanced arguments built with Azure optimizations');
@@ -204,10 +206,12 @@ async function executeYtDlpSecurelyCore(args, options = {}) {
   console.log('[YT-DLP-SECURE] 🚫 Cookies explicitly disabled for this execution');
  }
 
- // Add multi-client support for better reliability
+ // Add multi-client support for better reliability with OFFICIAL FIX
  if (!enhancedArgs.some((arg) => arg.includes('--extractor-args'))) {
-  enhancedArgs.push('--extractor-args', 'youtube:player_client=android,web,tv,ios;innertube_host=youtubei.googleapis.com');
-  console.log('[YT-DLP-SECURE] 🔧 Added optimized multi-client extractor args');
+  // 🚨 CRITICAL FIX: Use the official solution from GitHub issue #13930, PR #14081
+  // This fixes "The following content is not available on this app" error
+  enhancedArgs.push('--extractor-args', 'youtube:player_client=default,tv_simply,web,android;bypass_native_jsi;formats=all');
+  console.log('[YT-DLP-SECURE] 🔧 Added OFFICIAL FIX multi-client extractor args (GitHub issue #13930)');
  }
 
  console.log('[YT-DLP-SECURE] 📋 Execution summary:');

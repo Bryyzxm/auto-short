@@ -19,41 +19,43 @@ class BotDetectionBypass {
   ];
 
   this.extractorConfigs = [
-   // Configuration 1: Mobile-first approach
+   // Configuration 1: OFFICIAL FIX - Use as primary strategy
    {
-    name: 'mobile-android',
-    clients: 'android',
-    userAgent: 'com.google.android.youtube/19.50.37 (Linux; U; Android 14; SM-G998B Build/UP1A.231005.007) gzip',
-    extraArgs: ['--extractor-args', 'youtube:player_client=android;innertube_host=youtubei.googleapis.com'],
+    name: 'official-fix-primary',
+    clients: 'default,tv_simply,web,android',
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    // 🚨 CRITICAL FIX: Use the official solution from GitHub issue #13930, PR #14081
+    extraArgs: ['--extractor-args', 'youtube:player_client=default,tv_simply,web,android;bypass_native_jsi;formats=all'],
    },
-   // Configuration 2: iOS approach
+   // Configuration 2: TV Simply only (known to work)
    {
-    name: 'mobile-ios',
-    clients: 'ios',
-    userAgent: 'com.google.ios.youtube/19.50.7 (iPhone16,2; U; CPU iOS 18_2 like Mac OS X)',
-    extraArgs: ['--extractor-args', 'youtube:player_client=ios;innertube_host=youtubei.googleapis.com'],
+    name: 'tv-simply-only',
+    clients: 'tv_simply',
+    userAgent: 'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version TV Safari/537.36',
+    extraArgs: ['--extractor-args', 'youtube:player_client=tv_simply;bypass_native_jsi'],
    },
-   // Configuration 3: Desktop web without cookies
+   // Configuration 3: Default client only
    {
-    name: 'web-no-cookies',
+    name: 'default-only',
+    clients: 'default',
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    extraArgs: ['--extractor-args', 'youtube:player_client=default;bypass_native_jsi;formats=all'],
+   },
+   // Configuration 4: Web client fallback
+   {
+    name: 'web-fallback',
     clients: 'web',
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-    extraArgs: ['--extractor-args', 'youtube:player_client=web;innertube_host=youtubei.googleapis.com'],
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    extraArgs: ['--extractor-args', 'youtube:player_client=web;bypass_native_jsi'],
     skipCookies: true,
    },
-   // Configuration 4: TV client fallback
+   // Configuration 5: Android fallback (without iOS to avoid cookie issues)
    {
-    name: 'tv-fallback',
-    clients: 'tv',
-    userAgent: 'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/40.13031.2 (unlike Gecko) v8/9.7.230.20 TV Safari/537.36',
-    extraArgs: ['--extractor-args', 'youtube:player_client=tv;innertube_host=youtubei.googleapis.com'],
-   },
-   // Configuration 5: All clients as last resort
-   {
-    name: 'all-clients',
-    clients: 'android,web,tv,ios',
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-    extraArgs: ['--extractor-args', 'youtube:player_client=android,web,tv,ios;innertube_host=youtubei.googleapis.com'],
+    name: 'android-fallback',
+    clients: 'android',
+    userAgent: 'com.google.android.youtube/19.50.37 (Linux; U; Android 14; SM-G998B Build/UP1A.231005.007) gzip',
+    extraArgs: ['--extractor-args', 'youtube:player_client=android;bypass_native_jsi'],
+    skipCookies: true, // Android and iOS don't support cookies in current yt-dlp
    },
   ];
 
