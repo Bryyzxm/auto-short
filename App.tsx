@@ -251,11 +251,14 @@ const App: React.FC = () => {
   }
  };
 
- // Fetch intelligent segments with real timing
+ // Fetch intelligent segments with real timing and enhanced Indonesian support
  const fetchIntelligentSegments = async (videoId: string, targetCount: number = 8): Promise<ShortVideo[]> => {
-  console.log(`[APP] Fetching intelligent segments for ${videoId}`);
+  console.log(`[APP] Fetching intelligent segments for ${videoId} with Indonesian priority`);
 
   try {
+   const controller = new AbortController();
+   const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+
    const response = await fetch(`${BACKEND_URL}/api/intelligent-segments`, {
     method: 'POST',
     headers: {
@@ -264,8 +267,12 @@ const App: React.FC = () => {
     body: JSON.stringify({
      videoId: videoId,
      targetSegmentCount: targetCount,
+     prioritizeIndonesian: true, // NEW: Request Indonesian content priority
     }),
+    signal: controller.signal,
    });
+
+   clearTimeout(timeoutId);
 
    if (!response.ok) {
     // Try to get specific error message from backend
@@ -273,15 +280,31 @@ const App: React.FC = () => {
      const errorData = await response.json();
      if (errorData.error) {
       console.log(`[APP] Intelligent segments error: ${errorData.error}`);
+
+      // Handle Indonesian-specific error messages
+      if (errorData.indonesianFriendly) {
+       throw new Error(errorData.message); // Use Indonesian-friendly message
+      }
+
+      // Handle specific error types with appropriate Indonesian messages
+      if (errorData.errorType === 'transcript_disabled') {
+       throw new Error('Transkrip dinonaktifkan oleh pemilik video. Silakan coba video lain atau gunakan fitur upload manual.');
+      }
+
+      if (errorData.errorType === 'temporary_failure') {
+       throw new Error('Layanan sementara tidak tersedia. Silakan coba lagi dalam beberapa menit.');
+      }
+
       // Propagate specific backend errors like NoValidTranscriptError
       if (errorData.error.includes('A valid transcript is not available for this video')) {
-       throw new Error(errorData.error);
+       throw new Error('Transkrip tidak tersedia untuk video ini. Video mungkin tidak memiliki subtitle Indonesia.');
       }
      }
     } catch (parseError) {
      // JSON parsing failed, use generic error
     }
-    throw new Error(`Intelligent segments API failed: ${response.status}`);
+
+    throw new Error(`API gagal merespons: ${response.status}. Silakan coba lagi.`);
    }
 
    const data = await response.json();
@@ -289,10 +312,15 @@ const App: React.FC = () => {
    if (data.segments && data.segments.length > 0) {
     console.log(`[APP] ✅ Got ${data.segments.length} intelligent segments (avg: ${data.averageDuration}s, quality: ${data.transcriptQuality})`);
 
+    // Log Indonesian content detection
+    if (data.language === 'indonesian' || data.method?.includes('indonesian')) {
+     console.log(`[APP] 🇮🇩 Indonesian content successfully processed using: ${data.method}`);
+    }
+
     return data.segments.map((segment: any, index: number) => ({
      id: segment.id,
      title: segment.title || `Segment ${index + 1}`,
-     description: segment.description || `Smart segment with ${segment.duration}s duration`,
+     description: segment.description || `Segmen cerdas dengan durasi ${segment.duration}s`,
      startTimeSeconds: segment.startTimeSeconds,
      endTimeSeconds: segment.endTimeSeconds,
      youtubeVideoId: videoId,
@@ -302,10 +330,16 @@ const App: React.FC = () => {
      duration: segment.duration,
     }));
    } else {
-    throw new Error('No intelligent segments returned');
+    throw new Error('Tidak ada segmen yang berhasil dibuat. Video mungkin terlalu pendek atau tidak memiliki konten yang sesuai.');
    }
-  } catch (error) {
+  } catch (error: any) {
    console.error(`[APP] Intelligent segments failed for ${videoId}:`, error);
+
+   // Enhanced error handling for timeout
+   if (error.name === 'AbortError') {
+    throw new Error('Permintaan timeout. Server mungkin sedang sibuk, silakan coba lagi.');
+   }
+
    throw error;
   }
  };
@@ -487,12 +521,12 @@ const App: React.FC = () => {
    setCurrentVideoId(videoId);
 
    try {
-    console.log(`[APP] ✅ NEW APPROACH: Using intelligent segments with real timing for ${videoId}`);
+    console.log(`[APP] ✅ NEW APPROACH: Using intelligent segments with Indonesian priority for ${videoId}`);
 
     // Get target segment count based on aspect ratio or default
     const targetSegmentCount = aspectRatio === '16:9' ? 10 : 8;
 
-    // Use NEW intelligent segmentation API
+    // Use NEW intelligent segmentation API with enhanced error handling
     const intelligentSegments = await fetchIntelligentSegments(videoId, targetSegmentCount);
 
     console.log(`[APP] ✅ Intelligent segmentation complete: ${intelligentSegments.length} segments`);
@@ -510,13 +544,33 @@ const App: React.FC = () => {
    } catch (intelligentError: any) {
     console.error(`[APP] ❌ Intelligent segmentation failed:`, intelligentError);
 
-    // Check for specific error types
+    // Check for specific error types with Indonesian-friendly messages
     const errorMessage = intelligentError?.message || String(intelligentError);
 
-    // Check for NoValidTranscriptError - don't fallback, show manual upload immediately
-    if (errorMessage.includes('A valid transcript is not available for this video')) {
+    // Check for transcript unavailable errors
+    if (errorMessage.includes('Transkrip tidak tersedia') || errorMessage.includes('tidak memiliki subtitle') || errorMessage.includes('A valid transcript is not available for this video')) {
      console.log(`[APP] 🚨 NoValidTranscriptError from intelligent segments - showing manual upload`);
-     setError('Maaf, transkrip otomatis tidak tersedia untuk video ini. Silakan coba video lain atau unggah file transkrip secara manual.');
+     setError('Transkrip otomatis tidak tersedia untuk video ini. Silakan coba video lain atau unggah file transkrip secara manual.');
+     setCurrentVideoId(videoId);
+     setShowTranscriptUpload(true);
+     setIsLoading(false);
+     return;
+    }
+
+    // Check for transcript disabled errors
+    if (errorMessage.includes('dinonaktifkan oleh pemilik') || errorMessage.includes('disabled')) {
+     console.log(`[APP] 🚨 Transcript disabled error`);
+     setError('Transkrip dinonaktifkan oleh pemilik video. Silakan coba video lain atau gunakan fitur upload manual.');
+     setCurrentVideoId(videoId);
+     setShowTranscriptUpload(true);
+     setIsLoading(false);
+     return;
+    }
+
+    // Check for temporary service errors
+    if (errorMessage.includes('sementara tidak tersedia') || errorMessage.includes('timeout')) {
+     console.log(`[APP] 🚨 Temporary service error`);
+     setError('Layanan sementara tidak tersedia. Silakan coba lagi dalam beberapa menit atau gunakan fitur upload manual.');
      setCurrentVideoId(videoId);
      setShowTranscriptUpload(true);
      setIsLoading(false);
@@ -526,7 +580,7 @@ const App: React.FC = () => {
     // Other specific error messages for better user experience
     if (errorMessage.includes('Real timing data required')) {
      console.log(`[APP] 🔄 Falling back to legacy AI method due to timing issues...`);
-    } else if (errorMessage.includes('No intelligent segments returned')) {
+    } else if (errorMessage.includes('No intelligent segments returned') || errorMessage.includes('Tidak ada segmen')) {
      console.log(`[APP] 🔄 No intelligent segments found, falling back to legacy method...`);
     } else {
      console.log(`[APP] 🔄 Falling back to legacy AI method due to: ${errorMessage}`);

@@ -108,72 +108,72 @@ class AzureEnvironmentManager {
   */
  getYtdlpConfiguration() {
   console.log('[AZURE-YTDLP] 🔧 Configuring yt-dlp for Azure environment...');
-  
+
   // Critical: Based on GitHub issue #13930 - fixed by #14081
   const config = {
    // Force update to latest version that includes the fix
    updateOptions: {
     updateToMaster: true,
-    forceUpdate: true
+    forceUpdate: true,
    },
-   
+
    // Extractor arguments - CRITICAL FIX for "content not available on this app"
    extractorArgs: {
     youtube: [
      // Use multiple clients as fallbacks - critical for Azure environment
      'player-client=default,tv_simply,web,android',
-     
+
      // Bypass native JSI to avoid bot detection
      'bypass_native_jsi',
-     
+
      // Enable all available formats including those requiring PO tokens
      'formats=all',
-     
+
      // Disable problematic clients that trigger "content not available"
      'exclude=tv_embedded',
-     
+
      // Force IPv4 to avoid Azure networking issues
      'force_ipv4',
-     
+
      // Skip problematic verification steps
-     'skip_verification'
-    ]
+     'skip_verification',
+    ],
    },
-   
+
    // Rate limiting and retry configuration for Azure
    rateLimit: {
     maxRetries: 5,
     retryInterval: 2000,
     backoffMultiplier: 1.5,
-    maxBackoffTime: 30000
+    maxBackoffTime: 30000,
    },
-   
+
    // Network configuration optimized for Azure
    network: {
     timeout: 60000,
     connectTimeout: 30000,
     readTimeout: 45000,
     maxRedirects: 10,
-    userAgent: this.getRotatingUserAgent()
+    userAgent: this.getRotatingUserAgent(),
    },
-   
+
    // Azure-specific paths
    paths: {
     binary: this.getYtdlpBinaryPath(),
     cookies: this.azureConfig.paths.cookies,
     tempDir: this.azureConfig.paths.temp,
-    cacheDir: path.join(this.azureConfig.paths.temp, 'yt-dlp-cache')
+    cacheDir: path.join(this.azureConfig.paths.temp, 'yt-dlp-cache'),
    },
-   
+
    // Output configuration
    output: {
     format: 'best[height<=1080]',
     extractAudio: true,
     audioFormat: 'mp3',
-    noVideoDownload: true // We only need transcripts
-   }
+    noVideoDownload: true, // We only need transcripts
+   },
   };
-  
+
   console.log('[AZURE-YTDLP] ✅ yt-dlp configuration completed');
   return config;
  }
@@ -186,9 +186,9 @@ class AzureEnvironmentManager {
    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-   'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0'
+   'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0',
   ];
-  
+
   const index = Math.floor(Math.random() * userAgents.length);
   return userAgents[index];
  }
@@ -204,11 +204,11 @@ class AzureEnvironmentManager {
     '/usr/bin/yt-dlp',
     '/opt/python/bin/yt-dlp',
     path.join(this.azureConfig.paths.home, 'node_modules/.bin/yt-dlp'),
-    'yt-dlp' // Use PATH
+    'yt-dlp', // Use PATH
    ];
    return candidatePaths;
   }
-  
+
   return 'yt-dlp'; // Local development
  }
 
@@ -3004,7 +3004,7 @@ async function checkVideoFormats(id, youtubeUrl) {
 // Build yt-dlp arguments for video download
 function buildYtDlpArgs(tempFile, youtubeUrl) {
  console.log('[YT-DLP-ARGS] 🔧 Building yt-dlp arguments with Azure optimizations...');
- 
+
  // CRITICAL FIX: Based on GitHub issue #13930 - fixed by #14081
  // Use the new extractor configuration to solve "content not available on this app"
  const baseArgs = [
@@ -3028,14 +3028,14 @@ function buildYtDlpArgs(tempFile, youtubeUrl) {
   'mp4',
   '--user-agent',
   getRandomUserAgent(),
-  
+
   // =============================================
   // 🚨 CRITICAL FIX FOR "CONTENT NOT AVAILABLE"
   // =============================================
   // Use multiple client strategies as fallbacks
   '--extractor-args',
   'youtube:player_client=default,tv_simply,web,android;bypass_native_jsi;formats=all',
-  
+
   // Enhanced retry configuration for Azure
   '--retries',
   '8', // Increased from 5
@@ -3043,7 +3043,7 @@ function buildYtDlpArgs(tempFile, youtubeUrl) {
   '60', // Increased from 45
   '--fragment-retries',
   '5', // Increased from 3
-  
+
   // Enhanced headers for better compatibility
   '--add-header',
   'Accept-Language: en-US,en;q=0.9,id;q=0.8,*;q=0.7',
@@ -3063,22 +3063,22 @@ function buildYtDlpArgs(tempFile, youtubeUrl) {
   'Sec-Fetch-Site: none',
   '--add-header',
   'Upgrade-Insecure-Requests: 1',
-  
+
   // Azure-specific network optimizations
   '--concurrent-fragments',
   '3',
   '--keep-fragments',
   '--max-downloads',
   '1',
-  
+
   // Force IPv4 to avoid Azure networking issues
   '--force-ipv4',
-  
+
   // Disable problematic features that trigger bot detection
   '--no-check-certificate',
   '--no-call-home',
   '--no-check-extensions',
-  
+
   // Output configuration
   '-o',
   tempFile,
@@ -3088,23 +3088,27 @@ function buildYtDlpArgs(tempFile, youtubeUrl) {
  // Add Azure-specific configurations
  if (azureEnv.isAzure) {
   console.log('[YT-DLP-ARGS] 🌐 Adding Azure-specific configurations...');
-  
+
   // Add Azure optimizations
   const azureArgs = [
-   '--sleep-requests', '1', // Add delay between requests
-   '--sleep-interval', '2', // Sleep between fragment downloads
-   '--max-sleep-interval', '5', // Maximum sleep interval
+   '--sleep-requests',
+   '1', // Add delay between requests
+   '--sleep-interval',
+   '2', // Sleep between fragment downloads
+   '--max-sleep-interval',
+   '5', // Maximum sleep interval
    '--no-color', // Disable colored output
-   '--progress-delta', '5', // Reduce progress updates
+   '--progress-delta',
+   '5', // Reduce progress updates
   ];
-  
+
   // Insert Azure args before output and URL
   const insertIndex = baseArgs.length - 2; // Before -o and URL
   baseArgs.splice(insertIndex, 0, ...azureArgs);
-  
+
   console.log('[YT-DLP-ARGS] ✅ Azure configurations added');
  }
- 
+
  // Log the configuration for debugging
  console.log('[YT-DLP-ARGS] 📋 Final arguments count:', baseArgs.length);
  console.log('[YT-DLP-ARGS] 🔍 Key configurations:');
@@ -3116,7 +3120,7 @@ function buildYtDlpArgs(tempFile, youtubeUrl) {
  console.log('[YT-DLP-ARGS]   - Fragment retries: 5 attempts');
  console.log('[YT-DLP-ARGS]   - Force IPv4: enabled');
  console.log('[YT-DLP-ARGS]   - Azure optimizations:', azureEnv.isAzure ? 'enabled' : 'disabled');
- 
+
  return baseArgs;
 }
 
@@ -4534,35 +4538,72 @@ app.post('/api/intelligent-segments', async (req, res) => {
  try {
   console.log(`[INTELLIGENT-SEGMENTS] 🚀 Starting enhanced AI segmentation for ${videoId}`);
 
-  // Step 1: Get transcript with real timing using enhanced orchestrator
+  // Step 1: Get transcript with real timing using enhanced orchestrator with Indonesian priority
   let transcriptData;
   try {
+   console.log(`[INTELLIGENT-SEGMENTS] 🎯 Extracting transcript with Indonesian language priority for ${videoId}`);
+
    transcriptData = await enhancedTranscriptOrchestrator.extract(videoId, {
-    lang: ['id', 'en'],
+    lang: ['id', 'en'], // Prioritize Indonesian first
+    forceIndonesian: true, // NEW: Force Indonesian extraction when possible
+    retryOnFailure: true, // NEW: Enable retry logic
+    maxRetries: 3, // NEW: Maximum retry attempts
    });
+
+   console.log(`[INTELLIGENT-SEGMENTS] ✅ Transcript extraction successful: ${transcriptData.segments.length} segments, ${transcriptData.language || 'unknown'} language`);
   } catch (transcriptError) {
    console.error(`[INTELLIGENT-SEGMENTS] ❌ Transcript extraction failed for ${videoId}:`, transcriptError);
 
-   // Check if it's a transcript disabled error
+   // ENHANCED: More specific error handling for Indonesian content
    if (transcriptError.message && transcriptError.message.includes('disabled')) {
+    console.log(`[INTELLIGENT-SEGMENTS] 🚨 Transcript disabled by owner for ${videoId}`);
     return res.status(404).json({
      error: 'TRANSCRIPT_DISABLED',
-     message: 'Transcript is disabled by the video owner.',
+     message: 'Transkrip dinonaktifkan oleh pemilik video. Silakan coba video lain atau gunakan fitur upload manual.',
      videoId: videoId,
      userFriendly: true,
      errorType: 'transcript_disabled',
+     indonesianFriendly: true,
     });
    }
 
-   // Generic transcript error
-   return res.status(404).json({
-    error: 'TRANSCRIPT_NOT_AVAILABLE',
-    message: 'Could not extract transcript for this video.',
-    videoId: videoId,
-    details: transcriptError.message,
-    userFriendly: true,
-    errorType: 'transcript_unavailable',
-   });
+   // Check for rate limiting or temporary failures
+   if (transcriptError.message && (transcriptError.message.includes('429') || transcriptError.message.includes('rate limit'))) {
+    console.log(`[INTELLIGENT-SEGMENTS] 🚨 Rate limiting detected for ${videoId}, trying emergency extraction`);
+
+    // Try emergency extraction for rate-limited cases
+    try {
+     const emergencyResult = await this.tryEmergencyIndonesianExtraction(videoId);
+     if (emergencyResult && emergencyResult.segments && emergencyResult.segments.length > 0) {
+      transcriptData = emergencyResult;
+      console.log(`[INTELLIGENT-SEGMENTS] ✅ Emergency extraction successful: ${transcriptData.segments.length} segments`);
+     } else {
+      throw new Error('Emergency extraction failed');
+     }
+    } catch (emergencyError) {
+     console.error(`[INTELLIGENT-SEGMENTS] ❌ Emergency extraction also failed:`, emergencyError);
+     return res.status(503).json({
+      error: 'TEMPORARY_UNAVAILABLE',
+      message: 'Layanan sementara tidak tersedia karena pembatasan. Silakan coba lagi dalam beberapa menit.',
+      videoId: videoId,
+      userFriendly: true,
+      errorType: 'temporary_failure',
+      indonesianFriendly: true,
+      retryAfter: 300, // 5 minutes
+     });
+    }
+   } else {
+    // Generic transcript error
+    return res.status(404).json({
+     error: 'TRANSCRIPT_NOT_AVAILABLE',
+     message: 'Tidak dapat mengekstrak transkrip untuk video ini. Video mungkin tidak memiliki subtitle Indonesia.',
+     videoId: videoId,
+     details: transcriptError.message,
+     userFriendly: true,
+     errorType: 'transcript_unavailable',
+     indonesianFriendly: true,
+    });
+   }
   }
 
   if (!transcriptData.hasRealTiming) {
@@ -4597,7 +4638,16 @@ app.post('/api/intelligent-segments', async (req, res) => {
      };
 
      console.log(`[INTELLIGENT-SEGMENTS] ✅ Enhanced AI created ${result.totalSegments} segments (avg: ${result.averageDuration}s, quality: ${result.qualityScore})`);
-     return res.json(result);
+
+     // ENHANCED: Ensure response is sent successfully before container termination
+     try {
+      res.status(200).json(result);
+      console.log(`[INTELLIGENT-SEGMENTS] 📤 Response sent successfully to frontend for ${videoId}`);
+      return;
+     } catch (responseError) {
+      console.error(`[INTELLIGENT-SEGMENTS] ❌ Failed to send response for ${videoId}:`, responseError);
+      throw responseError;
+     }
     }
    } catch (aiError) {
     console.warn(`[INTELLIGENT-SEGMENTS] ⚠️ Enhanced AI failed: ${aiError.message}, falling back to simple chunking`);
@@ -4651,7 +4701,15 @@ app.post('/api/intelligent-segments', async (req, res) => {
   };
 
   console.log(`[INTELLIGENT-SEGMENTS] ✅ Fallback created ${segments.length} segments (avg: ${result.averageDuration}s)`);
-  res.json(result);
+
+  // ENHANCED: Ensure response is sent successfully before container termination
+  try {
+   res.status(200).json(result);
+   console.log(`[INTELLIGENT-SEGMENTS] 📤 Fallback response sent successfully to frontend for ${videoId}`);
+  } catch (responseError) {
+   console.error(`[INTELLIGENT-SEGMENTS] ❌ Failed to send fallback response for ${videoId}:`, responseError);
+   throw responseError;
+  }
  } catch (error) {
   console.error(`[INTELLIGENT-SEGMENTS] ❌ Error for ${videoId}:`, error);
   res.status(500).json({
@@ -4661,6 +4719,147 @@ app.post('/api/intelligent-segments', async (req, res) => {
   });
  }
 });
+
+// ENHANCED: Emergency Indonesian transcript extraction method
+// Specifically designed for Indonesian content when primary extraction fails
+async function tryEmergencyIndonesianExtraction(videoId) {
+ console.log(`[EMERGENCY-ID] 🚨 Starting emergency Indonesian extraction for ${videoId}`);
+
+ try {
+  // Strategy 1: Direct VTT file extraction with Indonesian priority
+  const ytdlpResult = await ytdlpSecureExecutor.extractSecure(videoId, {
+   writeAutoSub: true,
+   subFormat: 'vtt',
+   subLang: 'id', // Indonesian only for emergency
+   skipDownload: true,
+   extractorArgs: {
+    youtube: 'player_client=default;bypass_native_jsi',
+   },
+  });
+
+  if (ytdlpResult && ytdlpResult.success) {
+   console.log(`[EMERGENCY-ID] ✅ Emergency yt-dlp extraction successful`);
+
+   // Parse VTT files for Indonesian content
+   const vttFiles = await findVTTFiles(videoId, ['id']);
+   if (vttFiles.length > 0) {
+    const segments = await parseVTTToSegments(vttFiles[0]);
+    if (segments && segments.length > 0) {
+     console.log(`[EMERGENCY-ID] ✅ Emergency Indonesian segments extracted: ${segments.length}`);
+
+     return {
+      segments: segments,
+      hasRealTiming: true,
+      totalDuration: Math.max(...segments.map((s) => s.end)),
+      language: 'indonesian',
+      method: 'emergency-indonesian-extraction',
+     };
+    }
+   }
+  }
+
+  // Strategy 2: Alternative transcript service with Indonesian focus
+  console.log(`[EMERGENCY-ID] 🔄 Trying alternative transcript service...`);
+  if (alternativeTranscriptService) {
+   const alternativeResult = await alternativeTranscriptService.getTranscript(videoId, 'id');
+
+   if (alternativeResult && alternativeResult.length > 0) {
+    console.log(`[EMERGENCY-ID] ✅ Alternative service extraction successful: ${alternativeResult.length} segments`);
+
+    return {
+     segments: alternativeResult,
+     hasRealTiming: true,
+     totalDuration: Math.max(...alternativeResult.map((s) => s.end)),
+     language: 'indonesian',
+     method: 'emergency-alternative-service',
+    };
+   }
+  }
+
+  throw new Error('All emergency extraction methods failed');
+ } catch (emergencyError) {
+  console.error(`[EMERGENCY-ID] ❌ Emergency Indonesian extraction failed:`, emergencyError);
+  return null;
+ }
+}
+
+// Helper function to find VTT files for specific languages
+async function findVTTFiles(videoId, languages) {
+ const fs = require('fs').promises;
+ const path = require('path');
+ const tempDir = path.join(__dirname, 'temp');
+
+ try {
+  const files = await fs.readdir(tempDir);
+  const vttFiles = files
+   .filter((file) => file.includes(videoId) && file.endsWith('.vtt'))
+   .filter((file) => languages.some((lang) => file.includes(`.${lang}.vtt`)))
+   .map((file) => path.join(tempDir, file));
+
+  console.log(`[VTT-FINDER] Found ${vttFiles.length} VTT files for ${videoId} in languages: ${languages.join(', ')}`);
+  return vttFiles;
+ } catch (error) {
+  console.error(`[VTT-FINDER] Error finding VTT files:`, error);
+  return [];
+ }
+}
+
+// Helper function to parse VTT files to transcript segments
+async function parseVTTToSegments(vttFilePath) {
+ const fs = require('fs').promises;
+
+ try {
+  const vttContent = await fs.readFile(vttFilePath, 'utf8');
+  const segments = [];
+
+  // Parse VTT format
+  const lines = vttContent.split('\n');
+  let currentSegment = null;
+
+  for (let i = 0; i < lines.length; i++) {
+   const line = lines[i].trim();
+
+   // Time code line format: 00:00:20.000 --> 00:00:25.000
+   if (line.includes(' --> ')) {
+    const [startStr, endStr] = line.split(' --> ');
+    const start = parseVTTTimestamp(startStr);
+    const end = parseVTTTimestamp(endStr);
+
+    currentSegment = {start, end, text: ''};
+   }
+   // Text line (not empty, not WEBVTT, not time code)
+   else if (line && !line.startsWith('WEBVTT') && !line.includes(' --> ') && currentSegment) {
+    currentSegment.text += (currentSegment.text ? ' ' : '') + line;
+   }
+   // Empty line indicates end of segment
+   else if (!line && currentSegment && currentSegment.text) {
+    segments.push(currentSegment);
+    currentSegment = null;
+   }
+  }
+
+  // Add final segment if exists
+  if (currentSegment && currentSegment.text) {
+   segments.push(currentSegment);
+  }
+
+  console.log(`[VTT-PARSER] Parsed ${segments.length} segments from VTT file`);
+  return segments;
+ } catch (error) {
+  console.error(`[VTT-PARSER] Error parsing VTT file:`, error);
+  return [];
+ }
+}
+
+// Helper function to parse VTT timestamp to seconds
+function parseVTTTimestamp(timestamp) {
+ const parts = timestamp.split(':');
+ const seconds = parts[parts.length - 1].replace(',', '.');
+ const minutes = parts[parts.length - 2] || '0';
+ const hours = parts[parts.length - 3] || '0';
+
+ return parseInt(hours) * 3600 + parseInt(minutes) * 60 + parseFloat(seconds);
+}
 
 // ===== ENHANCED MANUAL TRANSCRIPT UPLOAD ENDPOINT =====
 /**
