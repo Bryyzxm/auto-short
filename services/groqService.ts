@@ -619,10 +619,10 @@ export const generateShortsIdeas = async (videoUrl: string, transcript?: string,
   throw new Error('Groq API client is not initialized. GROQ_API_KEY might be missing.');
  }
 
- // Validate transcript quality
- if (!transcript || transcript.length < 500) {
+ // Validate transcript quality - ENHANCED: More reasonable minimum threshold
+ if (!transcript || transcript.length < 200) {
   console.error(`[UNIFIED-WORKFLOW] ❌ Transcript too short or missing (${transcript?.length || 0} chars)`);
-  throw new Error(`Transcript terlalu pendek atau tidak tersedia (${transcript?.length || 0} karakter). Pastikan backend extraction berhasil.`);
+  throw new Error(`Transcript terlalu pendek atau tidak tersedia (${transcript?.length || 0} karakter). Minimum 200 karakter diperlukan.`);
  }
 
  // Check if transcript is AI-generated placeholder

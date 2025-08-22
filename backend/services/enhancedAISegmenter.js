@@ -1666,55 +1666,54 @@ Return JSON format:
 
  /**
   * Analyze transcript specifically for viral moments and engaging content
+  * ENHANCED: Smart chunking to prevent rate limiting for large transcripts
   */
  async analyzeTranscriptForViralMoments(transcriptSegments) {
   await this.respectRateLimit();
 
-  // Sample content for analysis
-  const sampleText = this.sampleTranscriptForAnalysis(transcriptSegments, 2000);
+  // ENHANCED: Calculate total word count to determine chunking strategy
+  const totalWords = transcriptSegments.reduce((sum, segment) => sum + segment.text.split(' ').length, 0);
 
-  const prompt = `Analyze this transcript to identify VIRAL POTENTIAL and INTERESTING MOMENTS for short-form content.
+  // ENHANCED: Smart sampling based on transcript size to prevent rate limiting
+  let sampleText;
+  if (totalWords > 3000) {
+   // For very large transcripts (like the 2864 segments case), use strategic sampling
+   console.log(`[AI-SEGMENTER] 🔧 Very large transcript detected (${totalWords} words), using strategic sampling`);
+   sampleText = this.strategicSampleForAnalysis(transcriptSegments, 1200);
+  } else if (totalWords > 1500) {
+   console.log(`[AI-SEGMENTER] 🔧 Large transcript detected (${totalWords} words), using reduced sampling`);
+   sampleText = this.sampleTranscriptForAnalysis(transcriptSegments, 1500);
+  } else {
+   sampleText = this.sampleTranscriptForAnalysis(transcriptSegments, 2000);
+  }
 
-TRANSCRIPT SAMPLE:
+  // ENHANCED: Character limit safety check
+  if (sampleText.length > 6000) {
+   console.log(`[AI-SEGMENTER] ⚠️ Sample still too large (${sampleText.length} chars), truncating to prevent rate limiting`);
+   sampleText = sampleText.substring(0, 6000) + '...';
+  }
+
+  console.log(`[AI-SEGMENTER] 📊 Analyzing ${totalWords} words for viral content (${sampleText.length} chars after smart sampling)`);
+
+  // ENHANCED: Shorter, more focused prompt to reduce token usage
+  const prompt = `Analyze this transcript for viral moments. Find 2-3 key highlights that work for short videos.
+
+TRANSCRIPT:
 ${sampleText}
 
-Identify:
-1. Content type and style
-2. Language and tone
-3. VIRAL MOMENTS: timestamps or topics that would be most engaging for short videos
-4. KEY THEMES that audiences find compelling
-5. EMOTIONAL PEAKS: exciting, surprising, or valuable moments
-
-Focus on finding content that would make people:
-- Stop scrolling and watch
-- Share with friends
-- Leave comments
-- Learn something valuable
-
-OUTPUT FORMAT (JSON only):
+JSON format only:
 {
-  "contentType": "educational|entertainment|business|lifestyle|tech|other",
-  "language": "english|indonesian|other", 
-  "tone": "energetic|calm|educational|entertaining",
+  "contentType": "tech|business|educational|entertainment|other",
+  "language": "indonesian|english|other", 
   "viralMoments": [
-    {
-      "topic": "Brief description of interesting moment",
-      "reason": "Why this would be engaging",
-      "intensity": 1-10
-    }
+    {"topic": "brief description", "intensity": 1-10}
   ],
-  "keyThemes": ["theme1", "theme2"],
-  "emotionalPeaks": ["exciting_topic", "surprising_reveal"],
-  "engagementFactors": ["learning", "entertainment", "shock", "value"]
+  "keyThemes": ["theme1", "theme2"]
 }`;
 
   try {
    const completion = await this.groq.chat.completions.create({
     messages: [
-     {
-      role: 'system',
-      content: 'You are an expert viral content analyst. Focus on identifying moments that would engage short-form video audiences.',
-     },
      {
       role: 'user',
       content: prompt,
@@ -1722,12 +1721,14 @@ OUTPUT FORMAT (JSON only):
     ],
     model: 'llama3-70b-8192',
     temperature: 0.3,
-    max_tokens: 1000,
+    max_tokens: 600, // Reduced token limit to prevent rate limiting
     response_format: {type: 'json_object'},
    });
 
    const response = completion.choices[0]?.message?.content;
    const analysis = JSON.parse(response);
+
+   console.log(`[AI-SEGMENTER] ✅ Content analysis: ${analysis.contentType}, ${analysis.language}, ${analysis.viralMoments?.length || 0} viral moments`);
 
    return {
     contentType: analysis.contentType || 'unknown',
@@ -1736,7 +1737,7 @@ OUTPUT FORMAT (JSON only):
     viralMoments: analysis.viralMoments || [],
     keyThemes: analysis.keyThemes || [],
     emotionalPeaks: analysis.emotionalPeaks || [],
-    engagementFactors: analysis.engagementFactors || [],
+    engagementFactors: analysis.engagementFactors || ['general'],
     topics: analysis.keyThemes || [],
     style: analysis.tone || 'unknown',
    };
@@ -1758,46 +1759,55 @@ OUTPUT FORMAT (JSON only):
 
  /**
   * Detect specific interesting moments in the transcript using AI
+  * ENHANCED: Smart chunking to prevent rate limiting for large transcripts
   */
  async detectInterestingMoments(transcriptSegments, contentAnalysis) {
   await this.respectRateLimit();
 
-  // Create chunks for analysis - smaller chunks to find more moments
-  const chunks = this.createTimeBasedChunks(transcriptSegments, 3);
+  // ENHANCED: Calculate transcript size and adjust chunking strategy
+  const totalWords = transcriptSegments.reduce((sum, segment) => sum + segment.text.split(' ').length, 0);
+
+  // ENHANCED: Smart chunking based on transcript size to prevent rate limiting
+  let chunks;
+  if (totalWords > 3000) {
+   // For very large transcripts, use strategic sampling instead of processing everything
+   console.log(`[AI-SEGMENTER] 🔧 Large transcript detected (${totalWords} words), using strategic chunk sampling`);
+   chunks = this.createStrategicChunks(transcriptSegments, 2); // Only 2 chunks for large transcripts
+  } else if (totalWords > 1500) {
+   console.log(`[AI-SEGMENTER] 🔧 Medium transcript detected (${totalWords} words), using reduced chunking`);
+   chunks = this.createTimeBasedChunks(transcriptSegments, 2); // 2 chunks for medium transcripts
+  } else {
+   chunks = this.createTimeBasedChunks(transcriptSegments, 3); // 3 chunks for small transcripts
+  }
+
   const interestingMoments = [];
 
   for (let i = 0; i < chunks.length; i++) {
    const chunk = chunks[i];
 
-   const prompt = `Find the MOST INTERESTING 30-90 second moments in this transcript chunk that would make great short videos.
+   // ENHANCED: Character limit check to prevent rate limiting
+   let chunkText = chunk.text;
+   if (chunkText.length > 3000) {
+    console.log(`[AI-SEGMENTER] ⚠️ Chunk ${i + 1} too large (${chunkText.length} chars), truncating`);
+    chunkText = chunkText.substring(0, 3000) + '...';
+   }
 
-CONTENT TYPE: ${contentAnalysis.contentType}
-ENGAGEMENT FACTORS: ${contentAnalysis.engagementFactors?.join(', ') || 'entertainment, education'}
+   // ENHANCED: Simplified prompt to reduce token usage
+   const prompt = `Find 2 interesting 30-90 second moments in this chunk for short videos.
 
-TRANSCRIPT CHUNK ${i + 1}:
-${chunk.text}
+CONTENT: ${contentAnalysis.contentType}
 
-Look for moments that are:
-- Surprising or unexpected
-- Educational with immediate value  
-- Emotionally engaging
-- Controversial or thought-provoking
-- Funny or entertaining
-- Revealing secrets or tips
-- Showing transformation or results
+CHUNK ${i + 1}:
+${chunkText}
 
-Find 2-4 BEST moments in this chunk that would make engaging short videos. We need enough content for 12+ segments total.
-
-OUTPUT FORMAT (JSON only):
+JSON format:
 {
   "moments": [
     {
-      "startTime": seconds_number,
-      "endTime": seconds_number, 
-      "topic": "Brief engaging description",
-      "hook": "Why viewers would stop scrolling",
-      "interestScore": 1-10,
-      "engagementType": "educational|entertaining|surprising|valuable"
+      "startTime": seconds,
+      "endTime": seconds, 
+      "topic": "brief description",
+      "interestScore": 1-10
     }
   ]
 }`;
@@ -1806,17 +1816,13 @@ OUTPUT FORMAT (JSON only):
     const completion = await this.groq.chat.completions.create({
      messages: [
       {
-       role: 'system',
-       content: 'You are an expert at identifying viral moments in video content. Focus on quality over quantity.',
-      },
-      {
        role: 'user',
        content: prompt,
       },
      ],
      model: 'llama3-70b-8192',
      temperature: 0.4,
-     max_tokens: 800,
+     max_tokens: 400, // Reduced token limit to prevent rate limiting
      response_format: {type: 'json_object'},
     });
 
@@ -1825,14 +1831,18 @@ OUTPUT FORMAT (JSON only):
 
     if (result.moments && Array.isArray(result.moments)) {
      interestingMoments.push(...result.moments);
+     console.log(`[AI-SEGMENTER] ✅ Found ${result.moments.length} moments in chunk ${i + 1}`);
     }
    } catch (error) {
-    console.warn(`[AI-SEGMENTER] ⚠️ Moment detection failed for chunk ${i + 1}:`, error.message);
+    console.warn(`[AI-SEGMENTER] ⚠️ Moment detection failed for chunk ${i + 1}: ${error.status || error.message}`);
+    // Don't throw error, just continue with next chunk
    }
   }
 
+  console.log(`[AI-SEGMENTER] 🎯 Detected ${interestingMoments.length} interesting moments`);
+
   // Sort by interest score and return top moments
-  return interestingMoments.sort((a, b) => (b.interestScore || 0) - (a.interestScore || 0)).slice(0, 15); // Max 15 interesting moments to choose from
+  return interestingMoments.sort((a, b) => (b.interestScore || 0) - (a.interestScore || 0)).slice(0, 12); // Max 12 moments (was 15)
  }
 
  /**
@@ -2141,6 +2151,84 @@ OUTPUT FORMAT (JSON only):
   const end = fullText.substring(fullText.length - sampleSize);
 
   return `${beginning}\n\n[... middle content ...]\n\n${middle}\n\n[... later content ...]\n\n${end}`;
+ }
+
+ /**
+  * ENHANCED: Strategic sampling for very large transcripts (2000+ segments)
+  * Takes smart samples from beginning, middle, and end to get representative content
+  * Prevents rate limiting while maintaining content quality
+  */
+ strategicSampleForAnalysis(transcriptSegments, maxWords) {
+  const totalSegments = transcriptSegments.length;
+  const samplesPerSection = Math.floor(maxWords / 120); // ~120 words per sample
+
+  console.log(`[AI-SEGMENTER] 🎯 Strategic sampling: ${totalSegments} segments → ${samplesPerSection * 4} samples`);
+
+  // Take samples from beginning (15%), early-middle (35%), late-middle (35%), and end (15%)
+  const beginSamples = transcriptSegments.slice(0, Math.floor(totalSegments * 0.15)).slice(0, samplesPerSection);
+
+  const earlyMiddleStart = Math.floor(totalSegments * 0.15);
+  const earlyMiddleEnd = Math.floor(totalSegments * 0.5);
+  const earlyMiddleSamples = transcriptSegments.slice(earlyMiddleStart, earlyMiddleEnd).slice(0, samplesPerSection * 1.5);
+
+  const lateMiddleStart = Math.floor(totalSegments * 0.5);
+  const lateMiddleEnd = Math.floor(totalSegments * 0.85);
+  const lateMiddleSamples = transcriptSegments.slice(lateMiddleStart, lateMiddleEnd).slice(0, samplesPerSection * 1.5);
+
+  const endSamples = transcriptSegments.slice(Math.floor(totalSegments * 0.85)).slice(0, samplesPerSection);
+
+  const allSamples = [...beginSamples, ...earlyMiddleSamples, ...lateMiddleSamples, ...endSamples];
+  const sampleText = allSamples.map((s) => s.text).join(' ');
+
+  console.log(`[AI-SEGMENTER] ✅ Strategic sampling result: ${allSamples.length} segments → ${sampleText.length} chars`);
+  return sampleText;
+ }
+
+ /**
+  * ENHANCED: Create strategic chunks for large transcripts to prevent rate limiting
+  * Uses representative sampling instead of processing entire transcript
+  */
+ createStrategicChunks(transcriptSegments, chunkCount) {
+  const totalSegments = transcriptSegments.length;
+  const chunks = [];
+
+  console.log(`[AI-SEGMENTER] 🎯 Creating ${chunkCount} strategic chunks from ${totalSegments} segments`);
+
+  for (let i = 0; i < chunkCount; i++) {
+   // Calculate segment range for this chunk with strategic sampling
+   const startRatio = i / chunkCount;
+   const endRatio = (i + 1) / chunkCount;
+
+   const startIndex = Math.floor(totalSegments * startRatio);
+   const endIndex = Math.floor(totalSegments * endRatio);
+
+   // Sample from this range instead of taking all segments
+   const rangeSegments = transcriptSegments.slice(startIndex, endIndex);
+   const sampleSize = Math.min(rangeSegments.length, 50); // Max 50 segments per chunk
+   const step = Math.max(1, Math.floor(rangeSegments.length / sampleSize));
+
+   const sampledSegments = [];
+   for (let j = 0; j < rangeSegments.length; j += step) {
+    sampledSegments.push(rangeSegments[j]);
+   }
+
+   if (sampledSegments.length > 0) {
+    const startTime = sampledSegments[0].start;
+    const endTime = sampledSegments[sampledSegments.length - 1].end;
+    const text = sampledSegments.map((s) => s.text).join(' ');
+
+    chunks.push({
+     startTime,
+     endTime,
+     text: text.length > 2500 ? text.substring(0, 2500) + '...' : text, // Character limit
+     segmentCount: sampledSegments.length,
+     strategic: true,
+    });
+   }
+  }
+
+  console.log(`[AI-SEGMENTER] ✅ Created ${chunks.length} strategic chunks with reduced token usage`);
+  return chunks;
  }
 }
 
