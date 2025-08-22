@@ -64,8 +64,17 @@ class EnhancedAISegmenter {
 
    console.log(`[AI-SEGMENTER] ⚙️ Parameters: target=${targetCount}, max=${maxSegments}, duration=${minDuration}-${maxDuration}s`);
 
+   // Extract language information from options
+   const detectedLanguage = options.detectedLanguage || 'unknown';
+   const preferIndonesian = options.preferIndonesian || detectedLanguage === 'indonesian';
+
+   console.log(`[AI-SEGMENTER] 🌐 Language context: ${detectedLanguage} (Indonesian priority: ${preferIndonesian})`);
+
    // STEP 1: Analyze transcript for interesting moments and viral potential
-   const contentAnalysis = await this.analyzeTranscriptForViralMoments(transcriptSegments);
+   const contentAnalysis = await this.analyzeTranscriptForViralMoments(transcriptSegments, {
+    detectedLanguage,
+    preferIndonesian,
+   });
    console.log(`[AI-SEGMENTER] 📊 Viral analysis: ${contentAnalysis.contentType}, ${contentAnalysis.language}, ${contentAnalysis.viralMoments?.length || 0} interesting moments`);
 
    // STEP 2: Detect engaging content boundaries using AI focus on interest
@@ -1668,8 +1677,14 @@ Return JSON format:
   * Analyze transcript specifically for viral moments and engaging content
   * ENHANCED: Smart chunking to prevent rate limiting for large transcripts
   */
- async analyzeTranscriptForViralMoments(transcriptSegments) {
+ async analyzeTranscriptForViralMoments(transcriptSegments, languageOptions = {}) {
   await this.respectRateLimit();
+
+  // Extract language information from options
+  const detectedLanguage = languageOptions.detectedLanguage || 'unknown';
+  const preferIndonesian = languageOptions.preferIndonesian || false;
+
+  console.log(`[AI-SEGMENTER] 🌐 Using detected language: ${detectedLanguage} (prefer Indonesian: ${preferIndonesian})`);
 
   // ENHANCED: Calculate total word count to determine chunking strategy
   const totalWords = transcriptSegments.reduce((sum, segment) => sum + segment.text.split(' ').length, 0);
@@ -1728,11 +1743,14 @@ JSON format only:
    const response = completion.choices[0]?.message?.content;
    const analysis = JSON.parse(response);
 
-   console.log(`[AI-SEGMENTER] ✅ Content analysis: ${analysis.contentType}, ${analysis.language}, ${analysis.viralMoments?.length || 0} viral moments`);
+   // CRITICAL FIX: Use detected language instead of AI analysis for accuracy
+   const finalLanguage = detectedLanguage !== 'unknown' ? detectedLanguage : analysis.language || 'unknown';
+
+   console.log(`[AI-SEGMENTER] ✅ Content analysis: ${analysis.contentType}, ${finalLanguage} (detected: ${detectedLanguage}), ${analysis.viralMoments?.length || 0} viral moments`);
 
    return {
     contentType: analysis.contentType || 'unknown',
-    language: analysis.language || 'unknown',
+    language: finalLanguage, // Use detected language for accuracy
     tone: analysis.tone || 'unknown',
     viralMoments: analysis.viralMoments || [],
     keyThemes: analysis.keyThemes || [],
@@ -1743,9 +1761,14 @@ JSON format only:
    };
   } catch (error) {
    console.warn('[AI-SEGMENTER] ⚠️ Viral analysis failed:', error.message);
+
+   // CRITICAL FIX: Use detected language in fallback case too
+   const fallbackLanguage = detectedLanguage !== 'unknown' ? detectedLanguage : 'unknown';
+   console.log(`[AI-SEGMENTER] 🔄 Using fallback analysis with detected language: ${fallbackLanguage}`);
+
    return {
     contentType: 'unknown',
-    language: 'unknown',
+    language: fallbackLanguage, // Use detected language even in fallback
     tone: 'unknown',
     viralMoments: [],
     keyThemes: [],

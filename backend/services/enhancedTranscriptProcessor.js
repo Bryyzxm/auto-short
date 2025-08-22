@@ -530,8 +530,14 @@ class EnhancedTranscriptProcessor {
   * MODE 2: GENERATE NEW SEGMENTS FROM TRANSCRIPT
   * Uses enhanced AI segmenter for intelligent segment creation
   */
- async generateSegmentsFromTranscript(transcriptSegments, videoId) {
+ async generateSegmentsFromTranscript(transcriptSegments, videoId, options = {}) {
   console.log(`[TRANSCRIPT-PROCESSOR] 🎯 Generating new segments from ${transcriptSegments.length} transcript segments using AI`);
+
+  // Extract language information from options
+  const detectedLanguage = options.detectedLanguage || options.sourceLanguage || 'unknown';
+  const preferIndonesian = options.preferIndonesian || detectedLanguage === 'indonesian';
+
+  console.log(`[TRANSCRIPT-PROCESSOR] 🌐 Language context: ${detectedLanguage} (Indonesian priority: ${preferIndonesian})`);
 
   try {
    // CRITICAL FIX: Ensure all transcript segments have proper end values
@@ -559,6 +565,8 @@ class EnhancedTranscriptProcessor {
     maxSegments: 15, // Hard limit - allow up to 15 segments
     focusOnInterest: true, // NEW: Focus on finding interesting moments
     contentMode: 'viral-moments', // NEW: Look for viral/engaging content
+    detectedLanguage: detectedLanguage, // CRITICAL: Pass detected language to AI
+    preferIndonesian: preferIndonesian, // CRITICAL: Indonesian preference flag
    });
 
    // STRICT enforcement - never exceed 15 segments

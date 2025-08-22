@@ -4619,8 +4619,12 @@ app.post('/api/intelligent-segments', async (req, res) => {
    try {
     console.log(`[INTELLIGENT-SEGMENTS] 🤖 Using enhanced AI segmentation`);
 
-    // Generate segments using enhanced AI processor
-    const aiResult = await enhancedTranscriptProcessor.generateSegmentsFromTranscript(transcriptData.segments, videoId);
+    // Generate segments using enhanced AI processor with language context
+    const aiResult = await enhancedTranscriptProcessor.generateSegmentsFromTranscript(transcriptData.segments, videoId, {
+     detectedLanguage: transcriptData.language, // CRITICAL: Pass detected language
+     sourceLanguage: transcriptData.language,
+     preferIndonesian: transcriptData.language === 'indonesian',
+    });
 
     if (aiResult.success) {
      result = {
@@ -4743,15 +4747,15 @@ async function tryEmergencyIndonesianExtraction(videoId) {
    // Parse VTT files for Indonesian content
    const vttFiles = await findVTTFiles(videoId, ['id']);
    if (vttFiles.length > 0) {
-    const segments = await parseVTTToSegments(vttFiles[0]);
-    if (segments && segments.length > 0) {
-     console.log(`[EMERGENCY-ID] ✅ Emergency Indonesian segments extracted: ${segments.length}`);
+    const vttResult = await parseVTTToSegments(vttFiles[0]);
+    if (vttResult && vttResult.segments && vttResult.segments.length > 0) {
+     console.log(`[EMERGENCY-ID] ✅ Emergency Indonesian segments extracted: ${vttResult.segments.length} (${vttResult.language})`);
 
      return {
-      segments: segments,
+      segments: vttResult.segments,
       hasRealTiming: true,
-      totalDuration: Math.max(...segments.map((s) => s.end)),
-      language: 'indonesian',
+      totalDuration: Math.max(...vttResult.segments.map((s) => s.end)),
+      language: vttResult.language, // Use detected language from VTT
       method: 'emergency-indonesian-extraction',
      };
     }
@@ -4783,7 +4787,7 @@ async function tryEmergencyIndonesianExtraction(videoId) {
  }
 }
 
-// Helper function to find VTT files for specific languages
+// Helper function to find VTT files for specific languages with Indonesian priority
 async function findVTTFiles(videoId, languages) {
  const fs = require('fs').promises;
  const path = require('path');
@@ -4791,26 +4795,45 @@ async function findVTTFiles(videoId, languages) {
 
  try {
   const files = await fs.readdir(tempDir);
-  const vttFiles = files
-   .filter((file) => file.includes(videoId) && file.endsWith('.vtt'))
-   .filter((file) => languages.some((lang) => file.includes(`.${lang}.vtt`)))
-   .map((file) => path.join(tempDir, file));
 
-  console.log(`[VTT-FINDER] Found ${vttFiles.length} VTT files for ${videoId} in languages: ${languages.join(', ')}`);
-  return vttFiles;
+  // Get all VTT files for this video
+  const allVttFiles = files.filter((file) => file.includes(videoId) && file.endsWith('.vtt')).map((file) => path.join(tempDir, file));
+
+  // PRIORITY SELECTION: Indonesian first, then others
+  const indonesianFiles = allVttFiles.filter((file) => file.includes('.id.vtt'));
+  const otherLanguageFiles = allVttFiles.filter((file) => languages.some((lang) => file.includes(`.${lang}.vtt`)) && !file.includes('.id.vtt'));
+
+  // Combine with Indonesian priority
+  const prioritizedFiles = [...indonesianFiles, ...otherLanguageFiles];
+
+  console.log(`[VTT-FINDER] Found ${prioritizedFiles.length} VTT files for ${videoId} (${indonesianFiles.length} Indonesian, ${otherLanguageFiles.length} others)`);
+
+  if (indonesianFiles.length > 0) {
+   console.log(`[VTT-FINDER] ✅ PRIORITIZING Indonesian VTT files`);
+  }
+
+  return prioritizedFiles;
  } catch (error) {
   console.error(`[VTT-FINDER] Error finding VTT files:`, error);
   return [];
  }
 }
 
-// Helper function to parse VTT files to transcript segments
+// Helper function to parse VTT files to transcript segments with language detection
 async function parseVTTToSegments(vttFilePath) {
  const fs = require('fs').promises;
+ const path = require('path');
 
  try {
   const vttContent = await fs.readFile(vttFilePath, 'utf8');
   const segments = [];
+
+  // Detect language from file path
+  const fileName = path.basename(vttFilePath);
+  const isIndonesian = fileName.includes('.id.vtt');
+  const detectedLanguage = isIndonesian ? 'indonesian' : 'english';
+
+  console.log(`[VTT-PARSER] Parsing ${fileName} (detected: ${detectedLanguage})`);
 
   // Parse VTT format
   const lines = vttContent.split('\n');
@@ -4843,11 +4866,22 @@ async function parseVTTToSegments(vttFilePath) {
    segments.push(currentSegment);
   }
 
-  console.log(`[VTT-PARSER] Parsed ${segments.length} segments from VTT file`);
-  return segments;
+  console.log(`[VTT-PARSER] Parsed ${segments.length} segments from VTT file (${detectedLanguage})`);
+
+  // Return segments with language metadata
+  return {
+   segments: segments,
+   language: detectedLanguage,
+   source: 'vtt-file',
+   filePath: vttFilePath,
+  };
  } catch (error) {
   console.error(`[VTT-PARSER] Error parsing VTT file:`, error);
-  return [];
+  return {
+   segments: [],
+   language: 'unknown',
+   source: 'vtt-file-error',
+  };
  }
 }
 

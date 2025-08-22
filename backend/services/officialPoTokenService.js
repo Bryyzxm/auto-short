@@ -85,7 +85,12 @@ class OfficialPoTokenService {
    const vttFile = this.findSubtitleFile(videoId, '_plugin');
    if (vttFile) {
     const segments = this.parseVttFile(vttFile);
+    const isIndonesian = vttFile.includes('.id.vtt');
+    const detectedLanguage = isIndonesian ? 'indonesian' : 'english';
+
     console.log(`[PO-TOKEN-SERVICE] ✅ Plugin extraction successful: ${segments.length} segments`);
+    console.log(`[PO-TOKEN-SERVICE] 🌐 Detected language: ${detectedLanguage}`);
+
     return {
      segments: segments.map((seg) => ({
       text: seg.text,
@@ -94,6 +99,7 @@ class OfficialPoTokenService {
      })),
      method: 'po-token-plugin',
      source: 'official-po-token-plugin',
+     language: detectedLanguage, // CRITICAL: Pass detected language
      duration: Date.now(),
     };
    }
@@ -147,7 +153,12 @@ class OfficialPoTokenService {
     const vttFile = this.findSubtitleFile(videoId, '_mweb');
     if (vttFile) {
      const segments = this.parseVttFile(vttFile);
+     const isIndonesian = vttFile.includes('.id.vtt');
+     const detectedLanguage = isIndonesian ? 'indonesian' : 'english';
+
      console.log(`[PO-TOKEN-SERVICE] ✅ mweb extraction successful: ${segments.length} segments`);
+     console.log(`[PO-TOKEN-SERVICE] 🌐 Detected language: ${detectedLanguage}`);
+
      return {
       segments: segments.map((seg) => ({
        text: seg.text,
@@ -156,6 +167,7 @@ class OfficialPoTokenService {
       })),
       method: 'mweb-po-token',
       source: 'official-mweb-client',
+      language: detectedLanguage, // CRITICAL: Pass detected language
       duration: Date.now(),
      };
     }
@@ -225,7 +237,12 @@ class OfficialPoTokenService {
     const vttFile = this.findSubtitleFile(videoId, `_${config.name}`);
     if (vttFile) {
      const segments = this.parseVttFile(vttFile);
+     const isIndonesian = vttFile.includes('.id.vtt');
+     const detectedLanguage = isIndonesian ? 'indonesian' : 'english';
+
      console.log(`[PO-TOKEN-SERVICE] ✅ ${config.name} successful: ${segments.length} segments`);
+     console.log(`[PO-TOKEN-SERVICE] 🌐 Detected language: ${detectedLanguage}`);
+
      return {
       segments: segments.map((seg) => ({
        text: seg.text,
@@ -234,6 +251,7 @@ class OfficialPoTokenService {
       })),
       method: config.name,
       source: `official-${config.name}-client`,
+      language: detectedLanguage, // CRITICAL: Pass detected language
       duration: Date.now(),
      };
     }
@@ -246,18 +264,41 @@ class OfficialPoTokenService {
  }
 
  /**
-  * Find subtitle file with given pattern
+  * Find subtitle file with given pattern - PRIORITIZE INDONESIAN
   */
  findSubtitleFile(videoId, suffix = '') {
-  const possibleFiles = [path.join(this.tempDir, `${videoId}${suffix}.en.vtt`), path.join(this.tempDir, `${videoId}${suffix}.vtt`), path.join(this.tempDir, `${videoId}.en.vtt`), path.join(this.tempDir, `${videoId}.vtt`)];
+  // CRITICAL FIX: Prioritize Indonesian (.id.vtt) files first
+  const possibleFiles = [
+   // Indonesian files (highest priority)
+   path.join(this.tempDir, `${videoId}${suffix}.id.vtt`),
+   path.join(this.tempDir, `${videoId}.id.vtt`),
+   // English files (fallback only)
+   path.join(this.tempDir, `${videoId}${suffix}.en.vtt`),
+   path.join(this.tempDir, `${videoId}.en.vtt`),
+   // Generic files (last resort)
+   path.join(this.tempDir, `${videoId}${suffix}.vtt`),
+   path.join(this.tempDir, `${videoId}.vtt`),
+  ];
 
   for (const file of possibleFiles) {
    if (fs.existsSync(file)) {
-    console.log(`[PO-TOKEN-SERVICE] 📄 Found subtitle file: ${path.basename(file)}`);
+    const isIndonesian = file.includes('.id.vtt');
+    const language = isIndonesian ? 'Indonesian' : 'English';
+
+    console.log(`[PO-TOKEN-SERVICE] 📄 Found subtitle file: ${path.basename(file)} (${language})`);
+
+    // Log priority selection for debugging
+    if (isIndonesian) {
+     console.log(`[PO-TOKEN-SERVICE] ✅ PRIORITIZING Indonesian content as requested`);
+    } else {
+     console.log(`[PO-TOKEN-SERVICE] 📝 Using ${language} content (Indonesian not available)`);
+    }
+
     return file;
    }
   }
 
+  console.log(`[PO-TOKEN-SERVICE] ❌ No subtitle files found for ${videoId}`);
   return null;
  }
 
