@@ -4537,34 +4537,32 @@ app.post('/api/intelligent-segments', async (req, res) => {
  res.setTimeout(240000);
 
  // Add Azure timeout warning and emergency response
+ // Azure timeout warning at 2.5 minutes
  const azureTimeoutWarning = setTimeout(() => {
-  console.log(`[INTELLIGENT-SEGMENTS] ⚠️ AZURE TIMEOUT WARNING: 3+ minutes elapsed for ${videoId}`);
- }, 180000);
+  console.log(`[INTELLIGENT-SEGMENTS] ⚠️ AZURE TIMEOUT WARNING: 2.5+ minutes elapsed for ${videoId}`);
+ }, 150000);
 
- // Emergency response before Azure kills the request (230 seconds)
+ // CRITICAL FIX: Emergency response BEFORE frontend timeout (at 2 minutes 45 seconds)
  const emergencyTimeout = setTimeout(() => {
-  console.log(`[INTELLIGENT-SEGMENTS] 🚨 EMERGENCY: Sending partial response to prevent Azure timeout for ${videoId}`);
+  console.log(`[INTELLIGENT-SEGMENTS] 🚨 EMERGENCY: Sending response before frontend timeout for ${videoId}`);
   if (!res.headersSent) {
    try {
-    // Send whatever we have so far
-    res.status(200).json({
-     segments: [], // Empty but valid response
-     totalSegments: 0,
-     averageDuration: 30,
-     language: 'indonesian',
-     method: 'Emergency Timeout Response',
-     hasRealTiming: false,
-     transcriptQuality: 'TIMEOUT',
-     extractedAt: new Date().toISOString(),
-     emergencyResponse: true,
-     message: 'Processing timed out, please try again',
+    // Send early response to prevent frontend timeout
+    res.status(503).json({
+     error: 'PROCESSING_TIMEOUT',
+     message: 'Video membutuhkan waktu lebih lama untuk diproses karena pembatasan YouTube. Silakan coba lagi dalam beberapa menit.',
+     videoId: videoId,
+     userFriendly: true,
+     errorType: 'processing_timeout',
+     indonesianFriendly: true,
+     retryAfter: 180, // 3 minutes
     });
     console.log(`[INTELLIGENT-SEGMENTS] 🚨 Emergency response sent for ${videoId}`);
    } catch (emergencyError) {
     console.error(`[INTELLIGENT-SEGMENTS] ❌ Emergency response failed:`, emergencyError);
    }
   }
- }, 230000); // 230 seconds - before Azure timeout
+ }, 165000); // CRITICAL: 2 minutes 45 seconds to beat frontend timeout
 
  if (!videoId) {
   clearTimeout(azureTimeoutWarning);

@@ -1,5 +1,5 @@
 // BULLETPROOF SERVICE IMPORTS - Handle missing services gracefully
-let robustTranscriptServiceV2, alternativeTranscriptService, emergencyTranscriptService;
+let robustTranscriptServiceV2, alternativeTranscriptService, emergencyTranscriptService, quickVttProcessor;
 
 try {
  robustTranscriptServiceV2 = require('./robustTranscriptServiceV2.js');
@@ -22,6 +22,14 @@ try {
  emergencyTranscriptService = null;
 }
 
+try {
+ const QuickVttProcessor = require('./quickVttProcessor.js');
+ quickVttProcessor = new QuickVttProcessor();
+} catch (error) {
+ console.error('[TRANSCRIPT-ORCHESTRATOR] ❌ Failed to load quickVttProcessor:', error.message);
+ quickVttProcessor = null;
+}
+
 const {NoValidTranscriptError, TranscriptDisabledError} = require('./transcriptErrors.js');
 
 // Build services array dynamically, excluding null services
@@ -39,6 +47,20 @@ console.log(
 async function extract(videoId, options = {}) {
  const session = Math.random().toString(36).substring(2, 9);
  console.log(`[TRANSCRIPT-ORCHESTRATOR] 🚀 Starting extraction for ${videoId} (session: ${session})`);
+
+ // PRIORITY 1: Quick VTT processor - check for existing files first
+ if (quickVttProcessor) {
+  try {
+   console.log(`[TRANSCRIPT-ORCHESTRATOR] ⚡ Trying quick VTT processor for existing files...`);
+   const quickResult = await quickVttProcessor.monitorAndProcess(videoId, 30000); // 30 second timeout
+   if (quickResult) {
+    console.log(`[TRANSCRIPT-ORCHESTRATOR] ✅ Quick VTT processor succeeded with ${quickResult.segments.length} segments`);
+    return quickResult;
+   }
+  } catch (error) {
+   console.log(`[TRANSCRIPT-ORCHESTRATOR] ⚠️ Quick VTT processor failed: ${error.message}`);
+  }
+ }
 
  let lastError = null;
  let isDisabledByOwner = false;
@@ -64,7 +86,26 @@ async function extract(videoId, options = {}) {
    // BULLETPROOF SERVICE CALL - Wrap each service call in its own try-catch
    let result;
    try {
-    result = await service.extract(videoId, options);
+    // Special handling for robust service - add parallel VTT monitoring
+    if (name === 'robust' && quickVttProcessor) {
+     console.log(`[TRANSCRIPT-ORCHESTRATOR] 🏃‍♂️ Running robust service with parallel VTT monitoring`);
+
+     // Run both the service extraction and VTT monitoring in parallel
+     const extractionPromise = service.extract(videoId, options);
+     const vttMonitoringPromise = quickVttProcessor.monitorAndProcess(videoId, 90000); // 90 second monitoring
+
+     // Return whichever completes first
+     result = await Promise.race([
+      extractionPromise,
+      vttMonitoringPromise.catch(() => {
+       // If VTT monitoring fails, just wait for the regular extraction
+       console.log(`[TRANSCRIPT-ORCHESTRATOR] ⚠️ VTT monitoring failed, waiting for regular extraction`);
+       return extractionPromise;
+      }),
+     ]);
+    } else {
+     result = await service.extract(videoId, options);
+    }
    } catch (serviceError) {
     // Handle MODULE_NOT_FOUND errors specifically (missing fallback services)
     if (serviceError.code === 'MODULE_NOT_FOUND') {

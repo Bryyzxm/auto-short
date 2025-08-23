@@ -257,7 +257,7 @@ const App: React.FC = () => {
 
   try {
    const controller = new AbortController();
-   const timeoutId = setTimeout(() => controller.abort(), 180000); // Increased to 3 minutes timeout
+   const timeoutId = setTimeout(() => controller.abort(), 300000); // INCREASED: 5 minutes timeout to handle YouTube rate limiting
 
    const response = await fetch(`${BACKEND_URL}/api/intelligent-segments`, {
     method: 'POST',
@@ -293,6 +293,10 @@ const App: React.FC = () => {
 
       if (errorData.errorType === 'temporary_failure') {
        throw new Error('Layanan sementara tidak tersedia. Silakan coba lagi dalam beberapa menit.');
+      }
+
+      if (errorData.errorType === 'processing_timeout') {
+       throw new Error('Video membutuhkan waktu lebih lama untuk diproses karena pembatasan YouTube. Silakan tunggu dan coba lagi dalam beberapa menit.');
       }
 
       // Propagate specific backend errors like NoValidTranscriptError
@@ -343,7 +347,7 @@ const App: React.FC = () => {
 
    // Enhanced error handling for timeout
    if (error.name === 'AbortError') {
-    throw new Error('Permintaan timeout. Server mungkin sedang sibuk, silakan coba lagi.');
+    throw new Error('Permintaan membutuhkan waktu lebih lama dari biasanya karena pembatasan YouTube. Silakan tunggu atau coba lagi dalam beberapa menit.');
    }
 
    throw error;
