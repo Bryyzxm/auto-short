@@ -3390,6 +3390,8 @@ app.post('/api/shorts', async (req, res) => {
  const ytDlpArgs = buildYtDlpArgs(tempFile, youtubeUrl, useSimpleFormat);
 
  console.log(`[${id}] yt-dlp command (${useSimpleFormat ? 'SIMPLE' : 'ADVANCED'}): ${YT_DLP_PATH} ${ytDlpArgs.join(' ')}`);
+ console.log(`[${id}] Expected output file: ${tempFile}`);
+ console.log(`[${id}] Working directory: ${process.cwd()}`);
 
  try {
   try {
@@ -3398,6 +3400,20 @@ app.post('/api/shorts', async (req, res) => {
    // Safely destructure with fallback values
    const {output = '', strategy = 'unknown'} = fallbackResult || {};
    console.log(`[${id}] download strategy used: ${strategy}`);
+   console.log(`[${id}] yt-dlp output: ${output.substring(0, 500)}...`);
+
+   // Check if file exists after download
+   console.log(`[${id}] Checking if file exists: ${tempFile}`);
+   if (fs.existsSync(tempFile)) {
+    console.log(`[${id}] ✅ File found: ${tempFile}`);
+    const stats = fs.statSync(tempFile);
+    console.log(`[${id}] File size: ${stats.size} bytes`);
+   } else {
+    console.log(`[${id}] ❌ File not found: ${tempFile}`);
+    // List files in working directory to see what was created
+    const files = fs.readdirSync(process.cwd()).filter((f) => f.includes(id) || f.endsWith('.mp4'));
+    console.log(`[${id}] Files in working directory matching ID or .mp4: ${files.join(', ')}`);
+   }
   } catch (downloadErr) {
    console.log(`[${id}] 🔄 Primary download failed, trying backup strategy with simpler format selection`);
 
@@ -3427,6 +3443,20 @@ app.post('/api/shorts', async (req, res) => {
    console.log(`[${id}] 🔄 Backup command: ${YT_DLP_PATH} ${backupArgs.join(' ')}`);
    const backupResult = await executeWithFallbackStrategies(backupArgs, {purpose: 'backup-download', timeout: 300000, maxBuffer: 1024 * 1024 * 50});
    console.log(`[${id}] ✅ Backup download successful with strategy: ${backupResult?.strategy || 'unknown'}`);
+   console.log(`[${id}] Backup yt-dlp output: ${backupResult?.output?.substring(0, 500) || ''}...`);
+
+   // Check if file exists after backup download
+   console.log(`[${id}] Checking if backup file exists: ${tempFile}`);
+   if (fs.existsSync(tempFile)) {
+    console.log(`[${id}] ✅ Backup file found: ${tempFile}`);
+    const stats = fs.statSync(tempFile);
+    console.log(`[${id}] Backup file size: ${stats.size} bytes`);
+   } else {
+    console.log(`[${id}] ❌ Backup file not found: ${tempFile}`);
+    // List files in working directory to see what was created
+    const files = fs.readdirSync(process.cwd()).filter((f) => f.includes(id) || f.endsWith('.mp4'));
+    console.log(`[${id}] Files in working directory after backup: ${files.join(', ')}`);
+   }
   }
   console.timeEnd(`[${id}] yt-dlp download`);
   console.log(`[${id}] yt-dlp download successful`);
