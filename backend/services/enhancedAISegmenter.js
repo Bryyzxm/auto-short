@@ -129,7 +129,7 @@ class EnhancedAISegmenter {
   * Uses simplified analysis to reduce processing time
   */
  async generateFastSegments(transcriptSegments, options = {}) {
-  const targetCount = options.targetCount || 8;
+  const targetCount = options.targetCount || 15; // FIXED: Default to 15 instead of 8
   const segmentDuration = 60; // 60 seconds per segment
   const totalDuration = Math.max(...transcriptSegments.map((s) => s.end));
 
@@ -373,7 +373,8 @@ OUTPUT FORMAT (JSON only):
   * STEP 3: OPTIMAL SEGMENT GENERATION
   * Creates segments based on topic boundaries and duration constraints
   */
- async generateOptimalSegments(transcriptSegments, topicBoundaries, contentAnalysis, targetCount = 8) {
+ async generateOptimalSegments(transcriptSegments, topicBoundaries, contentAnalysis, targetCount = 15) {
+  // FIXED: Default to 15 instead of 8
   const segments = [];
   const totalDuration = this.calculateTotalDuration(transcriptSegments);
 
