@@ -2977,22 +2977,40 @@ async function checkVideoFormats(id, youtubeUrl) {
    throw e;
   }
 
-  const has720p = /\b(720p|1280x720|1920x1080|2560x1440|3840x2160)\b/i.test(formatCheck);
-  const has480p = /\b(480p|854x480)\b/i.test(formatCheck);
-  const has360p = /\b(360p|640x360)\b/i.test(formatCheck);
+  const has720p = /\b(720p|1280x720|1920x1080|2560x1440|3840x2160|hd720|720|1280|1920)\b/i.test(formatCheck);
+  const has480p = /\b(480p|854x480|640x480|hd480|480|854)\b/i.test(formatCheck);
+  const has360p = /\b(360p|640x360|480x360|360|640)\b/i.test(formatCheck);
+
+  // Enhanced pattern matching for common YouTube format strings
+  const hasHighQuality = /\b(mp4|webm|best|bestvideo)\b/i.test(formatCheck) && /\b(medium|high|hd)\b/i.test(formatCheck);
+  const hasVideoFormats = /format\s+code/i.test(formatCheck) || /\d+\s+\w+\s+\d+x\d+/i.test(formatCheck);
 
   console.log(`[${id}] Quality analysis - 720p+: ${has720p}, 480p: ${has480p}, 360p: ${has360p}`);
+  console.log(`[${id}] Enhanced analysis - High quality patterns: ${hasHighQuality}, Video formats detected: ${hasVideoFormats}`);
 
-  if (!has720p && !has480p && !has360p) {
+  // Debug: Show first few lines of format output for analysis
+  if (formatCheck) {
+   const formatLines = formatCheck.split('\n').slice(0, 5).join('\n');
+   console.log(`[${id}] Format sample: ${formatLines}`);
+  }
+
+  // More lenient quality detection - accept if we detect any video formats or high quality indicators
+  if (!has720p && !has480p && !has360p && !hasHighQuality && !hasVideoFormats) {
+   // Last chance: if formatCheck has any meaningful content, proceed with caution
+   if (formatCheck && formatCheck.length > 50) {
+    console.log(`[${id}] ⚠️ Quality patterns not matched, but format data exists. Proceeding with fallback strategy.`);
+    return {success: true, willUpscale: true, fallbackUsed: true};
+   }
+
    return {
     success: false,
     error: 'No usable formats available',
     details: 'This video does not have any recognizable quality formats. Please try a different video.',
-    availableFormats: formatCheck.split('\n').slice(0, 10).join('\n'),
+    availableFormats: formatCheck ? formatCheck.split('\n').slice(0, 10).join('\n') : 'No format data available',
    };
   }
 
-  const willUpscale = !has720p;
+  const willUpscale = !has720p && !hasHighQuality;
   console.log(`[${id}] ${willUpscale ? '📈 Will upscale to 720p after download' : '✅ Native 720p+ available'}`);
   return {success: true, willUpscale};
  } catch (e) {
@@ -3005,22 +3023,25 @@ async function checkVideoFormats(id, youtubeUrl) {
 function buildYtDlpArgs(tempFile, youtubeUrl) {
  console.log('[YT-DLP-ARGS] 🔧 Building yt-dlp arguments with Azure optimizations...');
 
- // CRITICAL FIX: Based on GitHub issue #13930 - fixed by #14081
- // Use the new extractor configuration to solve "content not available on this app"
+ // CRITICAL FIX: Enhanced format selection with multiple fallback strategies
  const baseArgs = [
   '-f',
+  // Primary strategy: High quality with specific codecs
   'bestvideo[height>=720][vcodec^=avc1]+bestaudio[acodec^=mp4a]/' +
    'bestvideo[height>=720][ext=mp4]+bestaudio[ext=m4a]/' +
    'bestvideo[height>=720][vcodec^=vp9]+bestaudio[acodec^=opus]/' +
    'bestvideo[height>=720]+bestaudio[ext=m4a]/' +
    'bestvideo[height>=720]+bestaudio/' +
+   // Fallback strategy: 480p quality
    'bestvideo[height>=480][vcodec^=avc1]+bestaudio[acodec^=mp4a]/' +
    'bestvideo[height>=480][ext=mp4]+bestaudio[ext=m4a]/' +
    'bestvideo[height>=480]+bestaudio[ext=m4a]/' +
    'bestvideo[height>=480]+bestaudio/' +
+   // Last resort: 360p and any available
    'bestvideo[height>=360][ext=mp4]+bestaudio[ext=m4a]/' +
    'bestvideo[height>=360]+bestaudio/' +
    'best[height>=720][ext=mp4]/best[height>=480][ext=mp4]/best[height>=360][ext=mp4]/' +
+   // Ultimate fallback: any available format
    'best[ext=mp4]/best',
   '--no-playlist',
   '--no-warnings',
@@ -3298,8 +3319,34 @@ app.post('/api/shorts', async (req, res) => {
    const {output = '', strategy = 'unknown'} = fallbackResult || {};
    console.log(`[${id}] download strategy used: ${strategy}`);
   } catch (downloadErr) {
-   // Re-throw to existing catch below
-   throw downloadErr;
+   console.log(`[${id}] 🔄 Primary download failed, trying backup strategy with simpler format selection`);
+
+   // Backup strategy: Use much simpler format selection
+   const backupArgs = [
+    '-f',
+    'best[height<=1080]/best[height<=720]/best',
+    '--no-playlist',
+    '--no-warnings',
+    '--merge-output-format',
+    'mp4',
+    '--user-agent',
+    getRandomUserAgent(),
+    '--extractor-args',
+    'youtube:player_client=android',
+    '--socket-timeout',
+    '30',
+    '--retries',
+    '3',
+    '--fragment-retries',
+    '3',
+    '-o',
+    tempFile,
+    youtubeUrl,
+   ];
+
+   console.log(`[${id}] 🔄 Backup command: ${YT_DLP_PATH} ${backupArgs.join(' ')}`);
+   const backupResult = await executeWithFallbackStrategies(backupArgs, {purpose: 'backup-download', timeout: 300000, maxBuffer: 1024 * 1024 * 50});
+   console.log(`[${id}] ✅ Backup download successful with strategy: ${backupResult?.strategy || 'unknown'}`);
   }
   console.timeEnd(`[${id}] yt-dlp download`);
   console.log(`[${id}] yt-dlp download successful`);
@@ -3317,6 +3364,27 @@ app.post('/api/shorts', async (req, res) => {
  } catch (err) {
   console.timeEnd(`[${id}] yt-dlp download`);
   console.error(`[${id}] yt-dlp error:`, err.message);
+
+  // Enhanced error analysis for better debugging
+  let errorCategory = 'unknown';
+  if (err.message.includes('No such format') || err.message.includes('format not available')) {
+   errorCategory = 'format_issue';
+   console.log(`[${id}] 🔍 Format issue detected - running emergency format check`);
+
+   // Try to get more detailed format information
+   try {
+    const emergencyFormatCheck = await executeWithFallbackStrategies(['--list-formats', '--no-warnings', youtubeUrl], {purpose: 'emergency-formats', timeout: 30000});
+    console.log(`[${id}] 🆘 Emergency format check result:`, emergencyFormatCheck?.output?.substring(0, 500));
+   } catch (formatErr) {
+    console.log(`[${id}] 🆘 Emergency format check also failed:`, formatErr.message);
+   }
+  } else if (err.message.includes('429') || err.message.includes('Too Many Requests')) {
+   errorCategory = 'rate_limit';
+  } else if (err.message.includes('unavailable') || err.message.includes('not available')) {
+   errorCategory = 'video_unavailable';
+  }
+
+  console.log(`[${id}] 📊 Error category: ${errorCategory}`);
 
   const {errorDetails, userFriendlyError} = handleDownloadError(err);
 
