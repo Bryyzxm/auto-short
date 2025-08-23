@@ -4532,11 +4532,43 @@ app.post('/api/intelligent-segments', async (req, res) => {
  const startTime = Date.now();
  const {videoId, targetSegmentCount = 15, minDuration = 20, maxDuration = 90, prioritizeIndonesian = true} = req.body;
 
- // Set longer timeout for AI processing
- req.setTimeout(120000); // 2 minutes timeout
- res.setTimeout(120000);
+ // Set aggressive timeout protection with Azure-specific limits
+ req.setTimeout(240000); // 4 minutes timeout (Azure max)
+ res.setTimeout(240000);
+
+ // Add Azure timeout warning and emergency response
+ const azureTimeoutWarning = setTimeout(() => {
+  console.log(`[INTELLIGENT-SEGMENTS] ⚠️ AZURE TIMEOUT WARNING: 3+ minutes elapsed for ${videoId}`);
+ }, 180000);
+
+ // Emergency response before Azure kills the request (230 seconds)
+ const emergencyTimeout = setTimeout(() => {
+  console.log(`[INTELLIGENT-SEGMENTS] 🚨 EMERGENCY: Sending partial response to prevent Azure timeout for ${videoId}`);
+  if (!res.headersSent) {
+   try {
+    // Send whatever we have so far
+    res.status(200).json({
+     segments: [], // Empty but valid response
+     totalSegments: 0,
+     averageDuration: 30,
+     language: 'indonesian',
+     method: 'Emergency Timeout Response',
+     hasRealTiming: false,
+     transcriptQuality: 'TIMEOUT',
+     extractedAt: new Date().toISOString(),
+     emergencyResponse: true,
+     message: 'Processing timed out, please try again',
+    });
+    console.log(`[INTELLIGENT-SEGMENTS] 🚨 Emergency response sent for ${videoId}`);
+   } catch (emergencyError) {
+    console.error(`[INTELLIGENT-SEGMENTS] ❌ Emergency response failed:`, emergencyError);
+   }
+  }
+ }, 230000); // 230 seconds - before Azure timeout
 
  if (!videoId) {
+  clearTimeout(azureTimeoutWarning);
+  clearTimeout(emergencyTimeout);
   return res.status(400).json({error: 'Video ID is required'});
  }
 
@@ -4666,14 +4698,42 @@ app.post('/api/intelligent-segments', async (req, res) => {
       console.log(`[INTELLIGENT-SEGMENTS]   🔬 Required fields: id=${!!firstSegment.id}, title=${!!firstSegment.title}, startTime=${typeof firstSegment.startTimeSeconds}`);
      }
 
-     // ENHANCED: Ensure response is sent successfully before container termination
+     // ENHANCED: Comprehensive response protection with timeout cleanup
      try {
+      clearTimeout(azureTimeoutWarning); // Clear the warning timeout
+      clearTimeout(emergencyTimeout); // Clear the emergency timeout
+
+      // Final validation before sending
+      if (!result.segments || result.segments.length === 0) {
+       throw new Error('No segments generated');
+      }
+
+      // Ensure all segments have required fields
+      result.segments = result.segments.map((segment, index) => ({
+       id: segment.id || `ai-${videoId}-${index + 1}`,
+       title: segment.title || `Segment ${index + 1}`,
+       description: segment.description || `AI-generated segment ${index + 1}`,
+       startTimeSeconds: segment.startTimeSeconds || segment.start || 0,
+       endTimeSeconds: segment.endTimeSeconds || segment.end || 60,
+       duration: segment.duration || 60,
+       transcriptExcerpt: segment.transcriptExcerpt || segment.text?.substring(0, 200) || '',
+       transcriptFull: segment.transcriptFull || segment.text || '',
+       youtubeVideoId: videoId,
+       thumbnailUrl: segment.thumbnailUrl || `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
+       hasRealTiming: true,
+      }));
+
+      console.log(`[INTELLIGENT-SEGMENTS] ✅ Final result: ${result.segments.length} segments validated and ready`);
+
       res.status(200).json(result);
       console.log(`[INTELLIGENT-SEGMENTS] 📤 Response sent successfully to frontend for ${videoId}`);
       console.log(`[INTELLIGENT-SEGMENTS] 📤 Response headers: ${JSON.stringify(res.getHeaders())}`);
+      console.log(`[INTELLIGENT-SEGMENTS] ⏱️ Total processing time: ${Date.now() - startTime}ms`);
       return;
      } catch (responseError) {
       console.error(`[INTELLIGENT-SEGMENTS] ❌ Failed to send response for ${videoId}:`, responseError);
+      clearTimeout(azureTimeoutWarning);
+      clearTimeout(emergencyTimeout);
       throw responseError;
      }
     }
@@ -4739,12 +4799,31 @@ app.post('/api/intelligent-segments', async (req, res) => {
    throw responseError;
   }
  } catch (error) {
-  console.error(`[INTELLIGENT-SEGMENTS] ❌ Error for ${videoId}:`, error);
-  res.status(500).json({
-   error: 'Intelligent segmentation failed',
-   message: error.message,
-   videoId: videoId,
-  });
+  clearTimeout(azureTimeoutWarning); // Clear timeout in error case
+  clearTimeout(emergencyTimeout); // Clear emergency timeout in error case
+  console.error(`[INTELLIGENT-SEGMENTS] ❌ Critical error for ${videoId}:`, error);
+  console.error(`[INTELLIGENT-SEGMENTS] ❌ Error stack:`, error.stack);
+  console.error(`[INTELLIGENT-SEGMENTS] ⏱️ Failed after: ${Date.now() - startTime}ms`);
+
+  // Ensure we always send a response to prevent frontend hanging
+  if (!res.headersSent) {
+   try {
+    res.status(500).json({
+     error: 'Intelligent segmentation failed',
+     message: error.message,
+     videoId: videoId,
+     errorType: 'processing_failed',
+     processingTime: Date.now() - startTime,
+     indonesianFriendly: true,
+     fallbackMessage: 'Terjadi kesalahan saat memproses video. Silakan coba lagi atau gunakan fitur upload manual.',
+    });
+    console.log(`[INTELLIGENT-SEGMENTS] 📤 Error response sent to prevent frontend hanging`);
+   } catch (responseError) {
+    console.error(`[INTELLIGENT-SEGMENTS] ❌ Failed to send error response:`, responseError);
+   }
+  } else {
+   console.log(`[INTELLIGENT-SEGMENTS] ⚠️ Headers already sent, cannot send error response`);
+  }
  }
 });
 

@@ -1953,11 +1953,11 @@ JSON format:
 
   console.log(`[AI-SEGMENTER] ✨ Created ${segments.length} moment-based segments`);
 
-  // ENHANCED: Emergency segment generation if we're below target count
-  if (segments.length < targetCount && segments.length < interestingMoments.length) {
-   console.log(`[AI-SEGMENTER] 🚨 Emergency: Only ${segments.length}/${targetCount} segments created, attempting to fill gaps`);
+  // ENHANCED: Multi-stage emergency segment generation
+  if (segments.length < targetCount) {
+   console.log(`[AI-SEGMENTER] 🚨 Emergency Stage 1: Only ${segments.length}/${targetCount} segments created, attempting to fill gaps`);
 
-   // Try to create additional segments from remaining moments with relaxed criteria
+   // Stage 1: Try remaining moments with very relaxed criteria
    for (const moment of sortedMoments) {
     if (segments.length >= targetCount) break;
 
@@ -2013,7 +2013,91 @@ JSON format:
     }
    }
 
-   console.log(`[AI-SEGMENTER] 🔧 After emergency generation: ${segments.length} total segments`);
+   // Stage 2: If still not enough, create gap-filling segments
+   if (segments.length < targetCount) {
+    console.log(`[AI-SEGMENTER] 🚨 Emergency Stage 2: Still only ${segments.length}/${targetCount}, creating gap-filling segments`);
+
+    // Find gaps between existing segments
+    const sortedSegments = segments.sort((a, b) => a.start - b.start);
+    const totalDuration = Math.max(...transcriptSegments.map((s) => s.start + (s.duration || 5)));
+
+    // Create segments in gaps
+    for (let i = 0; i < sortedSegments.length - 1 && segments.length < targetCount; i++) {
+     const currentEnd = sortedSegments[i].end;
+     const nextStart = sortedSegments[i + 1].start;
+     const gapDuration = nextStart - currentEnd;
+
+     if (gapDuration >= minDuration) {
+      const segmentStart = currentEnd + 2; // Small buffer
+      const segmentEnd = Math.min(segmentStart + minDuration, nextStart - 2);
+      const duration = segmentEnd - segmentStart;
+
+      if (duration >= minDuration) {
+       const segmentText = this.extractSegmentText(transcriptSegments, segmentStart, segmentEnd);
+
+       if (segmentText.length > 5) {
+        segments.push({
+         start: segmentStart,
+         end: segmentEnd,
+         title: `Gap Segment ${segments.length + 1}`,
+         description: 'Konten tambahan untuk melengkapi segmen',
+         text: segmentText,
+         topic: 'Additional Content',
+         interestScore: 4, // Lower score for gap segments
+         duration: Math.round(duration),
+         metadata: {
+          isGapSegment: true,
+         },
+        });
+
+        console.log(`[AI-SEGMENTER] 🔧 Gap segment created: ${Math.round(duration)}s at ${Math.round(segmentStart)}s`);
+       }
+      }
+     }
+    }
+
+    // Stage 3: Last resort - create segments at the end
+    if (segments.length < targetCount) {
+     console.log(`[AI-SEGMENTER] � Emergency Stage 3: Last resort segment creation`);
+
+     const lastSegmentEnd = Math.max(...segments.map((s) => s.end));
+     let currentStart = lastSegmentEnd + 5;
+
+     while (segments.length < targetCount && currentStart < totalDuration - minDuration) {
+      const segmentEnd = Math.min(currentStart + minDuration, totalDuration);
+      const duration = segmentEnd - currentStart;
+
+      if (duration >= minDuration) {
+       const segmentText = this.extractSegmentText(transcriptSegments, currentStart, segmentEnd);
+
+       if (segmentText.length > 5) {
+        segments.push({
+         start: currentStart,
+         end: segmentEnd,
+         title: `Final Segment ${segments.length + 1}`,
+         description: 'Segmen tambahan dari konten tersisa',
+         text: segmentText,
+         topic: 'Final Content',
+         interestScore: 3, // Lowest score for final segments
+         duration: Math.round(duration),
+         metadata: {
+          isFinalSegment: true,
+         },
+        });
+
+        console.log(`[AI-SEGMENTER] 🏁 Final segment created: ${Math.round(duration)}s at ${Math.round(currentStart)}s`);
+        currentStart = segmentEnd + 5;
+       } else {
+        currentStart += 10;
+       }
+      } else {
+       break;
+      }
+     }
+    }
+   }
+
+   console.log(`[AI-SEGMENTER] �🔧 After multi-stage emergency generation: ${segments.length} total segments`);
   }
 
   return segments;

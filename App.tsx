@@ -257,7 +257,7 @@ const App: React.FC = () => {
 
   try {
    const controller = new AbortController();
-   const timeoutId = setTimeout(() => controller.abort(), 120000); // Increased to 2 minutes timeout
+   const timeoutId = setTimeout(() => controller.abort(), 180000); // Increased to 3 minutes timeout
 
    const response = await fetch(`${BACKEND_URL}/api/intelligent-segments`, {
     method: 'POST',
