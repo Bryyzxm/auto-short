@@ -3193,8 +3193,8 @@ function buildYtDlpArgs(tempFile, youtubeUrl, useSimpleFormat = false) {
    '5', // Reduce progress updates
   ];
 
-  // Insert Azure args before output and URL
-  const insertIndex = baseArgs.length - 2; // Before -o and URL
+  // Insert Azure args before output configuration (-o tempFile youtubeUrl)
+  const insertIndex = baseArgs.length - 3; // Before -o, tempFile, and URL
   baseArgs.splice(insertIndex, 0, ...azureArgs);
 
   console.log('[YT-DLP-ARGS] ✅ Azure configurations added');
