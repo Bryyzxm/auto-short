@@ -3179,26 +3179,11 @@ function buildYtDlpArgs(tempFile, youtubeUrl, useSimpleFormat = false) {
   ];
  }
 
- // CRITICAL FIX: Enhanced format selection with multiple fallback strategies
+ // CRITICAL FIX: Simplified format selection that actually works
  const baseArgs = [
   '-f',
-  // Primary strategy: High quality with specific codecs
-  'bestvideo[height>=720][vcodec^=avc1]+bestaudio[acodec^=mp4a]/' +
-   'bestvideo[height>=720][ext=mp4]+bestaudio[ext=m4a]/' +
-   'bestvideo[height>=720][vcodec^=vp9]+bestaudio[acodec^=opus]/' +
-   'bestvideo[height>=720]+bestaudio[ext=m4a]/' +
-   'bestvideo[height>=720]+bestaudio/' +
-   // Fallback strategy: 480p quality
-   'bestvideo[height>=480][vcodec^=avc1]+bestaudio[acodec^=mp4a]/' +
-   'bestvideo[height>=480][ext=mp4]+bestaudio[ext=m4a]/' +
-   'bestvideo[height>=480]+bestaudio[ext=m4a]/' +
-   'bestvideo[height>=480]+bestaudio/' +
-   // Last resort: 360p and any available
-   'bestvideo[height>=360][ext=mp4]+bestaudio[ext=m4a]/' +
-   'bestvideo[height>=360]+bestaudio/' +
-   'best[height>=720][ext=mp4]/best[height>=480][ext=mp4]/best[height>=360][ext=mp4]/' +
-   // Ultimate fallback: any available format
-   'best[ext=mp4]/best',
+  // SIMPLIFIED: Much more reliable format selection
+  'best[height<=1080][ext=mp4]/best[height<=720]/best[ext=mp4]/best',
   '--no-playlist',
   '--no-warnings',
   '--merge-output-format',
