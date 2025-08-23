@@ -4529,7 +4529,12 @@ app.get('/api/debug/invidious-instances', async (req, res) => {
 
 // ENHANCED INTELLIGENT SEGMENTS ENDPOINT WITH AI-POWERED SEGMENTATION
 app.post('/api/intelligent-segments', async (req, res) => {
- const {videoId, targetSegmentCount = 15, minDuration = 20, maxDuration = 90} = req.body;
+ const startTime = Date.now();
+ const {videoId, targetSegmentCount = 15, minDuration = 20, maxDuration = 90, prioritizeIndonesian = true} = req.body;
+
+ // Set longer timeout for AI processing
+ req.setTimeout(120000); // 2 minutes timeout
+ res.setTimeout(120000);
 
  if (!videoId) {
   return res.status(400).json({error: 'Video ID is required'});
@@ -4537,6 +4542,7 @@ app.post('/api/intelligent-segments', async (req, res) => {
 
  try {
   console.log(`[INTELLIGENT-SEGMENTS] 🚀 Starting enhanced AI segmentation for ${videoId}`);
+  console.log(`[INTELLIGENT-SEGMENTS] 🎯 Target: ${targetSegmentCount} segments, Indonesian priority: ${prioritizeIndonesian}`);
 
   // Step 1: Get transcript with real timing using enhanced orchestrator with Indonesian priority
   let transcriptData;
@@ -4646,10 +4652,25 @@ app.post('/api/intelligent-segments', async (req, res) => {
 
      console.log(`[INTELLIGENT-SEGMENTS] ✅ Enhanced AI created ${result.totalSegments} segments (avg: ${result.averageDuration}s, quality: ${result.qualityScore})`);
 
+     // ENHANCED: Detailed response validation before sending
+     console.log(`[INTELLIGENT-SEGMENTS] 🔍 Response validation for ${videoId}:`);
+     console.log(`[INTELLIGENT-SEGMENTS]   📊 Total segments: ${result.segments?.length || 0}`);
+     console.log(`[INTELLIGENT-SEGMENTS]   📏 Response size: ${JSON.stringify(result).length} bytes`);
+     console.log(`[INTELLIGENT-SEGMENTS]   🏷️ Response format: ${typeof result}`);
+     console.log(`[INTELLIGENT-SEGMENTS]   ✅ Has segments array: ${Array.isArray(result.segments)}`);
+
+     // Validate segments structure
+     if (result.segments && result.segments.length > 0) {
+      const firstSegment = result.segments[0];
+      console.log(`[INTELLIGENT-SEGMENTS]   🔬 First segment keys: ${Object.keys(firstSegment)}`);
+      console.log(`[INTELLIGENT-SEGMENTS]   🔬 Required fields: id=${!!firstSegment.id}, title=${!!firstSegment.title}, startTime=${typeof firstSegment.startTimeSeconds}`);
+     }
+
      // ENHANCED: Ensure response is sent successfully before container termination
      try {
       res.status(200).json(result);
       console.log(`[INTELLIGENT-SEGMENTS] 📤 Response sent successfully to frontend for ${videoId}`);
+      console.log(`[INTELLIGENT-SEGMENTS] 📤 Response headers: ${JSON.stringify(res.getHeaders())}`);
       return;
      } catch (responseError) {
       console.error(`[INTELLIGENT-SEGMENTS] ❌ Failed to send response for ${videoId}:`, responseError);

@@ -1911,22 +1911,24 @@ JSON format:
     duration = maxDuration;
    }
 
-   // FIXED: More lenient overlap detection - allow segments with minimal overlap
+   // ENHANCED: Even more lenient overlap detection - prioritize target count achievement
    const hasSignificantOverlap = usedTimeRanges.some((range) => {
     const overlapStart = Math.max(startTime, range.start);
     const overlapEnd = Math.min(endTime, range.end);
     const overlapDuration = Math.max(0, overlapEnd - overlapStart);
-    // Only reject if overlap is more than 30% of the segment duration
-    return overlapDuration > duration * 0.3;
+    // Only reject if overlap is more than 50% of the segment duration
+    // AND we already have enough segments (prioritize target count)
+    const overlapPercentage = overlapDuration / duration;
+    return overlapPercentage > 0.5 && segments.length >= Math.floor(targetCount * 0.7);
    });
 
    if (!hasSignificantOverlap) {
     // Extract transcript text for this segment
     const segmentText = this.extractSegmentText(transcriptSegments, startTime, endTime);
 
-    // FIXED: More lenient content length requirement
-    if (segmentText.length > 30) {
-     // Ensure meaningful content (reduced from 50 to 30)
+    // ENHANCED: Very lenient content requirement to maximize segment count
+    if (segmentText.length > 15) {
+     // Ensure minimal meaningful content (reduced from 30 to 15)
      segments.push({
       start: startTime,
       end: endTime,
@@ -1950,6 +1952,70 @@ JSON format:
   }
 
   console.log(`[AI-SEGMENTER] ✨ Created ${segments.length} moment-based segments`);
+
+  // ENHANCED: Emergency segment generation if we're below target count
+  if (segments.length < targetCount && segments.length < interestingMoments.length) {
+   console.log(`[AI-SEGMENTER] 🚨 Emergency: Only ${segments.length}/${targetCount} segments created, attempting to fill gaps`);
+
+   // Try to create additional segments from remaining moments with relaxed criteria
+   for (const moment of sortedMoments) {
+    if (segments.length >= targetCount) break;
+
+    // Check if this moment was already used
+    const alreadyUsed = segments.some((seg) => Math.abs(seg.start - (moment.startTime || 0)) < 10);
+
+    if (!alreadyUsed) {
+     let startTime = moment.startTime || 0;
+     let endTime = moment.endTime || startTime + 60;
+     let duration = endTime - startTime;
+
+     // Ensure duration is within limits
+     if (duration < minDuration) {
+      endTime = startTime + minDuration;
+      duration = minDuration;
+     } else if (duration > maxDuration) {
+      endTime = startTime + maxDuration;
+      duration = maxDuration;
+     }
+
+     // Very relaxed overlap check for emergency segments
+     const hasExtremeOverlap = usedTimeRanges.some((range) => {
+      const overlapStart = Math.max(startTime, range.start);
+      const overlapEnd = Math.min(endTime, range.end);
+      const overlapDuration = Math.max(0, overlapEnd - overlapStart);
+      return overlapDuration > duration * 0.8; // Only reject 80%+ overlap
+     });
+
+     if (!hasExtremeOverlap) {
+      const segmentText = this.extractSegmentText(transcriptSegments, startTime, endTime);
+
+      if (segmentText.length > 10) {
+       // Very minimal content requirement
+       segments.push({
+        start: startTime,
+        end: endTime,
+        title: moment.topic || `Emergency Segment ${segments.length + 1}`,
+        description: moment.description || 'Momen menarik yang ditemukan oleh AI',
+        text: segmentText,
+        topic: moment.topic,
+        interestScore: (moment.interestScore || 5) - 1, // Slightly lower score for emergency segments
+        duration: Math.round(duration),
+        metadata: {
+         isEmergencySegment: true,
+         originalMoment: moment,
+        },
+       });
+
+       usedTimeRanges.push({start: startTime, end: endTime});
+       console.log(`[AI-SEGMENTER] 🆘 Emergency segment added: "${moment.topic}" (${Math.round(duration)}s)`);
+      }
+     }
+    }
+   }
+
+   console.log(`[AI-SEGMENTER] 🔧 After emergency generation: ${segments.length} total segments`);
+  }
+
   return segments;
  }
 

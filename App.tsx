@@ -252,12 +252,12 @@ const App: React.FC = () => {
  };
 
  // Fetch intelligent segments with real timing and enhanced Indonesian support
- const fetchIntelligentSegments = async (videoId: string, targetCount: number = 8): Promise<ShortVideo[]> => {
-  console.log(`[APP] Fetching intelligent segments for ${videoId} with Indonesian priority`);
+ const fetchIntelligentSegments = async (videoId: string, targetCount: number = 15): Promise<ShortVideo[]> => {
+  console.log(`[APP] Fetching intelligent segments for ${videoId} with Indonesian priority (target: ${targetCount})`);
 
   try {
    const controller = new AbortController();
-   const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+   const timeoutId = setTimeout(() => controller.abort(), 120000); // Increased to 2 minutes timeout
 
    const response = await fetch(`${BACKEND_URL}/api/intelligent-segments`, {
     method: 'POST',
@@ -267,7 +267,7 @@ const App: React.FC = () => {
     body: JSON.stringify({
      videoId: videoId,
      targetSegmentCount: targetCount,
-     prioritizeIndonesian: true, // NEW: Request Indonesian content priority
+     prioritizeIndonesian: true, // Request Indonesian content priority
     }),
     signal: controller.signal,
    });
@@ -308,6 +308,12 @@ const App: React.FC = () => {
    }
 
    const data = await response.json();
+   console.log(`[APP] 🔍 Response received:`, {
+    hasSegments: !!data.segments,
+    segmentCount: data.segments?.length || 0,
+    totalSegments: data.totalSegments,
+    responseKeys: Object.keys(data),
+   });
 
    if (data.segments && data.segments.length > 0) {
     console.log(`[APP] ✅ Got ${data.segments.length} intelligent segments (avg: ${data.averageDuration}s, quality: ${data.transcriptQuality})`);
@@ -523,8 +529,8 @@ const App: React.FC = () => {
    try {
     console.log(`[APP] ✅ NEW APPROACH: Using intelligent segments with Indonesian priority for ${videoId}`);
 
-    // Get target segment count based on aspect ratio or default
-    const targetSegmentCount = aspectRatio === '16:9' ? 10 : 8;
+    // Get target segment count based on aspect ratio - increased for better results
+    const targetSegmentCount = aspectRatio === '16:9' ? 18 : 15; // Increased from 10/8 to 18/15
 
     // Use NEW intelligent segmentation API with enhanced error handling
     const intelligentSegments = await fetchIntelligentSegments(videoId, targetSegmentCount);
