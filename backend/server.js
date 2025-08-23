@@ -2959,22 +2959,48 @@ function logEnvironmentInfo(id) {
  console.log(`[${id}] - Azure Env: ${process.env.WEBSITE_HOSTNAME || 'local'}`);
 }
 
-// Check video formats availability
+// Check video formats availability with enhanced fallback
 async function checkVideoFormats(id, youtubeUrl) {
  try {
+  console.log(`[${id}] 🔍 Starting comprehensive format check for ${youtubeUrl}`);
+
+  // Primary strategy: List formats with multiple client attempts
   const formatCheckArgs = ['--list-formats', '--no-warnings', '--user-agent', getRandomUserAgent(), '--extractor-args', 'youtube:player_client=web,android', '--socket-timeout', '20', youtubeUrl];
 
-  let formatCheck;
+  let formatCheck = '';
+  let strategyUsed = 'unknown';
+
   try {
    const fallbackResult = await executeWithFallbackStrategies(formatCheckArgs, {purpose: 'list-formats', timeout: 30000});
-
-   // Safely destructure with fallback values
    const {output = '', strategy = 'unknown'} = fallbackResult || {};
    formatCheck = output;
+   strategyUsed = strategy;
    console.log(`[${id}] list-formats strategy used: ${strategy}`);
+   console.log(`[${id}] Format check output length: ${formatCheck.length} characters`);
   } catch (e) {
-   console.warn(`[${id}] list-formats all strategies failed: ${e.message}`);
-   throw e;
+   console.warn(`[${id}] Primary list-formats failed: ${e.message}`);
+
+   // EMERGENCY STRATEGY: Try basic format check without complex args
+   try {
+    console.log(`[${id}] 🚨 Attempting emergency format check...`);
+    const emergencyArgs = ['--list-formats', '--no-warnings', youtubeUrl];
+    const emergencyResult = await executeWithFallbackStrategies(emergencyArgs, {purpose: 'emergency-formats', timeout: 20000});
+    formatCheck = emergencyResult?.output || '';
+    strategyUsed = 'emergency';
+    console.log(`[${id}] Emergency format check completed, output length: ${formatCheck.length}`);
+   } catch (emergencyError) {
+    console.warn(`[${id}] Emergency format check also failed: ${emergencyError.message}`);
+
+    // LAST RESORT: Skip format validation and proceed with optimistic download
+    console.log(`[${id}] 🎯 All format checks failed - proceeding with optimistic download strategy`);
+    return {
+     success: true,
+     willUpscale: true,
+     skipFormatCheck: true,
+     fallbackUsed: true,
+     strategy: 'optimistic',
+    };
+   }
   }
 
   const has720p = /\b(720p|1280x720|1920x1080|2560x1440|3840x2160|hd720|720|1280|1920)\b/i.test(formatCheck);
@@ -2982,46 +3008,90 @@ async function checkVideoFormats(id, youtubeUrl) {
   const has360p = /\b(360p|640x360|480x360|360|640)\b/i.test(formatCheck);
 
   // Enhanced pattern matching for common YouTube format strings
-  const hasHighQuality = /\b(mp4|webm|best|bestvideo)\b/i.test(formatCheck) && /\b(medium|high|hd)\b/i.test(formatCheck);
-  const hasVideoFormats = /format\s+code/i.test(formatCheck) || /\d+\s+\w+\s+\d+x\d+/i.test(formatCheck);
+  const hasHighQuality = (/\b(mp4|webm|best|bestvideo)\b/i.test(formatCheck) && /\b(medium|high|hd)\b/i.test(formatCheck)) || /\b(1080|720|480)\b/i.test(formatCheck);
+  const hasVideoFormats = /format\s+code/i.test(formatCheck) || /\d+\s+\w+\s+\d+x\d+/i.test(formatCheck) || /\b(mp4|webm|m4a)\b/i.test(formatCheck);
 
   console.log(`[${id}] Quality analysis - 720p+: ${has720p}, 480p: ${has480p}, 360p: ${has360p}`);
   console.log(`[${id}] Enhanced analysis - High quality patterns: ${hasHighQuality}, Video formats detected: ${hasVideoFormats}`);
+  console.log(`[${id}] Strategy used: ${strategyUsed}, Format check length: ${formatCheck.length}`);
 
   // Debug: Show first few lines of format output for analysis
-  if (formatCheck) {
+  if (formatCheck && formatCheck.length > 0) {
    const formatLines = formatCheck.split('\n').slice(0, 5).join('\n');
-   console.log(`[${id}] Format sample: ${formatLines}`);
+   console.log(`[${id}] Format sample: ${formatLines.substring(0, 200)}...`);
+  } else {
+   console.log(`[${id}] ⚠️ No format data available - will use optimistic strategy`);
   }
 
-  // More lenient quality detection - accept if we detect any video formats or high quality indicators
-  if (!has720p && !has480p && !has360p && !hasHighQuality && !hasVideoFormats) {
+  // MUCH MORE PERMISSIVE QUALITY DETECTION
+  // Accept if ANY quality indicators are found OR if we're using fallback strategies
+  const hasAnyQualityIndicator = has720p || has480p || has360p || hasHighQuality || hasVideoFormats;
+  const shouldProceedOptimistically = strategyUsed === 'emergency' || strategyUsed === 'optimistic' || formatCheck.length === 0;
+
+  if (!hasAnyQualityIndicator && !shouldProceedOptimistically) {
    // Last chance: if formatCheck has any meaningful content, proceed with caution
    if (formatCheck && formatCheck.length > 50) {
     console.log(`[${id}] ⚠️ Quality patterns not matched, but format data exists. Proceeding with fallback strategy.`);
-    return {success: true, willUpscale: true, fallbackUsed: true};
+    return {success: true, willUpscale: true, fallbackUsed: true, strategy: strategyUsed};
    }
 
+   console.log(`[${id}] ❌ No usable formats detected and no fallback options available`);
    return {
     success: false,
     error: 'No usable formats available',
     details: 'This video does not have any recognizable quality formats. Please try a different video.',
     availableFormats: formatCheck ? formatCheck.split('\n').slice(0, 10).join('\n') : 'No format data available',
+    strategy: strategyUsed,
+    debug: {
+     hasAnyQualityIndicator,
+     shouldProceedOptimistically,
+     formatCheckLength: formatCheck.length,
+    },
    };
   }
 
+  // Success! We found some quality indicators or are proceeding optimistically
   const willUpscale = !has720p && !hasHighQuality;
-  console.log(`[${id}] ${willUpscale ? '📈 Will upscale to 720p after download' : '✅ Native 720p+ available'}`);
-  return {success: true, willUpscale};
+  console.log(`[${id}] ✅ Format check passed - ${willUpscale ? '📈 Will upscale to 720p after download' : '✅ Native 720p+ available'}`);
+
+  return {
+   success: true,
+   willUpscale,
+   strategy: strategyUsed,
+   qualityFound: {has720p, has480p, has360p, hasHighQuality, hasVideoFormats},
+  };
  } catch (e) {
   console.warn(`[${id}] Could not check formats, proceeding with fallback strategy:`, e.message);
-  return {success: true, willUpscale: true};
+  return {success: true, willUpscale: true, strategy: 'fallback-error'};
  }
 }
 
 // Build yt-dlp arguments for video download
-function buildYtDlpArgs(tempFile, youtubeUrl) {
- console.log('[YT-DLP-ARGS] 🔧 Building yt-dlp arguments with Azure optimizations...');
+function buildYtDlpArgs(tempFile, youtubeUrl, useSimpleFormat = false) {
+ console.log(`[YT-DLP-ARGS] 🔧 Building yt-dlp arguments with Azure optimizations${useSimpleFormat ? ' (SIMPLE MODE)' : ''}...`);
+
+ if (useSimpleFormat) {
+  // EMERGENCY SIMPLE FORMAT: When format detection fails, use basic download
+  return [
+   '-f',
+   'best[height<=1080]/best',
+   '--no-playlist',
+   '--no-warnings',
+   '--merge-output-format',
+   'mp4',
+   '--user-agent',
+   getRandomUserAgent(),
+   '--extractor-args',
+   'youtube:player_client=android',
+   '--socket-timeout',
+   '30',
+   '--retries',
+   '3',
+   '-o',
+   tempFile,
+   youtubeUrl,
+  ];
+ }
 
  // CRITICAL FIX: Enhanced format selection with multiple fallback strategies
  const baseArgs = [
@@ -3300,16 +3370,26 @@ app.post('/api/shorts', async (req, res) => {
  console.log(`[${id}] Mulai proses download dan cut segmen: ${youtubeUrl} (${start}s - ${end}s, rasio: ${aspectRatio})`);
  logEnvironmentInfo(id);
 
- // Check video formats
+ // Check video formats with aggressive fallback handling
  const formatCheck = await checkVideoFormats(id, youtubeUrl);
  if (!formatCheck.success) {
-  return res.status(400).json(formatCheck);
+  console.log(`[${id}] ❌ Format check failed: ${formatCheck.error}`);
+  console.log(`[${id}] 🎯 Attempting direct download bypass...`);
+
+  // Don't return error immediately - try direct download instead
+  // return res.status(400).json(formatCheck);
+ } else {
+  console.log(`[${id}] ✅ Format check passed with strategy: ${formatCheck.strategy}`);
  }
 
  // Download video
  console.time(`[${id}] yt-dlp download`);
- const ytDlpArgs = buildYtDlpArgs(tempFile, youtubeUrl);
- console.log(`[${id}] yt-dlp command: ${YT_DLP_PATH} ${ytDlpArgs.join(' ')}`);
+
+ // Choose download strategy based on format check results
+ const useSimpleFormat = !formatCheck.success || formatCheck.strategy === 'optimistic' || formatCheck.skipFormatCheck;
+ const ytDlpArgs = buildYtDlpArgs(tempFile, youtubeUrl, useSimpleFormat);
+
+ console.log(`[${id}] yt-dlp command (${useSimpleFormat ? 'SIMPLE' : 'ADVANCED'}): ${YT_DLP_PATH} ${ytDlpArgs.join(' ')}`);
 
  try {
   try {
