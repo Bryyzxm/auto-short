@@ -4529,7 +4529,7 @@ app.get('/api/debug/invidious-instances', async (req, res) => {
 
 // ENHANCED INTELLIGENT SEGMENTS ENDPOINT WITH AI-POWERED SEGMENTATION
 app.post('/api/intelligent-segments', async (req, res) => {
- const {videoId, targetSegmentCount = 8, minDuration = 20, maxDuration = 90} = req.body;
+ const {videoId, targetSegmentCount = 15, minDuration = 20, maxDuration = 90} = req.body;
 
  if (!videoId) {
   return res.status(400).json({error: 'Video ID is required'});
@@ -4619,11 +4619,14 @@ app.post('/api/intelligent-segments', async (req, res) => {
    try {
     console.log(`[INTELLIGENT-SEGMENTS] 🤖 Using enhanced AI segmentation`);
 
-    // Generate segments using enhanced AI processor with language context
+    // Generate segments using enhanced AI processor with language context and target count
     const aiResult = await enhancedTranscriptProcessor.generateSegmentsFromTranscript(transcriptData.segments, videoId, {
      detectedLanguage: transcriptData.language, // CRITICAL: Pass detected language
      sourceLanguage: transcriptData.language,
      preferIndonesian: transcriptData.language === 'indonesian',
+     targetCount: targetSegmentCount, // CRITICAL: Pass target segment count from API
+     minDuration: minDuration, // Pass minimum duration
+     maxDuration: maxDuration, // Pass maximum duration
     });
 
     if (aiResult.success) {

@@ -56,9 +56,9 @@ class EnhancedAISegmenter {
    console.log(`[AI-SEGMENTER] 🚀 Starting INTELLIGENT segmentation for ${transcriptSegments.length} transcript segments`);
    console.log(`[AI-SEGMENTER] 🎯 Focus: Finding INTERESTING VIRAL MOMENTS (not rigid segmentation)`);
 
-   // Enforce segment limits with proper shorts duration
-   const maxSegments = Math.min(options.maxSegments || 15, 15); // Allow up to 15 segments
-   const targetCount = Math.min(options.targetCount || 12, maxSegments);
+   // Enforce segment limits with proper shorts duration - OPTIMIZED for better coverage
+   const maxSegments = Math.min(options.maxSegments || 18, 20); // Increased from 15 to 18, max 20
+   const targetCount = Math.min(options.targetCount || 15, maxSegments); // Increased target from 12 to 15
    const minDuration = options.minDuration || 30; // 30 seconds minimum for shorts
    const maxDuration = options.maxDuration || 90; // 90 seconds maximum for shorts
 
@@ -1589,7 +1589,7 @@ Return JSON format:
 
   const segments = [];
   const totalDuration = this.calculateTotalDuration(transcriptSegments);
-  const targetCount = options.targetCount || 6; // Reduced for better quality
+  const targetCount = options.targetCount || 15; // INCREASED: Use 15 for better coverage (was 6)
 
   // Use semantic segmentation approach instead of fixed duration
   const semanticSegments = this.generateSemanticSegments(transcriptSegments, targetCount);
@@ -1791,14 +1791,15 @@ JSON format only:
   const totalWords = transcriptSegments.reduce((sum, segment) => sum + segment.text.split(' ').length, 0);
 
   // ENHANCED: Smart chunking based on transcript size to prevent rate limiting
+  // OPTIMIZED: Increase chunks for better segment discovery while managing rate limits
   let chunks;
   if (totalWords > 3000) {
-   // For very large transcripts, use strategic sampling instead of processing everything
+   // For very large transcripts, use more chunks to find enough segments
    console.log(`[AI-SEGMENTER] 🔧 Large transcript detected (${totalWords} words), using strategic chunk sampling`);
-   chunks = this.createStrategicChunks(transcriptSegments, 2); // Only 2 chunks for large transcripts
+   chunks = this.createStrategicChunks(transcriptSegments, 5); // Increased from 2 to 5 chunks for better coverage
   } else if (totalWords > 1500) {
    console.log(`[AI-SEGMENTER] 🔧 Medium transcript detected (${totalWords} words), using reduced chunking`);
-   chunks = this.createTimeBasedChunks(transcriptSegments, 2); // 2 chunks for medium transcripts
+   chunks = this.createTimeBasedChunks(transcriptSegments, 4); // Increased from 2 to 4 chunks
   } else {
    chunks = this.createTimeBasedChunks(transcriptSegments, 3); // 3 chunks for small transcripts
   }
@@ -1815,10 +1816,12 @@ JSON format only:
     chunkText = chunkText.substring(0, 3000) + '...';
    }
 
-   // ENHANCED: Simplified prompt to reduce token usage
-   const prompt = `Find 2 interesting 30-90 second moments in this chunk for short videos.
+   // ENHANCED: Adaptive prompt based on chunk size and position to find more segments
+   const momentsToFind = totalWords > 3000 ? 4 : 3; // More moments for large transcripts
+   const prompt = `Find ${momentsToFind} interesting 30-90 second moments in this chunk for viral short videos.
 
 CONTENT: ${contentAnalysis.contentType}
+TARGET: Find engaging, viral-worthy moments that would work as standalone shorts
 
 CHUNK ${i + 1}:
 ${chunkText}
@@ -1829,8 +1832,10 @@ JSON format:
     {
       "startTime": seconds,
       "endTime": seconds, 
-      "topic": "brief description",
-      "interestScore": 1-10
+      "topic": "brief viral-worthy description",
+      "hook": "engaging hook phrase",
+      "interestScore": 1-10,
+      "engagementType": "educational|entertaining|shocking|inspiring"
     }
   ]
 }`;
@@ -1845,7 +1850,7 @@ JSON format:
      ],
      model: 'llama3-70b-8192',
      temperature: 0.4,
-     max_tokens: 400, // Reduced token limit to prevent rate limiting
+     max_tokens: 600, // Increased token limit for more detailed responses
      response_format: {type: 'json_object'},
     });
 
@@ -1864,8 +1869,16 @@ JSON format:
 
   console.log(`[AI-SEGMENTER] 🎯 Detected ${interestingMoments.length} interesting moments`);
 
-  // Sort by interest score and return top moments
-  return interestingMoments.sort((a, b) => (b.interestScore || 0) - (a.interestScore || 0)).slice(0, 12); // Max 12 moments (was 15)
+  // ENHANCED: Ensure minimum segment count through fallback generation
+  if (interestingMoments.length < 8) {
+   console.log(`[AI-SEGMENTER] ⚠️ Not enough moments found (${interestingMoments.length}), adding fallback segments`);
+   const fallbackMoments = this.generateFallbackMoments(transcriptSegments, 15 - interestingMoments.length);
+   interestingMoments.push(...fallbackMoments);
+   console.log(`[AI-SEGMENTER] ✅ Added ${fallbackMoments.length} fallback moments, total: ${interestingMoments.length}`);
+  }
+
+  // Sort by interest score and return top moments - increased limit
+  return interestingMoments.sort((a, b) => (b.interestScore || 0) - (a.interestScore || 0)).slice(0, 15); // Increased from 12 to 15
  }
 
  /**
@@ -1882,8 +1895,8 @@ JSON format:
   const sortedMoments = interestingMoments.sort((a, b) => (b.interestScore || 0) - (a.interestScore || 0));
 
   for (const moment of sortedMoments) {
-   // Generate more segments if we have interesting moments, up to maxSegments
-   if (segments.length >= 15) break; // Hard limit to prevent too many segments
+   // Generate segments up to our target, with room for quality over quantity
+   if (segments.length >= 20) break; // Increased hard limit to allow more segments
 
    let startTime = moment.startTime || 0;
    let endTime = moment.endTime || startTime + 60;
@@ -2252,6 +2265,53 @@ OUTPUT FORMAT (JSON only):
 
   console.log(`[AI-SEGMENTER] ✅ Created ${chunks.length} strategic chunks with reduced token usage`);
   return chunks;
+ }
+
+ /**
+  * Generate fallback moments when AI doesn't find enough interesting content
+  * Creates evenly distributed segments to ensure minimum count is met
+  */
+ generateFallbackMoments(transcriptSegments, neededCount) {
+  const totalDuration = Math.max(...transcriptSegments.map((s) => s.end));
+  const fallbackMoments = [];
+
+  console.log(`[AI-SEGMENTER] 🔄 Generating ${neededCount} fallback moments from ${Math.round(totalDuration / 60)}min content`);
+
+  // Create evenly distributed segments across the transcript
+  const segmentDuration = 60; // 60 seconds per fallback segment
+  const step = Math.max(120, totalDuration / (neededCount + 2)); // Ensure spacing between segments
+
+  for (let i = 0; i < neededCount; i++) {
+   const startTime = Math.max(0, (i + 1) * step);
+   const endTime = Math.min(startTime + segmentDuration, totalDuration);
+
+   // Skip if we've reached the end
+   if (startTime >= totalDuration - 30) break;
+
+   // Find relevant transcript content for this time range
+   const relevantSegments = transcriptSegments.filter((s) => s.start < endTime && s.end > startTime);
+
+   if (relevantSegments.length > 0) {
+    const segmentText = relevantSegments.map((s) => s.text).join(' ');
+
+    // Create a simple topic from the first few words
+    const firstWords = segmentText.split(' ').slice(0, 4).join(' ');
+    const topic = firstWords.length > 20 ? firstWords.substring(0, 20) + '...' : firstWords;
+
+    fallbackMoments.push({
+     startTime: Math.round(startTime),
+     endTime: Math.round(endTime),
+     topic: topic || 'Segment Content',
+     hook: 'Interesting moment from the video',
+     interestScore: 5, // Medium interest score for fallback
+     engagementType: 'educational',
+     fallback: true,
+    });
+   }
+  }
+
+  console.log(`[AI-SEGMENTER] ✅ Generated ${fallbackMoments.length} fallback moments`);
+  return fallbackMoments;
  }
 }
 

@@ -557,52 +557,63 @@ class EnhancedTranscriptProcessor {
    // Remove the "large transcript" shortcut that bypasses AI
    console.log(`[TRANSCRIPT-PROCESSOR] 🧠 Using FULL AI analysis to find interesting moments`);
 
-   // Use full AI processing with strict parameters for finding viral moments
+   // Use full AI processing with user-specified parameters and viral moments focus
+   const targetCount = options.targetCount || 15; // Use API parameter or default to 15
+   const minDuration = options.minDuration || 30; // Use API parameter or default to 30s
+   const maxDuration = options.maxDuration || 90; // Use API parameter or default to 90s
+   const maxSegments = Math.min(Math.max(targetCount + 3, 18), 20); // Dynamic max based on target
+
+   console.log(`[TRANSCRIPT-PROCESSOR] ⚙️ AI Parameters: target=${targetCount}, max=${maxSegments}, duration=${minDuration}-${maxDuration}s`);
+
    const aiResult = await enhancedAISegmenter.generateIntelligentSegments(normalizedSegments, {
-    targetCount: 12, // Target exactly 12 segments (minimum requirement)
-    minDuration: 30, // Minimum 30 seconds (good for shorts)
-    maxDuration: 90, // Maximum 90 seconds (max for shorts)
-    maxSegments: 15, // Hard limit - allow up to 15 segments
+    targetCount: targetCount, // DYNAMIC: Use API-specified target count
+    minDuration: minDuration, // DYNAMIC: Use API-specified minimum duration
+    maxDuration: maxDuration, // DYNAMIC: Use API-specified maximum duration
+    maxSegments: maxSegments, // DYNAMIC: Hard limit based on target count
     focusOnInterest: true, // NEW: Focus on finding interesting moments
     contentMode: 'viral-moments', // NEW: Look for viral/engaging content
     detectedLanguage: detectedLanguage, // CRITICAL: Pass detected language to AI
     preferIndonesian: preferIndonesian, // CRITICAL: Indonesian preference flag
    });
 
-   // STRICT enforcement - never exceed 15 segments
+   // DYNAMIC enforcement - use maxSegments calculated above
    if (!aiResult || !aiResult.segments || aiResult.segments.length === 0) {
     console.log(`[TRANSCRIPT-PROCESSOR] ⚠️ AI returned no segments, using emergency fallback`);
-    return this.generateEmergencySegments(normalizedSegments, videoId);
+    return this.generateEmergencySegments(normalizedSegments, videoId, {
+     targetCount: targetCount,
+     minDuration: minDuration,
+     maxDuration: maxDuration,
+    });
    }
 
-   // Enforce strict segment count limit
-   const strictLimit = Math.min(aiResult.segments.length, 15);
+   // Enforce dynamic segment count limit based on target
+   const strictLimit = Math.min(aiResult.segments.length, maxSegments);
    const limitedSegments = aiResult.segments.slice(0, strictLimit);
 
    console.log(`[TRANSCRIPT-PROCESSOR] 🔒 STRICT LIMIT: Using ${limitedSegments.length} out of ${aiResult.segments.length} AI segments`);
 
    // Validate segment durations and fix any that are too long
    const validatedSegments = limitedSegments.map((segment, index) => {
-    // Ensure duration is within shorts-friendly limits
-    if (segment.duration > 90) {
-     console.log(`[TRANSCRIPT-PROCESSOR] ⚠️ Segment ${index + 1} too long (${segment.duration}s), capping at 90s`);
-     const newEnd = segment.start + 90;
+    // Ensure duration is within API-specified limits
+    if (segment.duration > maxDuration) {
+     console.log(`[TRANSCRIPT-PROCESSOR] ⚠️ Segment ${index + 1} too long (${segment.duration}s), capping at ${maxDuration}s`);
+     const newEnd = segment.start + maxDuration;
      return {
       ...segment,
       end: newEnd,
-      duration: 90,
+      duration: maxDuration,
       text: this.extractSegmentText(normalizedSegments, segment.start, newEnd),
      };
     }
 
-    if (segment.duration < 30) {
-     console.log(`[TRANSCRIPT-PROCESSOR] ⚠️ Segment ${index + 1} too short (${segment.duration}s), extending to 30s`);
+    if (segment.duration < minDuration) {
+     console.log(`[TRANSCRIPT-PROCESSOR] ⚠️ Segment ${index + 1} too short (${segment.duration}s), extending to ${minDuration}s`);
 
      // Calculate total duration safely
      const maxEnd = Math.max(...normalizedSegments.filter((s) => s.end && !isNaN(s.end)).map((s) => s.end));
      const totalDuration = !isNaN(maxEnd) ? maxEnd : 600; // fallback to 600s
 
-     const newEnd = Math.min(segment.start + 30, totalDuration);
+     const newEnd = Math.min(segment.start + minDuration, totalDuration);
      return {
       ...segment,
       end: newEnd,
@@ -629,7 +640,11 @@ class EnhancedTranscriptProcessor {
   } catch (error) {
    console.error('[TRANSCRIPT-PROCESSOR] ❌ AI processing failed:', error);
    // Fallback to emergency simple segmentation
-   return this.generateEmergencySegments(transcriptSegments, videoId);
+   return this.generateEmergencySegments(transcriptSegments, videoId, {
+    targetCount: options.targetCount || 15,
+    minDuration: options.minDuration || 30,
+    maxDuration: options.maxDuration || 90,
+   });
   }
  }
 
@@ -921,11 +936,11 @@ class EnhancedTranscriptProcessor {
  /**
   * Emergency segmentation when AI fails - focus on finding interesting content
   */
- generateEmergencySegments(transcriptSegments, videoId) {
+ generateEmergencySegments(transcriptSegments, videoId, options = {}) {
   console.log(`[TRANSCRIPT-PROCESSOR] 🚨 Using emergency segmentation - finding interesting moments`);
 
   const totalDuration = Math.max(...transcriptSegments.map((s) => s.end));
-  const targetSegments = 8;
+  const targetSegments = options.targetCount || 15; // FIXED: Use API target count instead of hardcoded 8
   const segmentDuration = 60; // 60 seconds per segment
   const segments = [];
 
