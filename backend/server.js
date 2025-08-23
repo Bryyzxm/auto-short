@@ -2373,6 +2373,51 @@ app.get('/', (req, res) => {
 });
 
 // 🚨 DEBUG ENDPOINT: Production diagnostics with Azure awareness
+// ============================================
+// 🔧 DEBUG ENDPOINT: Test yt-dlp command structure
+// ============================================
+app.post('/api/debug/ytdlp-test', async (req, res) => {
+ const {youtubeUrl = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'} = req.body;
+ const id = 'test-' + Date.now();
+ const tempFile = path.join(process.cwd(), `${id}.mp4`);
+
+ try {
+  console.log(`[${id}] 🔧 DEBUG: Testing yt-dlp command structure...`);
+
+  // Test our buildYtDlpArgs function
+  const ytDlpArgs = buildYtDlpArgs(tempFile, youtubeUrl, false);
+
+  const debugInfo = {
+   id: id,
+   tempFile: tempFile,
+   workingDirectory: process.cwd(),
+   ytDlpPath: YT_DLP_PATH,
+   command: `${YT_DLP_PATH} ${ytDlpArgs.join(' ')}`,
+   args: ytDlpArgs,
+   argCount: ytDlpArgs.length,
+   outputFlag: {
+    position: ytDlpArgs.indexOf('-o'),
+    nextArg: ytDlpArgs[ytDlpArgs.indexOf('-o') + 1],
+    isCorrect: ytDlpArgs[ytDlpArgs.indexOf('-o') + 1] === tempFile,
+   },
+  };
+
+  console.log(`[${id}] 🔧 DEBUG INFO:`, JSON.stringify(debugInfo, null, 2));
+
+  res.json({
+   status: 'debug_complete',
+   debugInfo: debugInfo,
+   message: 'Command structure analysis complete - check logs for details',
+  });
+ } catch (err) {
+  console.error(`[${id}] 🔧 DEBUG ERROR:`, err.message);
+  res.status(500).json({
+   error: 'debug_failed',
+   message: err.message,
+  });
+ }
+});
+
 app.get('/api/debug/environment', async (req, res) => {
  try {
   const debugInfo = {
