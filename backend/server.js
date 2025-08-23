@@ -2418,6 +2418,47 @@ app.post('/api/debug/ytdlp-test', async (req, res) => {
  }
 });
 
+// ============================================
+// 🔧 DEBUG ENDPOINT: Direct yt-dlp test with full output
+// ============================================
+app.post('/api/debug/ytdlp-direct-test', async (req, res) => {
+ const {youtubeUrl = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'} = req.body;
+ const id = 'direct-test-' + Date.now();
+
+ try {
+  console.log(`[${id}] 🔧 DIRECT DEBUG: Testing yt-dlp with minimal args...`);
+
+  // Test with minimal arguments first
+  const minimalArgs = ['--dump-json', '--no-warnings', youtubeUrl];
+
+  console.log(`[${id}] 🔧 Minimal command: ${YT_DLP_PATH} ${minimalArgs.join(' ')}`);
+
+  const result = await executeYtDlpSecurelyCore(minimalArgs, {
+   timeout: 30000,
+   useCookies: true,
+  });
+
+  console.log(`[${id}] 🔧 SUCCESS: yt-dlp output length: ${result.length}`);
+
+  res.json({
+   status: 'success',
+   output: result.substring(0, 1000), // First 1000 chars
+   outputLength: result.length,
+   message: 'yt-dlp executed successfully - check logs for full output',
+  });
+ } catch (err) {
+  console.error(`[${id}] 🔧 DIRECT ERROR:`, err.message);
+  console.error(`[${id}] 🔧 ERROR STACK:`, err.stack);
+
+  res.json({
+   status: 'error',
+   error: err.message,
+   stack: err.stack?.split('\n').slice(0, 5), // First 5 lines of stack
+   message: 'yt-dlp failed - check logs for details',
+  });
+ }
+});
+
 app.get('/api/debug/environment', async (req, res) => {
  try {
   const debugInfo = {
