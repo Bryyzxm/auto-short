@@ -1895,8 +1895,8 @@ JSON format:
   const sortedMoments = interestingMoments.sort((a, b) => (b.interestScore || 0) - (a.interestScore || 0));
 
   for (const moment of sortedMoments) {
-   // Generate segments up to our target, with room for quality over quantity
-   if (segments.length >= 20) break; // Increased hard limit to allow more segments
+   // Generate segments up to our target, prioritizing quality over strict limits
+   if (segments.length >= targetCount) break; // FIXED: Use targetCount instead of hard limit 20
 
    let startTime = moment.startTime || 0;
    let endTime = moment.endTime || startTime + 60;
@@ -1911,15 +1911,22 @@ JSON format:
     duration = maxDuration;
    }
 
-   // Check for overlap with existing segments
-   const hasOverlap = usedTimeRanges.some((range) => !(endTime <= range.start || startTime >= range.end));
+   // FIXED: More lenient overlap detection - allow segments with minimal overlap
+   const hasSignificantOverlap = usedTimeRanges.some((range) => {
+    const overlapStart = Math.max(startTime, range.start);
+    const overlapEnd = Math.min(endTime, range.end);
+    const overlapDuration = Math.max(0, overlapEnd - overlapStart);
+    // Only reject if overlap is more than 30% of the segment duration
+    return overlapDuration > duration * 0.3;
+   });
 
-   if (!hasOverlap) {
+   if (!hasSignificantOverlap) {
     // Extract transcript text for this segment
     const segmentText = this.extractSegmentText(transcriptSegments, startTime, endTime);
 
-    if (segmentText.length > 50) {
-     // Ensure meaningful content
+    // FIXED: More lenient content length requirement
+    if (segmentText.length > 30) {
+     // Ensure meaningful content (reduced from 50 to 30)
      segments.push({
       start: startTime,
       end: endTime,
@@ -1934,7 +1941,11 @@ JSON format:
      });
 
      usedTimeRanges.push({start: startTime, end: endTime});
+    } else {
+     console.log(`[AI-SEGMENTER] ⚠️ Skipping moment "${moment.topic}" - insufficient content (${segmentText.length} chars)`);
     }
+   } else {
+    console.log(`[AI-SEGMENTER] ⚠️ Skipping moment "${moment.topic}" - significant overlap detected`);
    }
   }
 
