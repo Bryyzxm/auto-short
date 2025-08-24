@@ -3194,8 +3194,9 @@ function buildYtDlpArgs(tempFile, youtubeUrl, useSimpleFormat = false, workingDi
  // CRITICAL FIX: Simplified format selection that actually works
  const baseArgs = [
   '-f',
-  // 🚨 SIMPLIFIED: Much more reliable format selection for Azure
-  'best[height<=1080][ext=mp4]/best[height<=720]/best[ext=mp4]/best',
+  // 🚨 MAXIMUM COMPATIBILITY: Just use the best available format
+  // Let yt-dlp's built-in logic choose the best format without restrictions
+  'best',
   '--no-playlist',
   '--no-warnings',
   '--merge-output-format',
@@ -3206,7 +3207,7 @@ function buildYtDlpArgs(tempFile, youtubeUrl, useSimpleFormat = false, workingDi
   // =============================================
   // 🚨 CRITICAL FIX FOR AZURE AUTHENTICATION
   // =============================================
-  // Use SINGLE CLIENT strategy to avoid auth conflicts
+  // Use ANDROID CLIENT with bypass - most reliable for bot detection avoidance
   '--extractor-args',
   'youtube:player_client=android;bypass_native_jsi',
 
@@ -3243,7 +3244,7 @@ function buildYtDlpArgs(tempFile, youtubeUrl, useSimpleFormat = false, workingDi
   // Disable problematic features that trigger bot detection
   '--no-check-certificate',
   '--no-call-home',
-  '--no-check-extensions',
+  // 🚨 REMOVED: --no-check-extensions (invalid option in current yt-dlp version)
 
   // Output configuration - 🚨 FIXED: Use calculated output path
   '-o',
