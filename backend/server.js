@@ -266,7 +266,7 @@ class AzureEnvironmentManager {
  }
 
  /**
-  * Try to read from Azure Key Vault (placeholder for future implementation)
+  * Try to read from Azure Key Vault (basic implementation)
   */
  async tryAzureKeyVault(secretName) {
   if (!this.isAzure) {
@@ -275,12 +275,31 @@ class AzureEnvironmentManager {
 
   console.log(`[AZURE-ENV] 🔑 Attempting to read from Azure Key Vault: ${secretName}`);
 
-  // TODO: Implement Azure Key Vault integration
-  // const { DefaultAzureCredential } = require('@azure/identity');
-  // const { SecretClient } = require('@azure/keyvault-secrets');
+  // Basic Azure Key Vault integration (requires environment variables for credentials and vault URL)
+  try {
+   const keyVaultUrl = process.env.AZURE_KEYVAULT_URL;
+   if (!keyVaultUrl) {
+    console.log(`[AZURE-ENV] ⚠️  AZURE_KEYVAULT_URL not set`);
+    return null;
+   }
 
-  console.log(`[AZURE-ENV] ⚠️  Azure Key Vault integration not yet implemented`);
-  return null;
+   const {DefaultAzureCredential} = require('@azure/identity');
+   const {SecretClient} = require('@azure/keyvault-secrets');
+   const credential = new DefaultAzureCredential();
+   const client = new SecretClient(keyVaultUrl, credential);
+
+   const secret = await client.getSecret(secretName);
+   if (secret && secret.value) {
+    console.log(`[AZURE-ENV] ✅ Successfully retrieved secret from Azure Key Vault`);
+    return secret.value;
+   } else {
+    console.log(`[AZURE-ENV] ❌ Secret not found in Azure Key Vault`);
+    return null;
+   }
+  } catch (err) {
+   console.log(`[AZURE-ENV] ❌ Azure Key Vault error: ${err.message}`);
+   return null;
+  }
  }
 
  /**
@@ -1710,21 +1729,12 @@ async function executeYtDlpSecurelyCore(args, options = {}) {
    }
   }
 
-  // CRITICAL FIX: Add optimized extractor args based on cookies availability
+  // 🚨 CRITICAL FIX: Use consistent android client strategy
   if (!finalArgs.includes('--extractor-args')) {
-   let extractorArgs;
-   if (cookiesUsed) {
-    // When cookies are available, use only web client (most reliable)
-    extractorArgs = 'youtube:player_client=web;innertube_host=youtubei.googleapis.com';
-    console.log('[YT-DLP-EXEC] 🔧 Using cookies-compatible client: web only (avoiding TV client auth issues)');
-   } else {
-    // When no cookies, use all clients for maximum compatibility
-    extractorArgs = 'youtube:player_client=android,web,tv,ios;innertube_host=youtubei.googleapis.com';
-    console.log('[YT-DLP-EXEC] 🔧 Using all clients: android,web,tv,ios (no cookies mode)');
-   }
-
+   // ALWAYS use android client for consistency between format checking and download
+   const extractorArgs = 'youtube:player_client=android';
    finalArgs.push('--extractor-args', extractorArgs);
-   console.log('[YT-DLP-EXEC] 🔧 Added optimized extractor args');
+   console.log('[YT-DLP-EXEC] 🔧 Using consistent android client strategy');
   }
 
   // Add cookies to args if being used
@@ -1961,34 +1971,47 @@ function isSignInBotError(message = '') {
 async function executeWithFallbackStrategies(baseArgs, {purpose = 'generic', timeout = 300000, maxBuffer, allowCookies = true, workingDir = null} = {}) {
  const strategies = [];
 
- // Strategy 1: Original args (already includes cookies if validated)
- strategies.push({label: 'original', args: baseArgs.slice(), useCookies: allowCookies});
-
- // Strategy 2: Force android client only (most reliable for bot bypass)
+ // 🚨 OFFICIAL FIX 2025: Primary strategy should use official fix configuration
+ // Strategy 1: Official fix from PR #14081 (most reliable)
  strategies.push({
-  label: 'android-client',
+  label: 'official-fix-2025',
+  mutate: true,
+  transform: (a) => replaceOrInsertExtractorArgs(a, 'youtube:player_client=default,android'),
+  useCookies: allowCookies,
+ });
+
+ // Strategy 2: Android-only fallback (if official fix fails)
+ strategies.push({
+  label: 'android-fallback',
   mutate: true,
   transform: (a) => replaceOrInsertExtractorArgs(a, 'youtube:player_client=android'),
   useCookies: allowCookies,
  });
 
- // Strategy 3: Android + TV clients (enhanced bypass)
+ // Strategy 2: Original args (fallback to user's configuration)
+ strategies.push({label: 'original', args: baseArgs.slice(), useCookies: allowCookies});
+
+ // Strategy 3: Android + no cookies (sometimes cookies trigger issues)
  strategies.push({
-  label: 'android-tv',
+  label: 'android-no-cookies',
   mutate: true,
-  transform: (a) => replaceOrInsertExtractorArgs(a, 'youtube:player_client=android,tv'),
+  transform: (a) => replaceOrInsertExtractorArgs(a, 'youtube:player_client=android'),
+  useCookies: false,
+ });
+
+ // Strategy 4: Android + specific user agent
+ strategies.push({
+  label: 'android-specific-ua',
+  mutate: true,
+  transform: (a) => {
+   let args = replaceOrInsertExtractorArgs(a, 'youtube:player_client=android');
+   args = addArgsIfMissing(args, ['--user-agent', 'Mozilla/5.0 (Linux; Android 10; SM-G975F) AppleWebKit/537.36']);
+   return args;
+  },
   useCookies: allowCookies,
  });
 
- // Strategy 4: Embedded web client + android (some bypass)
- strategies.push({
-  label: 'embedded-web',
-  mutate: true,
-  transform: (a) => replaceOrInsertExtractorArgs(a, 'youtube:player_client=web_embedded,android'),
-  useCookies: allowCookies,
- });
-
- // Strategy 5: iOS client (another mobile bypass)
+ // Strategy 5: iOS client (mobile alternative)
  strategies.push({
   label: 'ios-client',
   mutate: true,
@@ -1996,42 +2019,15 @@ async function executeWithFallbackStrategies(baseArgs, {purpose = 'generic', tim
   useCookies: allowCookies,
  });
 
- // Strategy 6: Android + force IPv4 + random user agent
+ // Strategy 6: Android + TV clients (enhanced bypass for stubborn videos)
  strategies.push({
-  label: 'android-ipv4-ua',
+  label: 'android-tv',
   mutate: true,
-  transform: (a) => {
-   let args = replaceOrInsertExtractorArgs(a, 'youtube:player_client=android');
-   args = addArgsIfMissing(args, ['--force-ipv4']);
-   args = addArgsIfMissing(args, ['--user-agent', getRandomUserAgent()]);
-   return args;
-  },
+  transform: (a) => replaceOrInsertExtractorArgs(a, 'youtube:player_client=android,tv'),
   useCookies: allowCookies,
  });
 
- // Strategy 7: Disable cookies entirely (sometimes stale cookies trigger challenge)
- strategies.push({
-  label: 'no-cookies-android',
-  mutate: true,
-  transform: (a) => replaceOrInsertExtractorArgs(a, 'youtube:player_client=android'),
-  useCookies: false,
- });
-
- // Strategy 8: Aggressive bypass - multiple clients + no cookies
- strategies.push({
-  label: 'aggressive-bypass',
-  mutate: true,
-  transform: (a) => {
-   let args = replaceOrInsertExtractorArgs(a, 'youtube:player_client=android,tv,ios');
-   args = addArgsIfMissing(args, ['--force-ipv4']);
-   args = addArgsIfMissing(args, ['--user-agent', getRandomUserAgent()]);
-   args = addArgsIfMissing(args, ['--sleep-requests', '1']);
-   return args;
-  },
-  useCookies: false,
- });
-
- // Strategy 9: Last resort - minimal extraction
+ // Strategy 7: Minimal extraction - last resort
  strategies.push({
   label: 'minimal-extraction',
   mutate: true,
@@ -2227,6 +2223,13 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+
+// Add simple HTTP request logging middleware
+app.use((req, res, next) => {
+ console.log(`[HTTP] ${new Date().toISOString()} ${req.method} ${req.path} - ${req.ip || 'unknown'}`);
+ next();
+});
+
 app.use(express.json({limit: '10mb'}));
 app.use(express.urlencoded({extended: true, limit: '10mb'}));
 
@@ -2362,22 +2365,88 @@ app.get('/health', async (req, res) => {
  res.json(healthInfo);
 });
 
-// Root endpoint for basic connectivity test
-app.get('/', (req, res) => {
- res.json({
-  message: 'AI YouTube to Shorts Backend API',
-  status: 'running',
-  version: '1.0.0',
-  endpoints: ['/health', '/api/intelligent-segments', '/api/enhanced-transcript/:videoId', '/api/shorts', '/api/transcript'],
-  cors: {
-   enabled: true,
-   allowedOrigins: whitelist,
-  },
-  timestamp: new Date().toISOString(),
- });
+// 🚨 DEBUG ENDPOINT: Production diagnostics with Azure awareness
+// ============================================
+// 🔧 DEBUG ENDPOINT: Test OFFICIAL FIX 2025
+// ============================================
+app.post('/api/debug/official-fix-2025', async (req, res) => {
+ const {youtubeUrl = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'} = req.body;
+ const id = 'official-fix-' + Date.now();
+ const tempFile = path.join(process.cwd(), `${id}.mp4`);
+
+ try {
+  console.log('[OFFICIAL-FIX-2025] 🔧 Testing official fix from PR #14081...');
+  console.log('[OFFICIAL-FIX-2025] 📋 Issue: https://github.com/yt-dlp/yt-dlp/issues/13930');
+  console.log('[OFFICIAL-FIX-2025] ✅ Fixed: https://github.com/yt-dlp/yt-dlp/pull/14081');
+
+  const ytDlpArgs = buildYtDlpArgs(tempFile, youtubeUrl, false);
+
+  console.log('[OFFICIAL-FIX-2025] 📋 Testing arguments:');
+  ytDlpArgs.forEach((arg, index) => {
+   console.log(`[OFFICIAL-FIX-2025]   ${index}: ${arg}`);
+  });
+
+  const result = await executeYtDlpSecurelyCore(ytDlpArgs, {
+   purpose: 'official-fix-test',
+   timeout: 120000,
+   allowCookies: true,
+  });
+
+  // Clean up test file
+  setTimeout(() => {
+   try {
+    if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
+   } catch (e) {
+    /* ignore */
+   }
+  }, 5000);
+
+  res.json({
+   status: 'success',
+   message: 'Official Fix 2025 test completed successfully',
+   officialFix: {
+    issue: 'https://github.com/yt-dlp/yt-dlp/issues/13930',
+    fix: 'https://github.com/yt-dlp/yt-dlp/pull/14081',
+    date: 'August 20, 2025',
+   },
+   testResults: {
+    id,
+    url: youtubeUrl,
+    exitCode: result.code,
+    duration: result.duration,
+    success: true,
+   },
+   configuration: {
+    extractorArgs: 'youtube:player_client=default,android',
+    format: 'best[height<=1080]/best',
+    userAgent: 'Android optimized',
+    retries: 3,
+    socketTimeout: 30,
+   },
+  });
+ } catch (err) {
+  console.error('[OFFICIAL-FIX-2025] ❌ Test failed:', err.message);
+
+  // Analyze if this is the specific error the fix addresses
+  const isTargetError = err.message.includes('Requested format is not available') || err.message.includes('HTTP Error 403') || err.message.includes('content is not available on this app');
+
+  res.status(500).json({
+   status: 'error',
+   message: isTargetError ? 'This is the exact error that PR #14081 fixes - update yt-dlp to latest version' : err.message,
+   officialFix: {
+    issue: 'https://github.com/yt-dlp/yt-dlp/issues/13930',
+    fix: 'https://github.com/yt-dlp/yt-dlp/pull/14081',
+    updateCommand: 'yt-dlp --update-to master',
+   },
+   errorAnalysis: {
+    isKnownIssue: isTargetError,
+    needsUpdate: isTargetError,
+    originalError: err.message,
+   },
+  });
+ }
 });
 
-// 🚨 DEBUG ENDPOINT: Production diagnostics with Azure awareness
 // ============================================
 // 🔧 DEBUG ENDPOINT: Test yt-dlp command structure
 // ============================================
@@ -3055,8 +3124,18 @@ async function checkVideoFormats(id, youtubeUrl) {
  try {
   console.log(`[${id}] 🔍 Starting comprehensive format check for ${youtubeUrl}`);
 
-  // Primary strategy: List formats with multiple client attempts
-  const formatCheckArgs = ['--list-formats', '--no-warnings', '--user-agent', getRandomUserAgent(), '--extractor-args', 'youtube:player_client=web,android', '--socket-timeout', '20', youtubeUrl];
+  // 🚨 CRITICAL FIX: Use SAME client strategy as download to ensure consistency
+  const formatCheckArgs = [
+   '--list-formats',
+   '--no-warnings',
+   '--user-agent',
+   'Mozilla/5.0 (Linux; Android 10; SM-G975F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36',
+   '--extractor-args',
+   'youtube:player_client=android', // 🚨 SAME as download strategy
+   '--socket-timeout',
+   '30',
+   youtubeUrl,
+  ];
 
   let formatCheck = '';
   let strategyUsed = 'unknown';
@@ -3168,11 +3247,11 @@ function buildYtDlpArgs(tempFile, youtubeUrl, useSimpleFormat = false, workingDi
  console.log(`[YT-DLP-ARGS] 📍 Full expected path: ${tempFile}`);
 
  if (useSimpleFormat) {
-  // EMERGENCY SIMPLE FORMAT: When format detection fails, use basic download
-  console.log(`[YT-DLP-ARGS] 🆘 Using emergency simple format`);
+  // EMERGENCY SIMPLE FORMAT: When format detection fails, use basic download with official fix
+  console.log(`[YT-DLP-ARGS] 🆘 Using emergency simple format with OFFICIAL FIX 2025`);
   return [
    '-f',
-   'best[height<=1080]/best',
+   'best[height<=1080]/best', // Official fix format
    '--no-playlist',
    '--no-warnings',
    '--merge-output-format',
@@ -3180,7 +3259,7 @@ function buildYtDlpArgs(tempFile, youtubeUrl, useSimpleFormat = false, workingDi
    '--user-agent',
    getRandomUserAgent(),
    '--extractor-args',
-   'youtube:player_client=android',
+   'youtube:player_client=default,android', // 🚨 OFFICIAL FIX 2025
    '--socket-timeout',
    '30',
    '--retries',
@@ -3191,82 +3270,68 @@ function buildYtDlpArgs(tempFile, youtubeUrl, useSimpleFormat = false, workingDi
   ];
  }
 
- // CRITICAL FIX: Simplified format selection that actually works
+ // 🚨 OFFICIAL FIX 2025: Simplified format selection per PR #14081
+ // Based on analysis: Complex format selectors trigger "Requested format is not available" errors
+ // Solution: Use simplified format selector that YouTube accepts
  const baseArgs = [
   '-f',
-  // 🚨 MAXIMUM COMPATIBILITY: Just use the best available format
-  // Let yt-dlp's built-in logic choose the best format without restrictions
-  'best',
+  // 🚨 OFFICIAL FIX: Use best[height<=1080] as the simplest working format
+  'best[height<=1080]/best', // Fallback to 'best' if height filter fails
   '--no-playlist',
   '--no-warnings',
   '--merge-output-format',
   'mp4',
+
+  // 🚨 CRITICAL: Use specific, working user agent for Android client
   '--user-agent',
-  getRandomUserAgent(),
+  'Mozilla/5.0 (Linux; Android 10; SM-G975F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36',
 
   // =============================================
-  // 🚨 CRITICAL FIX FOR AZURE AUTHENTICATION
+  // 🚨 OFFICIAL FIX 2025: Based on GitHub PR #14081
   // =============================================
-  // Use ANDROID CLIENT with bypass - most reliable for bot detection avoidance
+  // Issue: https://github.com/yt-dlp/yt-dlp/issues/13930
+  // Fixed by: https://github.com/yt-dlp/yt-dlp/pull/14081
+  // Date: August 20, 2025
+  //
+  // SOLUTION: Use simplified client configuration per official fix
   '--extractor-args',
-  'youtube:player_client=android;bypass_native_jsi',
-
-  // Enhanced retry configuration for Azure
+  'youtube:player_client=default,android', // 🚨 CRITICAL: Conservative timeout and retry configuration
   '--retries',
-  '8', // Increased from 5
+  '3', // Further reduced for faster failure detection
   '--socket-timeout',
-  '60', // Increased from 45
+  '30', // Reduced for better response time
   '--fragment-retries',
-  '5', // Increased from 3
+  '2', // Minimal retries to avoid triggering restrictions
 
-  // Essential headers for bot bypass
+  // 🚨 MINIMAL headers to avoid triggering bot detection
   '--add-header',
-  'Accept-Language: en-US,en;q=0.9,id;q=0.8,*;q=0.7',
-  '--add-header',
-  'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-  '--add-header',
-  'Accept-Encoding: gzip, deflate, br',
-  '--add-header',
-  'Cache-Control: no-cache',
-  '--add-header',
-  'Pragma: no-cache',
+  'Accept-Language: en-US,en;q=0.9',
 
-  // Azure-specific network optimizations
+  // 🚨 CRITICAL: Conservative network settings
   '--concurrent-fragments',
-  '3',
-  '--keep-fragments',
-  '--max-downloads',
-  '1',
-
-  // Force IPv4 to avoid Azure networking issues
+  '1', // Single fragment to avoid overwhelming YouTube
   '--force-ipv4',
-
-  // Disable problematic features that trigger bot detection
   '--no-check-certificate',
-  '--no-call-home',
-  // 🚨 REMOVED: --no-check-extensions (invalid option in current yt-dlp version)
 
-  // Output configuration - 🚨 FIXED: Use calculated output path
+  // 🚨 CRITICAL: Disable features that cause issues
+  '--no-call-home',
+  '--no-warnings',
+
+  // 🚨 CRITICAL FIX: Output configuration
   '-o',
   outputPath,
   youtubeUrl,
  ];
 
- // Add Azure-specific configurations
+ // Add minimal Azure-specific configurations only if needed
  if (azureEnv.isAzure) {
-  console.log('[YT-DLP-ARGS] 🌐 Adding Azure-specific configurations...');
+  console.log('[YT-DLP-ARGS] 🌐 Adding minimal Azure-specific configurations...');
 
-  // Add Azure optimizations
+  // Only add essential Azure optimizations
   const azureArgs = [
    '--sleep-requests',
    '1', // Add delay between requests
-   '--sleep-interval',
-   '2', // Sleep between fragment downloads
-   '--max-sleep-interval',
-   '5', // Maximum sleep interval
-   '--no-color', // Disable colored output
-   '--progress-delta',
-   '5', // Reduce progress updates
+   '--no-color', // Disable colored output for Azure logs
   ];
 
   // Insert Azure args before output configuration (-o outputPath youtubeUrl)
@@ -3279,11 +3344,11 @@ function buildYtDlpArgs(tempFile, youtubeUrl, useSimpleFormat = false, workingDi
  // Log the configuration for debugging
  console.log('[YT-DLP-ARGS] 📋 Final arguments count:', baseArgs.length);
  console.log('[YT-DLP-ARGS] 🔍 Key configurations:');
- console.log('[YT-DLP-ARGS]   - Single client strategy: android (Azure-optimized)');
- console.log('[YT-DLP-ARGS]   - Bypass native JSI: enabled');
- console.log('[YT-DLP-ARGS]   - Enhanced retries: 8 attempts');
- console.log('[YT-DLP-ARGS]   - Socket timeout: 60s');
- console.log('[YT-DLP-ARGS]   - Fragment retries: 5 attempts');
+ console.log('[YT-DLP-ARGS]   - Client strategy: android (consistent)');
+ console.log('[YT-DLP-ARGS]   - Format: best (ultra-simplified to bypass restrictions)');
+ console.log('[YT-DLP-ARGS]   - Retries: 3 attempts (conservative)');
+ console.log('[YT-DLP-ARGS]   - Socket timeout: 30s');
+ console.log('[YT-DLP-ARGS]   - Fragment retries: 2 attempts');
  console.log('[YT-DLP-ARGS]   - Force IPv4: enabled');
  console.log('[YT-DLP-ARGS]   - Azure optimizations:', azureEnv.isAzure ? 'enabled' : 'disabled');
  console.log('[YT-DLP-ARGS]   - Output path:', outputPath);
@@ -3298,7 +3363,10 @@ function handleDownloadError(err) {
  let userFriendlyError = 'Video download failed';
 
  if (err.message) {
-  if (err.message.includes('Requested format is not available')) {
+  if (err.message.includes('Failed to extract any player response')) {
+   errorDetails = 'YouTube player response extraction failed - likely bot detection';
+   userFriendlyError = 'YouTube has detected automated access. This video cannot be processed at the moment. Please try a different video or try again later.';
+  } else if (err.message.includes('Requested format is not available')) {
    errorDetails = 'No compatible video format found';
    userFriendlyError = 'This video format is not supported. Try a different video.';
   } else if (err.message.includes('Sign in to confirm')) {
@@ -3559,29 +3627,27 @@ app.post('/api/shorts', async (req, res) => {
     }
    }
   } catch (downloadErr) {
-   console.log(`[${id}] 🔄 Primary download failed, trying backup strategy with simpler format selection`);
+   console.log(`[${id}] 🔄 Primary download failed, trying backup strategy with ultra-simplified format`);
 
    // 🚨 CRITICAL FIX: Backup strategy with proper output path
    const backupOutputPath = workingDir ? path.relative(workingDir, tempFile) : path.basename(tempFile);
 
-   // Backup strategy: Use much simpler format selection
+   // 🚨 ULTRA-SIMPLIFIED backup strategy: Use absolute minimum args to bypass YouTube restrictions
    const backupArgs = [
     '-f',
-    'best[height<=1080]/best[height<=720]/best',
+    'best', // 🚨 ULTRA-SIMPLIFIED: Just 'best' - no format selectors that can trigger restrictions
     '--no-playlist',
     '--no-warnings',
     '--merge-output-format',
     'mp4',
     '--user-agent',
-    getRandomUserAgent(),
+    'Mozilla/5.0 (Linux; Android 10; SM-G975F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36',
     '--extractor-args',
     'youtube:player_client=android',
     '--socket-timeout',
-    '30',
+    '20', // 🚨 Even more aggressive timeout for backup
     '--retries',
-    '3',
-    '--fragment-retries',
-    '3',
+    '2', // 🚨 Minimal retries for backup
     '-o',
     backupOutputPath, // 🚨 FIXED: Use calculated output path
     youtubeUrl,

@@ -140,41 +140,47 @@ class QuickVttProcessor {
  parseVttContent(content) {
   const segments = [];
   const lines = content.split('\n');
-
   let currentSegment = null;
 
-  for (let i = 0; i < lines.length; i++) {
-   const line = lines[i].trim();
+  const isHeaderOrEmpty = (line) =>
+    !line || line === 'WEBVTT' || line.startsWith('NOTE');
 
-   // Skip header and empty lines
-   if (!line || line === 'WEBVTT' || line.startsWith('NOTE')) {
-    continue;
-   }
+  const isTimeLine = (line) =>
+    line.match(/^(\d{2}:\d{2}:\d{2}\.\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}\.\d{3})/);
 
-   // Time format: 00:00:01.000 --> 00:00:04.000
-   const timeMatch = line.match(/^(\d{2}:\d{2}:\d{2}\.\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}\.\d{3})/);
+  const isSegmentNumber = (line) => /^\d+$/.test(line);
 
-   if (timeMatch) {
-    // Save previous segment if exists
+  const handleTimeMatch = (timeMatch) => {
     if (currentSegment && currentSegment.text.trim()) {
-     segments.push(currentSegment);
+      segments.push(currentSegment);
     }
-
-    // Start new segment
     currentSegment = {
-     start: this.timeToSeconds(timeMatch[1]),
-     end: this.timeToSeconds(timeMatch[2]),
-     text: '',
+      start: this.timeToSeconds(timeMatch[1]),
+      end: this.timeToSeconds(timeMatch[2]),
+      text: '',
     };
-   } else if (currentSegment && line && !line.match(/^\d+$/)) {
-    // Accumulate text (skip segment numbers)
-    currentSegment.text += (currentSegment.text ? ' ' : '') + line;
-   }
+  };
+
+  const handleTextLine = (line) => {
+    if (currentSegment && line && !isSegmentNumber(line)) {
+      currentSegment.text += (currentSegment.text ? ' ' : '') + line;
+    }
+  };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (isHeaderOrEmpty(line)) continue;
+
+    const timeMatch = isTimeLine(line);
+    if (timeMatch) {
+      handleTimeMatch(timeMatch);
+    } else {
+      handleTextLine(line);
+    }
   }
 
-  // Add final segment
   if (currentSegment && currentSegment.text.trim()) {
-   segments.push(currentSegment);
+    segments.push(currentSegment);
   }
 
   return segments;

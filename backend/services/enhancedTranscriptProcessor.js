@@ -98,61 +98,67 @@ class EnhancedTranscriptProcessor {
   let currentSegment = null;
   let lineIndex = 0;
 
-  while (lineIndex < lines.length) {
-   const line = lines[lineIndex].trim();
+  const isSequenceNumber = (line) => /^\d+$/.test(line);
 
-   // Skip empty lines
-   if (!line) {
-    lineIndex++;
-    continue;
-   }
+  const handleSequenceNumber = (line) => ({
+    index: parseInt(line),
+    text: '',
+  });
 
-   // Check if this is a sequence number (should be a number)
-   if (/^\d+$/.test(line)) {
-    // Save previous segment if exists
-    if (currentSegment && currentSegment.text) {
-     segments.push(currentSegment);
-    }
-
-    // Start new segment
-    currentSegment = {
-     index: parseInt(line),
-     text: '',
-    };
-    lineIndex++;
-
-    // Next line should be timestamp
-    if (lineIndex < lines.length) {
-     const timestampLine = lines[lineIndex].trim();
-     const timestamps = this.parseTimestampLine(timestampLine);
-
-     if (timestamps) {
-      currentSegment.start = timestamps.start;
-      currentSegment.end = timestamps.end;
-      lineIndex++;
-     } else {
+  const handleTimestampLine = (timestampLine) => {
+    const timestamps = this.parseTimestampLine(timestampLine);
+    if (timestamps) {
+      return { start: timestamps.start, end: timestamps.end };
+    } else {
       console.warn(`[SRT-PARSER] Invalid timestamp: ${timestampLine}`);
-      currentSegment = null;
+      return null;
+    }
+  };
+
+  const addSegmentIfValid = (segment) => {
+    if (segment && segment.text) {
+      segments.push(segment);
+    }
+  };
+
+  while (lineIndex < lines.length) {
+    const line = lines[lineIndex].trim();
+
+    if (!line) {
+      lineIndex++;
       continue;
-     }
     }
-   } else if (currentSegment) {
-    // This is transcript text
-    if (currentSegment.text) {
-     currentSegment.text += ' ';
+
+    if (isSequenceNumber(line)) {
+      addSegmentIfValid(currentSegment);
+      currentSegment = handleSequenceNumber(line);
+      lineIndex++;
+
+      if (lineIndex < lines.length) {
+        const timestampLine = lines[lineIndex].trim();
+        const timestamps = handleTimestampLine(timestampLine);
+
+        if (timestamps) {
+          currentSegment.start = timestamps.start;
+          currentSegment.end = timestamps.end;
+          lineIndex++;
+        } else {
+          currentSegment = null;
+          lineIndex++;
+          continue;
+        }
+      }
+    } else if (currentSegment) {
+      currentSegment.text = currentSegment.text
+        ? currentSegment.text + ' ' + line
+        : line;
+      lineIndex++;
+    } else {
+      lineIndex++;
     }
-    currentSegment.text += line;
-    lineIndex++;
-   } else {
-    // Orphaned text line, skip
-    lineIndex++;
-   }
   }
 
-  // Add final segment
-  if (currentSegment && currentSegment.text) {
-   segments.push(currentSegment);
-  }
+  addSegmentIfValid(currentSegment);
 
   console.log(`[SRT-PARSER] ✅ Successfully parsed ${segments.length} SRT segments`);
   return segments;

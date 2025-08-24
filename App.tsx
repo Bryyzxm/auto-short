@@ -165,72 +165,72 @@ const App: React.FC = () => {
 
  // Enhanced transcript fetching with emergency fallback
  const fetchEnhancedTranscript = async (videoId: string): Promise<{transcript: string; segments: any[]; method: string}> => {
-  try {
-   console.log(`[APP] Fetching enhanced transcript with timing for ${videoId}`);
+  const backendUrl = BACKEND_URL;
 
-   // Try backend with timing first
-   const backendUrl = BACKEND_URL;
-   const enhancedUrl = `${backendUrl}/api/enhanced-transcript/${videoId}`;
-
-   console.log(`[APP] Trying enhanced backend endpoint: ${enhancedUrl}`);
-   const response = await fetch(enhancedUrl);
-
+  const handleBackendResponse = async (response: Response) => {
    if (response.ok) {
     const data = await response.json();
-    console.log(`[APP] Enhanced backend success: ${data.transcript?.length || 0} chars, ${data.segments?.length || 0} segments, method: ${data.method}`);
     return {
      transcript: data.segments ? data.segments.map((s: any) => s.text).join(' ') : data.transcript || '',
      segments: data.segments || [],
      method: data.method || 'Enhanced Backend',
     };
-   } else {
-    // Check for specific error responses from backend
-    try {
-     const errorData = await response.json();
-     if (errorData.error) {
-      console.log(`[APP] Enhanced backend error: ${errorData.error}`);
-      // Propagate specific backend errors
-      if (errorData.error.includes('A valid transcript is not available for this video')) {
-       throw new Error(errorData.error);
-      }
-     }
-    } catch (parseError) {
-     // JSON parsing failed, continue with status-based handling
-    }
-    console.log(`[APP] Enhanced backend failed with status: ${response.status}`);
    }
-
-   // Emergency fallback endpoint
-   console.log(`[APP] Trying emergency transcript endpoint...`);
-   const emergencyResponse = await fetch(`${backendUrl}/api/emergency-transcript/${videoId}`);
-
-   if (emergencyResponse.ok || emergencyResponse.status === 206) {
-    // Accept partial content
-    const emergencyData = await emergencyResponse.json();
-    console.log(`[APP] Emergency endpoint success: ${emergencyData.segments?.length || 0} segments, method: ${emergencyData.method}`);
-
-    if (emergencyData.isFallback) {
-     console.warn(`[APP] ⚠️ Using fallback transcript data for ${videoId}`);
+   try {
+    const errorData = await response.json();
+    if (errorData.error) {
+     if (errorData.error.includes('A valid transcript is not available for this video')) {
+      throw new Error(errorData.error);
+     }
     }
+   } catch {}
+   return null;
+  };
 
+  const handleEmergencyResponse = async (response: Response) => {
+   if (response.ok || response.status === 206) {
+    const emergencyData = await response.json();
     return {
      transcript: emergencyData.segments ? emergencyData.segments.map((s: any) => s.text).join(' ') : '',
      segments: emergencyData.segments || [],
      method: emergencyData.method || 'Emergency Fallback',
     };
-   } else {
-    // Check for specific error responses from emergency endpoint
-    try {
-     const errorData = await emergencyResponse.json();
-     if (errorData.error && errorData.error.includes('A valid transcript is not available for this video')) {
-      console.log(`[APP] Emergency endpoint - NoValidTranscriptError: ${errorData.error}`);
-      throw new Error(errorData.error);
-     }
-    } catch (parseError) {
-     // JSON parsing failed, continue
-    }
-    console.log(`[APP] Emergency endpoint failed with status: ${emergencyResponse.status}`);
    }
+   try {
+    const errorData = await response.json();
+    if (errorData.error && errorData.error.includes('A valid transcript is not available for this video')) {
+     throw new Error(errorData.error);
+    }
+   } catch {}
+   return null;
+  };
+
+  try {
+   console.log(`[APP] Fetching enhanced transcript with timing for ${videoId}`);
+
+   // Try backend with timing first
+   const enhancedUrl = `${backendUrl}/api/enhanced-transcript/${videoId}`;
+   console.log(`[APP] Trying enhanced backend endpoint: ${enhancedUrl}`);
+   const response = await fetch(enhancedUrl);
+   const backendResult = await handleBackendResponse(response);
+   if (backendResult) {
+    console.log(`[APP] Enhanced backend success: ${backendResult.transcript.length} chars, ${backendResult.segments.length} segments, method: ${backendResult.method}`);
+    return backendResult;
+   }
+   console.log(`[APP] Enhanced backend failed with status: ${response.status}`);
+
+   // Emergency fallback endpoint
+   console.log(`[APP] Trying emergency transcript endpoint...`);
+   const emergencyResponse = await fetch(`${backendUrl}/api/emergency-transcript/${videoId}`);
+   const emergencyResult = await handleEmergencyResponse(emergencyResponse);
+   if (emergencyResult) {
+    console.log(`[APP] Emergency endpoint success: ${emergencyResult.segments.length} segments, method: ${emergencyResult.method}`);
+    if ((emergencyResult as any).isFallback) {
+     console.warn(`[APP] ⚠️ Using fallback transcript data for ${videoId}`);
+    }
+    return emergencyResult;
+   }
+   console.log(`[APP] Emergency endpoint failed with status: ${emergencyResponse.status}`);
 
    // Fallback to transcriptManager
    console.log(`[APP] Falling back to transcript manager...`);
@@ -252,22 +252,57 @@ const App: React.FC = () => {
  };
 
  // Fetch intelligent segments with real timing and enhanced Indonesian support
+ // Helper for error handling
+ function handleIntelligentSegmentsError(errorData: any) {
+  if (!errorData || !errorData.error) return;
+  console.log(`[APP] Intelligent segments error: ${errorData.error}`);
+
+  if (errorData.indonesianFriendly) {
+   throw new Error(errorData.message);
+  }
+  if (errorData.errorType === 'transcript_disabled') {
+   throw new Error('Transkrip dinonaktifkan oleh pemilik video. Silakan coba video lain atau gunakan fitur upload manual.');
+  }
+  if (errorData.errorType === 'temporary_failure') {
+   throw new Error('Layanan sementara tidak tersedia. Silakan coba lagi dalam beberapa menit.');
+  }
+  if (errorData.errorType === 'processing_timeout') {
+   throw new Error('Video membutuhkan waktu lebih lama untuk diproses karena pembatasan YouTube. Silakan tunggu dan coba lagi dalam beberapa menit.');
+  }
+  if (errorData.error.includes('A valid transcript is not available for this video')) {
+   throw new Error('Transkrip tidak tersedia untuk video ini. Video mungkin tidak memiliki subtitle Indonesia.');
+  }
+ }
+
+ // Helper for mapping segments
+ function mapSegments(data: any, videoId: string): ShortVideo[] {
+  return data.segments.map((segment: any, index: number) => ({
+   id: segment.id,
+   title: segment.title || `Segment ${index + 1}`,
+   description: segment.description || `Segmen cerdas dengan durasi ${segment.duration}s`,
+   startTimeSeconds: segment.startTimeSeconds,
+   endTimeSeconds: segment.endTimeSeconds,
+   youtubeVideoId: videoId,
+   thumbnailUrl: segment.thumbnailUrl,
+   transcriptExcerpt: segment.transcriptExcerpt,
+   hasRealTiming: segment.hasRealTiming,
+   duration: segment.duration,
+  }));
+ }
+
  const fetchIntelligentSegments = async (videoId: string, targetCount: number = 15): Promise<ShortVideo[]> => {
   console.log(`[APP] Fetching intelligent segments for ${videoId} with Indonesian priority (target: ${targetCount})`);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 300000);
 
   try {
-   const controller = new AbortController();
-   const timeoutId = setTimeout(() => controller.abort(), 300000); // INCREASED: 5 minutes timeout to handle YouTube rate limiting
-
    const response = await fetch(`${BACKEND_URL}/api/intelligent-segments`, {
     method: 'POST',
-    headers: {
-     'Content-Type': 'application/json',
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-     videoId: videoId,
+     videoId,
      targetSegmentCount: targetCount,
-     prioritizeIndonesian: true, // Request Indonesian content priority
+     prioritizeIndonesian: true,
     }),
     signal: controller.signal,
    });
@@ -275,39 +310,10 @@ const App: React.FC = () => {
    clearTimeout(timeoutId);
 
    if (!response.ok) {
-    // Try to get specific error message from backend
     try {
      const errorData = await response.json();
-     if (errorData.error) {
-      console.log(`[APP] Intelligent segments error: ${errorData.error}`);
-
-      // Handle Indonesian-specific error messages
-      if (errorData.indonesianFriendly) {
-       throw new Error(errorData.message); // Use Indonesian-friendly message
-      }
-
-      // Handle specific error types with appropriate Indonesian messages
-      if (errorData.errorType === 'transcript_disabled') {
-       throw new Error('Transkrip dinonaktifkan oleh pemilik video. Silakan coba video lain atau gunakan fitur upload manual.');
-      }
-
-      if (errorData.errorType === 'temporary_failure') {
-       throw new Error('Layanan sementara tidak tersedia. Silakan coba lagi dalam beberapa menit.');
-      }
-
-      if (errorData.errorType === 'processing_timeout') {
-       throw new Error('Video membutuhkan waktu lebih lama untuk diproses karena pembatasan YouTube. Silakan tunggu dan coba lagi dalam beberapa menit.');
-      }
-
-      // Propagate specific backend errors like NoValidTranscriptError
-      if (errorData.error.includes('A valid transcript is not available for this video')) {
-       throw new Error('Transkrip tidak tersedia untuk video ini. Video mungkin tidak memiliki subtitle Indonesia.');
-      }
-     }
-    } catch (parseError) {
-     // JSON parsing failed, use generic error
-    }
-
+     handleIntelligentSegmentsError(errorData);
+    } catch {}
     throw new Error(`API gagal merespons: ${response.status}. Silakan coba lagi.`);
    }
 
@@ -321,35 +327,17 @@ const App: React.FC = () => {
 
    if (data.segments && data.segments.length > 0) {
     console.log(`[APP] ✅ Got ${data.segments.length} intelligent segments (avg: ${data.averageDuration}s, quality: ${data.transcriptQuality})`);
-
-    // Log Indonesian content detection
     if (data.language === 'indonesian' || data.method?.includes('indonesian')) {
      console.log(`[APP] 🇮🇩 Indonesian content successfully processed using: ${data.method}`);
     }
-
-    return data.segments.map((segment: any, index: number) => ({
-     id: segment.id,
-     title: segment.title || `Segment ${index + 1}`,
-     description: segment.description || `Segmen cerdas dengan durasi ${segment.duration}s`,
-     startTimeSeconds: segment.startTimeSeconds,
-     endTimeSeconds: segment.endTimeSeconds,
-     youtubeVideoId: videoId,
-     thumbnailUrl: segment.thumbnailUrl,
-     transcriptExcerpt: segment.transcriptExcerpt,
-     hasRealTiming: segment.hasRealTiming,
-     duration: segment.duration,
-    }));
-   } else {
-    throw new Error('Tidak ada segmen yang berhasil dibuat. Video mungkin terlalu pendek atau tidak memiliki konten yang sesuai.');
+    return mapSegments(data, videoId);
    }
+   throw new Error('Tidak ada segmen yang berhasil dibuat. Video mungkin terlalu pendek atau tidak memiliki konten yang sesuai.');
   } catch (error: any) {
    console.error(`[APP] Intelligent segments failed for ${videoId}:`, error);
-
-   // Enhanced error handling for timeout
    if (error.name === 'AbortError') {
     throw new Error('Permintaan membutuhkan waktu lebih lama dari biasanya karena pembatasan YouTube. Silakan tunggu atau coba lagi dalam beberapa menit.');
    }
-
    throw error;
   }
  };
@@ -518,7 +506,7 @@ const App: React.FC = () => {
    setIsLoading(true);
    setError(null);
    setGeneratedShorts([]);
-   setActivePlayerId(null); // Reset active player on new submission
+   setActivePlayerId(null);
 
    const videoId = extractYouTubeVideoId(url);
    if (!videoId) {
@@ -526,207 +514,129 @@ const App: React.FC = () => {
     setIsLoading(false);
     return;
    }
-
-   // Set video ID immediately so users can upload transcripts
    setCurrentVideoId(videoId);
 
-   try {
-    console.log(`[APP] ✅ NEW APPROACH: Using intelligent segments with Indonesian priority for ${videoId}`);
+   const targetSegmentCount = aspectRatio === '16:9' ? 18 : 15;
 
-    // Get target segment count based on aspect ratio - increased for better results
-    const targetSegmentCount = aspectRatio === '16:9' ? 18 : 15; // Increased from 10/8 to 18/15
-
-    // Use NEW intelligent segmentation API with enhanced error handling
-    const intelligentSegments = await fetchIntelligentSegments(videoId, targetSegmentCount);
-
-    console.log(`[APP] ✅ Intelligent segmentation complete: ${intelligentSegments.length} segments`);
-    intelligentSegments.forEach((segment, index) => {
-     const duration = segment.endTimeSeconds - segment.startTimeSeconds;
-     const startTime = Math.floor(segment.startTimeSeconds / 60) + ':' + String(Math.floor(segment.startTimeSeconds % 60)).padStart(2, '0');
-     const endTime = Math.floor(segment.endTimeSeconds / 60) + ':' + String(Math.floor(segment.endTimeSeconds % 60)).padStart(2, '0');
-     console.log(`[APP] Segment ${index + 1}: "${segment.title}" (${startTime} - ${endTime}, ${Math.round(duration)}s)`);
-    });
-
-    setGeneratedShorts(intelligentSegments);
-    setCurrentVideoId(videoId);
-    setIsLoading(false);
-    return; // Success - no need for legacy fallback
-   } catch (intelligentError: any) {
-    console.error(`[APP] ❌ Intelligent segmentation failed:`, intelligentError);
-
-    // Check for specific error types with Indonesian-friendly messages
-    const errorMessage = intelligentError?.message || String(intelligentError);
-
-    // Check for transcript unavailable errors
+   // Helper: handle errors from intelligent segmentation
+   const handleIntelligentSegmentationError = (errorMessage: string) => {
     if (errorMessage.includes('Transkrip tidak tersedia') || errorMessage.includes('tidak memiliki subtitle') || errorMessage.includes('A valid transcript is not available for this video')) {
-     console.log(`[APP] 🚨 NoValidTranscriptError from intelligent segments - showing manual upload`);
      setError('Transkrip otomatis tidak tersedia untuk video ini. Silakan coba video lain atau unggah file transkrip secara manual.');
      setCurrentVideoId(videoId);
      setShowTranscriptUpload(true);
      setIsLoading(false);
-     return;
+     return true;
     }
-
-    // Check for transcript disabled errors
     if (errorMessage.includes('dinonaktifkan oleh pemilik') || errorMessage.includes('disabled')) {
-     console.log(`[APP] 🚨 Transcript disabled error`);
      setError('Transkrip dinonaktifkan oleh pemilik video. Silakan coba video lain atau gunakan fitur upload manual.');
      setCurrentVideoId(videoId);
      setShowTranscriptUpload(true);
      setIsLoading(false);
-     return;
+     return true;
     }
-
-    // Check for temporary service errors
     if (errorMessage.includes('sementara tidak tersedia') || errorMessage.includes('timeout')) {
-     console.log(`[APP] 🚨 Temporary service error`);
      setError('Layanan sementara tidak tersedia. Silakan coba lagi dalam beberapa menit atau gunakan fitur upload manual.');
      setCurrentVideoId(videoId);
      setShowTranscriptUpload(true);
      setIsLoading(false);
-     return;
+     return true;
     }
+    return false;
+   };
 
-    // Other specific error messages for better user experience
-    if (errorMessage.includes('Real timing data required')) {
-     console.log(`[APP] 🔄 Falling back to legacy AI method due to timing issues...`);
-    } else if (errorMessage.includes('No intelligent segments returned') || errorMessage.includes('Tidak ada segmen')) {
-     console.log(`[APP] 🔄 No intelligent segments found, falling back to legacy method...`);
-    } else {
-     console.log(`[APP] 🔄 Falling back to legacy AI method due to: ${errorMessage}`);
+   // Helper: get video duration
+   const getVideoDuration = async (videoId: string, transcriptData: {transcript: string; segments: any[]; method: string}) => {
+    let videoDuration = 0;
+    try {
+     const metaRes = await fetch(`${BACKEND_URL}/api/video-metadata?videoId=${videoId}`);
+     if (metaRes.ok) {
+      const metadata = await metaRes.json();
+      videoDuration = metadata.duration || 0;
+     }
+    } catch {}
+    if (!videoDuration || isNaN(videoDuration) || videoDuration <= 600) {
+     if (transcriptData.segments && transcriptData.segments.length > 0) {
+      const lastSegment = transcriptData.segments[transcriptData.segments.length - 1];
+      videoDuration = Math.ceil(lastSegment.end || 600);
+     } else if (transcriptData.transcript.length > 50000) {
+      const estimatedMinutes = Math.max(10, transcriptData.transcript.length / 2500);
+      videoDuration = Math.ceil(estimatedMinutes * 60);
+     }
     }
-   }
+    return videoDuration;
+   };
 
-   // LEGACY FALLBACK CODE (only runs if intelligent segments fail)
-   let transcriptData: {transcript: string; segments: any[]; method: string} = {transcript: '', segments: [], method: ''};
-   try {
-    console.log(`[APP] Starting enhanced transcript extraction for ${videoId}`);
-    transcriptData = await fetchEnhancedTranscript(videoId);
-    console.log(`[APP] Enhanced transcript loaded: ${transcriptData.transcript.length} chars, ${transcriptData.segments.length} segments, method: ${transcriptData.method}`);
-   } catch (error: any) {
-    console.error(`[APP] Enhanced transcript extraction failed:`, error);
-
-    // Check for specific error types and provide appropriate user feedback
-    const errorMessage = error?.message || String(error);
-
-    // Check for NoValidTranscriptError from backend
-    if (errorMessage.includes('A valid transcript is not available for this video')) {
-     console.log(`[APP] 🚨 NoValidTranscriptError detected - transcript unavailable`);
-     setError('Maaf, transkrip otomatis tidak tersedia untuk video ini. Silakan coba video lain atau unggah file transkrip secara manual.');
-     setCurrentVideoId(videoId);
-     setShowTranscriptUpload(true);
+   // Helper: legacy fallback segmentation
+   const legacySegmentation = async (videoId: string, url: string) => {
+    let transcriptData: {transcript: string; segments: any[]; method: string} = {transcript: '', segments: [], method: ''};
+    try {
+     transcriptData = await fetchEnhancedTranscript(videoId);
+    } catch (error: any) {
+     const errorMessage = error?.message || String(error);
+     if (errorMessage.includes('A valid transcript is not available for this video')) {
+      setError('Maaf, transkrip otomatis tidak tersedia untuk video ini. Silakan coba video lain atau unggah file transkrip secara manual.');
+      setCurrentVideoId(videoId);
+      setShowTranscriptUpload(true);
+      setIsLoading(false);
+      return true;
+     }
+     if (errorMessage.includes('All transcript extraction services failed') || errorMessage.includes('YouTube is blocking') || errorMessage.includes('bot protection')) {
+      setCurrentVideoId(videoId);
+      setShowTranscriptUpload(true);
+      setIsLoading(false);
+      return true;
+     }
+     setError('Transkrip tidak tersedia untuk video ini. Silakan coba video lain.');
      setIsLoading(false);
-     return;
+     return true;
     }
-
-    // Check if this is a YouTube blocking issue
-    if (errorMessage.includes('All transcript extraction services failed') || errorMessage.includes('YouTube is blocking') || errorMessage.includes('bot protection')) {
-     // YouTube blocking detected - show manual upload option
-     console.log(`[APP] 🚨 YouTube blocking detected - showing manual transcript option`);
-     setCurrentVideoId(videoId);
-     setShowTranscriptUpload(true);
+    if (!transcriptData.transcript || transcriptData.transcript.length < 100) {
+     setError('Transkrip video terlalu pendek atau tidak tersedia. Video mungkin tidak memiliki subtitle.');
      setIsLoading(false);
-     return;
+     return true;
     }
-
-    // Generic error for other transcript issues
-    setError('Transkrip tidak tersedia untuk video ini. Silakan coba video lain.');
-    setIsLoading(false);
-    return;
-   }
-
-   // Validate transcript
-   if (!transcriptData.transcript || transcriptData.transcript.length < 100) {
-    console.error(`[APP] Transcript too short or empty: ${transcriptData.transcript.length} chars`);
-    setError('Transkrip video terlalu pendek atau tidak tersedia. Video mungkin tidak memiliki subtitle.');
-    setIsLoading(false);
-    return;
-   }
-
-   let videoDuration = 0;
-   // Fetch durasi video menggunakan backend endpoint untuk menghindari CORS
-   try {
-    console.log(`Fetching video metadata for: ${videoId}`);
-    const metaRes = await fetch(`${BACKEND_URL}/api/video-metadata?videoId=${videoId}`);
-    if (metaRes.ok) {
-     const metadata = await metaRes.json();
-     videoDuration = metadata.duration || 0;
-     console.log(`Video duration from backend: ${videoDuration} seconds`);
-    } else {
-     console.warn('Failed to fetch video metadata from backend:', metaRes.status);
-    }
-   } catch (error) {
-    console.error('Error fetching video metadata:', error);
-   }
-
-   // Smart duration fallback using transcript data
-   if (!videoDuration || isNaN(videoDuration) || videoDuration <= 600) {
-    // Changed: treat 600s as suspicious for long content
-    // Try to estimate duration from transcript segments if available
-    if (transcriptData.segments && transcriptData.segments.length > 0) {
-     const lastSegment = transcriptData.segments[transcriptData.segments.length - 1];
-     const estimatedDuration = Math.ceil(lastSegment.end || 600);
-     console.log(`Transcript-based duration estimate: ${estimatedDuration} seconds (from ${transcriptData.segments.length} segments)`);
-     videoDuration = estimatedDuration;
-    } else if (transcriptData.transcript.length > 50000) {
-     // Long transcript = long video
-     // Estimate from transcript length (rough: 130k chars ≈ 52 minutes)
-     const estimatedMinutes = Math.max(10, transcriptData.transcript.length / 2500); // ~2500 chars per minute
-     const estimatedDuration = Math.ceil(estimatedMinutes * 60);
-     console.log(`Length-based duration estimate: ${estimatedDuration} seconds (${estimatedMinutes.toFixed(1)} min from ${transcriptData.transcript.length} chars)`);
-     videoDuration = estimatedDuration;
-    }
-   }
-
-   console.log(`[APP] Final video duration: ${videoDuration}s (${Math.floor(videoDuration / 60)}m${videoDuration % 60}s)`);
-
-   try {
-    console.log(`[APP] Starting enhanced AI segmentation for ${videoId}`);
-    console.log(`[APP] Video duration: ${videoDuration}s, Transcript: ${transcriptData.transcript.length} chars, Timing segments: ${transcriptData.segments.length}`);
-
-    // Call enhanced generateShortsIdeas with timing segments
-    const ideas = await generateShortsIdeas(
-     url,
-     transcriptData.transcript,
-     videoDuration,
-     transcriptData.segments // Pass timing segments to AI
-    );
-
-    console.log(`[AI SEGMENTS] Enhanced AI generated ${ideas.length} intelligent segments for video duration ${videoDuration}s`);
-
-    if (!ideas || ideas.length === 0) {
-     console.error(`[APP] AI returned no segments`);
-     setError('AI tidak dapat mengidentifikasi segmen menarik dari video ini. Video mungkin tidak cocok untuk format pendek.');
-     setIsLoading(false);
-     return;
-    }
-
-    // Convert AI results to ShortVideo format with proper metadata
-    const shortsWithVideoId: ShortVideo[] = ideas.map((idea, index) => ({
-     ...idea,
-     id: idea.id || `ai-segment-${index}`,
-     youtubeVideoId: videoId,
-     thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
-     customThumbnailUrl: generateYouTubeThumbnailUrl(videoId, idea.startTimeSeconds),
-    }));
-
-    console.log(`[APP] ✅ Enhanced AI segmentation complete: ${shortsWithVideoId.length} segments`);
-    shortsWithVideoId.forEach((segment, i) => {
-     console.log(
-      `[APP] Segment ${i + 1}: "${segment.title}" (${Math.floor(segment.startTimeSeconds / 60)}:${String(segment.startTimeSeconds % 60).padStart(2, '0')} - ${Math.floor(segment.endTimeSeconds / 60)}:${String(
-       segment.endTimeSeconds % 60
-      ).padStart(2, '0')})`
+    const videoDuration = await getVideoDuration(videoId, transcriptData);
+    try {
+     const ideas = await generateShortsIdeas(
+      url,
+      transcriptData.transcript,
+      videoDuration,
+      transcriptData.segments
      );
-    });
+     if (!ideas || ideas.length === 0) {
+      setError('AI tidak dapat mengidentifikasi segmen menarik dari video ini. Video mungkin tidak cocok untuk format pendek.');
+      setIsLoading(false);
+      return true;
+     }
+     const shortsWithVideoId: ShortVideo[] = ideas.map((idea, index) => ({
+      ...idea,
+      id: idea.id || `ai-segment-${index}`,
+      youtubeVideoId: videoId,
+      thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
+      customThumbnailUrl: generateYouTubeThumbnailUrl(videoId, idea.startTimeSeconds),
+     }));
+     setGeneratedShorts(shortsWithVideoId);
+     setCurrentVideoId(videoId);
+    } catch (e: any) {
+     setError(e.message ?? 'Terjadi kesalahan saat menganalisis video dengan AI. Silakan coba lagi.');
+    } finally {
+     setIsLoading(false);
+    }
+    return false;
+   };
 
-    setGeneratedShorts(shortsWithVideoId);
+   // Main logic
+   try {
+    const intelligentSegments = await fetchIntelligentSegments(videoId, targetSegmentCount);
+    setGeneratedShorts(intelligentSegments);
     setCurrentVideoId(videoId);
-   } catch (e: any) {
-    console.error('Enhanced AI segmentation error:', e);
-    setError(e.message ?? 'Terjadi kesalahan saat menganalisis video dengan AI. Silakan coba lagi.');
-   } finally {
     setIsLoading(false);
+    return;
+   } catch (intelligentError: any) {
+    const errorMessage = intelligentError?.message || String(intelligentError);
+    if (handleIntelligentSegmentationError(errorMessage)) return;
    }
+   await legacySegmentation(videoId, url);
   },
   [apiKeyError]
  );

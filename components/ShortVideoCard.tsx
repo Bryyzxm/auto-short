@@ -54,7 +54,7 @@ export const ShortVideoCard: React.FC<ShortVideoCardProps> = ({shortVideo, isAct
 
  useEffect(() => {
   if (!showPlayer) return;
-  if (!window.YT || !window.YT.Player) {
+  if (!window.YT?.Player) {
    // If YT API is not ready, wait for it. This might happen on first load.
    // A more robust solution might involve a global ready state for the API.
    const interval = setInterval(() => {
