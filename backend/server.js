@@ -1748,7 +1748,8 @@ async function executeYtDlpSecurelyCore(args, options = {}) {
    // Enhanced pre-spawn validation for Azure debugging
    console.log(`[YT-DLP-EXEC] 🔍 Pre-spawn validation:`);
    console.log(`[YT-DLP-EXEC]   📍 Binary path: ${binaryToUse}`);
-   console.log(`[YT-DLP-EXEC]   📁 Current working directory: ${process.cwd()}`);
+   console.log(`[YT-DLP-EXEC]   📁 Spawn working directory: ${options.workingDir || process.cwd()}`);
+   console.log(`[YT-DLP-EXEC]   📁 Process current directory: ${process.cwd()}`);
    console.log(`[YT-DLP-EXEC]   👤 Process UID: ${process.getuid ? process.getuid() : 'N/A'}`);
    console.log(`[YT-DLP-EXEC]   👥 Process GID: ${process.getgid ? process.getgid() : 'N/A'}`);
    console.log(`[YT-DLP-EXEC]   🌍 Environment PATH: ${process.env.PATH || 'undefined'}`);
@@ -1778,6 +1779,7 @@ async function executeYtDlpSecurelyCore(args, options = {}) {
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout: options.timeout || 300000,
     maxBuffer: options.maxBuffer || 1024 * 1024 * 50,
+    cwd: options.workingDir || process.cwd(), // 🚨 CRITICAL FIX: Set working directory for spawn
    });
   } catch (spawnErr) {
    console.error(`[YT-DLP-EXEC] ❌ Spawn failed with detailed error:`);
@@ -1956,164 +1958,167 @@ function isSignInBotError(message = '') {
  return YTDLP_SIGNIN_PATTERNS.some((p) => lower.includes(p.toLowerCase()));
 }
 
-async function executeWithFallbackStrategies(baseArgs, {purpose = 'generic', timeout = 300000, maxBuffer, allowCookies = true} = {}) {
- async function executeWithFallbackStrategies(baseArgs, {purpose = 'generic', timeout = 300000, maxBuffer, allowCookies = true} = {}) {
-  const strategies = [];
+async function executeWithFallbackStrategies(baseArgs, {purpose = 'generic', timeout = 300000, maxBuffer, allowCookies = true, workingDir = null} = {}) {
+ const strategies = [];
 
-  // Strategy 1: Original args (already includes cookies if validated)
-  strategies.push({label: 'original', args: baseArgs.slice(), useCookies: allowCookies});
+ // Strategy 1: Original args (already includes cookies if validated)
+ strategies.push({label: 'original', args: baseArgs.slice(), useCookies: allowCookies});
 
-  // Strategy 2: Force android client only (most reliable for bot bypass)
-  strategies.push({
-   label: 'android-client',
-   mutate: true,
-   transform: (a) => replaceOrInsertExtractorArgs(a, 'youtube:player_client=android'),
-   useCookies: allowCookies,
-  });
+ // Strategy 2: Force android client only (most reliable for bot bypass)
+ strategies.push({
+  label: 'android-client',
+  mutate: true,
+  transform: (a) => replaceOrInsertExtractorArgs(a, 'youtube:player_client=android'),
+  useCookies: allowCookies,
+ });
 
-  // Strategy 3: Android + TV clients (enhanced bypass)
-  strategies.push({
-   label: 'android-tv',
-   mutate: true,
-   transform: (a) => replaceOrInsertExtractorArgs(a, 'youtube:player_client=android,tv'),
-   useCookies: allowCookies,
-  });
+ // Strategy 3: Android + TV clients (enhanced bypass)
+ strategies.push({
+  label: 'android-tv',
+  mutate: true,
+  transform: (a) => replaceOrInsertExtractorArgs(a, 'youtube:player_client=android,tv'),
+  useCookies: allowCookies,
+ });
 
-  // Strategy 4: Embedded web client + android (some bypass)
-  strategies.push({
-   label: 'embedded-web',
-   mutate: true,
-   transform: (a) => replaceOrInsertExtractorArgs(a, 'youtube:player_client=web_embedded,android'),
-   useCookies: allowCookies,
-  });
+ // Strategy 4: Embedded web client + android (some bypass)
+ strategies.push({
+  label: 'embedded-web',
+  mutate: true,
+  transform: (a) => replaceOrInsertExtractorArgs(a, 'youtube:player_client=web_embedded,android'),
+  useCookies: allowCookies,
+ });
 
-  // Strategy 5: iOS client (another mobile bypass)
-  strategies.push({
-   label: 'ios-client',
-   mutate: true,
-   transform: (a) => replaceOrInsertExtractorArgs(a, 'youtube:player_client=ios'),
-   useCookies: allowCookies,
-  });
+ // Strategy 5: iOS client (another mobile bypass)
+ strategies.push({
+  label: 'ios-client',
+  mutate: true,
+  transform: (a) => replaceOrInsertExtractorArgs(a, 'youtube:player_client=ios'),
+  useCookies: allowCookies,
+ });
 
-  // Strategy 6: Android + force IPv4 + random user agent
-  strategies.push({
-   label: 'android-ipv4-ua',
-   mutate: true,
-   transform: (a) => {
-    let args = replaceOrInsertExtractorArgs(a, 'youtube:player_client=android');
-    args = addArgsIfMissing(args, ['--force-ipv4']);
-    args = addArgsIfMissing(args, ['--user-agent', getRandomUserAgent()]);
-    return args;
-   },
-   useCookies: allowCookies,
-  });
+ // Strategy 6: Android + force IPv4 + random user agent
+ strategies.push({
+  label: 'android-ipv4-ua',
+  mutate: true,
+  transform: (a) => {
+   let args = replaceOrInsertExtractorArgs(a, 'youtube:player_client=android');
+   args = addArgsIfMissing(args, ['--force-ipv4']);
+   args = addArgsIfMissing(args, ['--user-agent', getRandomUserAgent()]);
+   return args;
+  },
+  useCookies: allowCookies,
+ });
 
-  // Strategy 7: Disable cookies entirely (sometimes stale cookies trigger challenge)
-  strategies.push({
-   label: 'no-cookies-android',
-   mutate: true,
-   transform: (a) => replaceOrInsertExtractorArgs(a, 'youtube:player_client=android'),
-   useCookies: false,
-  });
+ // Strategy 7: Disable cookies entirely (sometimes stale cookies trigger challenge)
+ strategies.push({
+  label: 'no-cookies-android',
+  mutate: true,
+  transform: (a) => replaceOrInsertExtractorArgs(a, 'youtube:player_client=android'),
+  useCookies: false,
+ });
 
-  // Strategy 8: Aggressive bypass - multiple clients + no cookies
-  strategies.push({
-   label: 'aggressive-bypass',
-   mutate: true,
-   transform: (a) => {
-    let args = replaceOrInsertExtractorArgs(a, 'youtube:player_client=android,tv,ios');
-    args = addArgsIfMissing(args, ['--force-ipv4']);
-    args = addArgsIfMissing(args, ['--user-agent', getRandomUserAgent()]);
-    args = addArgsIfMissing(args, ['--sleep-requests', '1']);
-    return args;
-   },
-   useCookies: false,
-  });
+ // Strategy 8: Aggressive bypass - multiple clients + no cookies
+ strategies.push({
+  label: 'aggressive-bypass',
+  mutate: true,
+  transform: (a) => {
+   let args = replaceOrInsertExtractorArgs(a, 'youtube:player_client=android,tv,ios');
+   args = addArgsIfMissing(args, ['--force-ipv4']);
+   args = addArgsIfMissing(args, ['--user-agent', getRandomUserAgent()]);
+   args = addArgsIfMissing(args, ['--sleep-requests', '1']);
+   return args;
+  },
+  useCookies: false,
+ });
 
-  // Strategy 9: Last resort - minimal extraction
-  strategies.push({
-   label: 'minimal-extraction',
-   mutate: true,
-   transform: (a) => {
-    let args = replaceOrInsertExtractorArgs(a, 'youtube:player_client=android');
-    args = addArgsIfMissing(args, ['--no-check-certificate']);
-    args = addArgsIfMissing(args, ['--user-agent', 'Mozilla/5.0 (Linux; Android 10; SM-G975F) AppleWebKit/537.36']);
-    return args;
-   },
-   useCookies: false,
-  });
+ // Strategy 9: Last resort - minimal extraction
+ strategies.push({
+  label: 'minimal-extraction',
+  mutate: true,
+  transform: (a) => {
+   let args = replaceOrInsertExtractorArgs(a, 'youtube:player_client=android');
+   args = addArgsIfMissing(args, ['--no-check-certificate']);
+   args = addArgsIfMissing(args, ['--user-agent', 'Mozilla/5.0 (Linux; Android 10; SM-G975F) AppleWebKit/537.36']);
+   return args;
+  },
+  useCookies: false,
+ });
 
-  let lastError;
-  let strategyResults = [];
+ let lastError;
+ let strategyResults = [];
 
-  for (const strat of strategies) {
-   try {
-    let workingArgs = strat.mutate ? strat.transform(baseArgs.slice()) : baseArgs.slice();
-    console.log(`[YTDLP-FALLBACK] 🚀 Attempting strategy=${strat.label} purpose=${purpose} cookies=${strat.useCookies}`);
+ for (const strat of strategies) {
+  try {
+   let workingArgs = strat.mutate ? strat.transform(baseArgs.slice()) : baseArgs.slice();
+   console.log(`[YTDLP-FALLBACK] 🚀 Attempting strategy=${strat.label} purpose=${purpose} cookies=${strat.useCookies}`);
 
-    const startTime = Date.now();
-    const out = await executeYtDlpSecurelyCore(workingArgs, {timeout, maxBuffer, useCookies: strat.useCookies});
-    const duration = Date.now() - startTime;
+   const startTime = Date.now();
+   const out = await executeYtDlpSecurelyCore(workingArgs, {
+    timeout,
+    maxBuffer,
+    useCookies: strat.useCookies,
+    workingDir: workingDir, // 🚨 CRITICAL FIX: Pass working directory
+   });
+   const duration = Date.now() - startTime;
 
-    // Enhanced validation with error handler
-    const validationResult = errorHandler.normalizeYtDlpOutput(out);
-    if (!validationResult.valid) {
-     throw new Error(`Strategy ${strat.label} returned invalid output: ${validationResult.error}`);
-    }
-
-    strategyResults.push({
-     strategy: strat.label,
-     success: true,
-     duration,
-     outputSize: validationResult.output ? validationResult.output.length : 0,
-    });
-
-    if (strat.label !== 'original') {
-     console.log(`[YTDLP-FALLBACK] ✅ Strategy succeeded: ${strat.label} (${duration}ms, ${validationResult.output?.length || 0} chars)`);
-    }
-
-    // Return safely structured result
-    return errorHandler.safeDestructure({output: validationResult.output, strategy: strat.label, attempts: strategyResults}, {output: '', strategy: 'unknown', attempts: []});
-   } catch (err) {
-    lastError = err;
-    const signIn = isSignInBotError(err.message);
-    const duration = Date.now() - (Date.now() - 5000); // rough estimate
-
-    strategyResults.push({
-     strategy: strat.label,
-     success: false,
-     duration,
-     error: err.message.substring(0, 100),
-     botDetection: signIn,
-    });
-
-    console.warn(`[YTDLP-FALLBACK] ❌ Strategy failed (${strat.label}) botDetection=${signIn} err=${err.message.substring(0, 140)}`);
-
-    if (!signIn && strat.label === 'original') {
-     // Non sign-in error at first attempt -> break early (not a bot issue)
-     console.log(`[YTDLP-FALLBACK] 💡 Non-bot error detected, skipping remaining strategies`);
-     break;
-    }
-    // Continue loop for sign-in errors or if we are exploring strategies
+   // Enhanced validation with error handler
+   const validationResult = errorHandler.normalizeYtDlpOutput(out);
+   if (!validationResult.valid) {
+    throw new Error(`Strategy ${strat.label} returned invalid output: ${validationResult.error}`);
    }
+
+   strategyResults.push({
+    strategy: strat.label,
+    success: true,
+    duration,
+    outputSize: validationResult.output ? validationResult.output.length : 0,
+   });
+
+   if (strat.label !== 'original') {
+    console.log(`[YTDLP-FALLBACK] ✅ Strategy succeeded: ${strat.label} (${duration}ms, ${validationResult.output?.length || 0} chars)`);
+   }
+
+   // Return safely structured result
+   return errorHandler.safeDestructure({output: validationResult.output, strategy: strat.label, attempts: strategyResults}, {output: '', strategy: 'unknown', attempts: []});
+  } catch (err) {
+   lastError = err;
+   const signIn = isSignInBotError(err.message);
+   const duration = Date.now() - (Date.now() - 5000); // rough estimate
+
+   strategyResults.push({
+    strategy: strat.label,
+    success: false,
+    duration,
+    error: err.message.substring(0, 100),
+    botDetection: signIn,
+   });
+
+   console.warn(`[YTDLP-FALLBACK] ❌ Strategy failed (${strat.label}) botDetection=${signIn} err=${err.message.substring(0, 140)}`);
+
+   if (!signIn && strat.label === 'original') {
+    // Non sign-in error at first attempt -> break early (not a bot issue)
+    console.log(`[YTDLP-FALLBACK] 💡 Non-bot error detected, skipping remaining strategies`);
+    break;
+   }
+   // Continue loop for sign-in errors or if we are exploring strategies
   }
-
-  // Log comprehensive failure analysis
-  console.error(`[YTDLP-FALLBACK] 💀 All strategies failed. Attempted ${strategyResults.length} strategies:`);
-  strategyResults.forEach((result, index) => {
-   const status = result.success ? '✅' : '❌';
-   const extra = result.botDetection ? ' [BOT-DETECTED]' : '';
-   console.error(`[YTDLP-FALLBACK]   ${index + 1}. ${status} ${result.strategy}${extra}`);
-  });
-
-  // Enhanced error with strategy context
-  const errorWithContext = new Error(lastError ? lastError.message : 'All strategies failed with unknown error');
-  errorWithContext.originalError = lastError;
-  errorWithContext.strategiesAttempted = strategyResults;
-  errorWithContext.botDetectionCount = strategyResults.filter((r) => r.botDetection).length;
-
-  throw errorWithContext;
  }
+
+ // Log comprehensive failure analysis
+ console.error(`[YTDLP-FALLBACK] 💀 All strategies failed. Attempted ${strategyResults.length} strategies:`);
+ strategyResults.forEach((result, index) => {
+  const status = result.success ? '✅' : '❌';
+  const extra = result.botDetection ? ' [BOT-DETECTED]' : '';
+  console.error(`[YTDLP-FALLBACK]   ${index + 1}. ${status} ${result.strategy}${extra}`);
+ });
+
+ // Enhanced error with strategy context
+ const errorWithContext = new Error(lastError ? lastError.message : 'All strategies failed with unknown error');
+ errorWithContext.originalError = lastError;
+ errorWithContext.strategiesAttempted = strategyResults;
+ errorWithContext.botDetectionCount = strategyResults.filter((r) => r.botDetection).length;
+
+ throw errorWithContext;
 }
 
 // Utility: replace or inject --extractor-args value
@@ -3152,12 +3157,19 @@ async function checkVideoFormats(id, youtubeUrl) {
  }
 }
 
-// Build yt-dlp arguments for video download
-function buildYtDlpArgs(tempFile, youtubeUrl, useSimpleFormat = false) {
+// Build yt-dlp arguments for video download with Azure working directory fix
+function buildYtDlpArgs(tempFile, youtubeUrl, useSimpleFormat = false, workingDir = null) {
  console.log(`[YT-DLP-ARGS] 🔧 Building yt-dlp arguments with Azure optimizations${useSimpleFormat ? ' (SIMPLE MODE)' : ''}...`);
+
+ // 🚨 CRITICAL FIX: Ensure output path is relative to working directory for yt-dlp
+ const outputPath = workingDir ? path.relative(workingDir, tempFile) : path.basename(tempFile);
+ console.log(`[YT-DLP-ARGS] 📁 Working directory: ${workingDir || process.cwd()}`);
+ console.log(`[YT-DLP-ARGS] 📍 Output path for yt-dlp: ${outputPath}`);
+ console.log(`[YT-DLP-ARGS] 📍 Full expected path: ${tempFile}`);
 
  if (useSimpleFormat) {
   // EMERGENCY SIMPLE FORMAT: When format detection fails, use basic download
+  console.log(`[YT-DLP-ARGS] 🆘 Using emergency simple format`);
   return [
    '-f',
    'best[height<=1080]/best',
@@ -3174,7 +3186,7 @@ function buildYtDlpArgs(tempFile, youtubeUrl, useSimpleFormat = false) {
    '--retries',
    '3',
    '-o',
-   tempFile,
+   outputPath, // 🚨 FIXED: Use calculated output path
    youtubeUrl,
   ];
  }
@@ -3182,7 +3194,7 @@ function buildYtDlpArgs(tempFile, youtubeUrl, useSimpleFormat = false) {
  // CRITICAL FIX: Simplified format selection that actually works
  const baseArgs = [
   '-f',
-  // SIMPLIFIED: Much more reliable format selection
+  // 🚨 SIMPLIFIED: Much more reliable format selection for Azure
   'best[height<=1080][ext=mp4]/best[height<=720]/best[ext=mp4]/best',
   '--no-playlist',
   '--no-warnings',
@@ -3192,11 +3204,11 @@ function buildYtDlpArgs(tempFile, youtubeUrl, useSimpleFormat = false) {
   getRandomUserAgent(),
 
   // =============================================
-  // 🚨 CRITICAL FIX FOR "CONTENT NOT AVAILABLE"
+  // 🚨 CRITICAL FIX FOR AZURE AUTHENTICATION
   // =============================================
-  // Use multiple client strategies as fallbacks
+  // Use SINGLE CLIENT strategy to avoid auth conflicts
   '--extractor-args',
-  'youtube:player_client=default,tv_simply,web,android;bypass_native_jsi;formats=all',
+  'youtube:player_client=android;bypass_native_jsi',
 
   // Enhanced retry configuration for Azure
   '--retries',
@@ -3206,7 +3218,7 @@ function buildYtDlpArgs(tempFile, youtubeUrl, useSimpleFormat = false) {
   '--fragment-retries',
   '5', // Increased from 3
 
-  // Enhanced headers for better compatibility
+  // Essential headers for bot bypass
   '--add-header',
   'Accept-Language: en-US,en;q=0.9,id;q=0.8,*;q=0.7',
   '--add-header',
@@ -3217,14 +3229,6 @@ function buildYtDlpArgs(tempFile, youtubeUrl, useSimpleFormat = false) {
   'Cache-Control: no-cache',
   '--add-header',
   'Pragma: no-cache',
-  '--add-header',
-  'Sec-Fetch-Dest: document',
-  '--add-header',
-  'Sec-Fetch-Mode: navigate',
-  '--add-header',
-  'Sec-Fetch-Site: none',
-  '--add-header',
-  'Upgrade-Insecure-Requests: 1',
 
   // Azure-specific network optimizations
   '--concurrent-fragments',
@@ -3241,9 +3245,9 @@ function buildYtDlpArgs(tempFile, youtubeUrl, useSimpleFormat = false) {
   '--no-call-home',
   '--no-check-extensions',
 
-  // Output configuration
+  // Output configuration - 🚨 FIXED: Use calculated output path
   '-o',
-  tempFile,
+  outputPath,
   youtubeUrl,
  ];
 
@@ -3264,8 +3268,8 @@ function buildYtDlpArgs(tempFile, youtubeUrl, useSimpleFormat = false) {
    '5', // Reduce progress updates
   ];
 
-  // Insert Azure args before output configuration (-o tempFile youtubeUrl)
-  const insertIndex = baseArgs.length - 3; // Before -o, tempFile, and URL
+  // Insert Azure args before output configuration (-o outputPath youtubeUrl)
+  const insertIndex = baseArgs.length - 3; // Before -o, outputPath, and URL
   baseArgs.splice(insertIndex, 0, ...azureArgs);
 
   console.log('[YT-DLP-ARGS] ✅ Azure configurations added');
@@ -3274,14 +3278,15 @@ function buildYtDlpArgs(tempFile, youtubeUrl, useSimpleFormat = false) {
  // Log the configuration for debugging
  console.log('[YT-DLP-ARGS] 📋 Final arguments count:', baseArgs.length);
  console.log('[YT-DLP-ARGS] 🔍 Key configurations:');
- console.log('[YT-DLP-ARGS]   - Multiple client fallbacks: default,tv_simply,web,android');
+ console.log('[YT-DLP-ARGS]   - Single client strategy: android (Azure-optimized)');
  console.log('[YT-DLP-ARGS]   - Bypass native JSI: enabled');
- console.log('[YT-DLP-ARGS]   - All formats: enabled');
  console.log('[YT-DLP-ARGS]   - Enhanced retries: 8 attempts');
  console.log('[YT-DLP-ARGS]   - Socket timeout: 60s');
  console.log('[YT-DLP-ARGS]   - Fragment retries: 5 attempts');
  console.log('[YT-DLP-ARGS]   - Force IPv4: enabled');
  console.log('[YT-DLP-ARGS]   - Azure optimizations:', azureEnv.isAzure ? 'enabled' : 'disabled');
+ console.log('[YT-DLP-ARGS]   - Output path:', outputPath);
+ console.log('[YT-DLP-ARGS]   - Working directory:', workingDir || process.cwd());
 
  return baseArgs;
 }
@@ -3436,9 +3441,51 @@ app.post('/api/shorts', async (req, res) => {
  }
 
  const id = uuidv4();
- const tempFile = path.join(process.cwd(), `${id}.mp4`);
+
+ // 🚨 CRITICAL FIX: Azure working directory path resolution
+ // Azure App Service has complex directory structure: /home/site/wwwroot/backend
+ // But process.cwd() returns /home/site/wwwroot, causing file path mismatches
+ let tempFile;
+ let workingDir;
+
+ if (azureEnv.isAzure) {
+  // In Azure: Use backend directory explicitly to match yt-dlp execution context
+  workingDir = path.join('/home/site/wwwroot', 'backend');
+  tempFile = path.join(workingDir, `${id}.mp4`);
+  console.log(`[${id}] 🌐 Azure Mode: Using backend working directory`);
+  console.log(`[${id}] 📁 Working directory: ${workingDir}`);
+  console.log(`[${id}] 📍 Expected file path: ${tempFile}`);
+
+  // Ensure working directory exists and is accessible
+  try {
+   if (!fs.existsSync(workingDir)) {
+    fs.mkdirSync(workingDir, {recursive: true});
+    console.log(`[${id}] 📁 Created working directory: ${workingDir}`);
+   }
+
+   // Test write permissions
+   const testFile = path.join(workingDir, `.write-test-${Date.now()}`);
+   fs.writeFileSync(testFile, 'test');
+   fs.unlinkSync(testFile);
+   console.log(`[${id}] ✅ Working directory is writable`);
+  } catch (dirError) {
+   console.error(`[${id}] ❌ Working directory issue: ${dirError.message}`);
+   // Fallback to process.cwd() if backend directory fails
+   workingDir = process.cwd();
+   tempFile = path.join(workingDir, `${id}.mp4`);
+   console.log(`[${id}] 🔄 Fallback to process.cwd(): ${workingDir}`);
+  }
+ } else {
+  // Local development: Use standard process.cwd()
+  workingDir = process.cwd();
+  tempFile = path.join(workingDir, `${id}.mp4`);
+  console.log(`[${id}] 💻 Local Mode: Using process.cwd()`);
+ }
 
  console.log(`[${id}] Mulai proses download dan cut segmen: ${youtubeUrl} (${start}s - ${end}s, rasio: ${aspectRatio})`);
+ console.log(`[${id}] 🔧 Environment: ${azureEnv.isAzure ? 'Azure App Service' : 'Local Development'}`);
+ console.log(`[${id}] 📁 Working directory: ${workingDir}`);
+ console.log(`[${id}] 📍 Target file: ${tempFile}`);
  logEnvironmentInfo(id);
 
  // Check video formats with aggressive fallback handling
@@ -3458,35 +3505,63 @@ app.post('/api/shorts', async (req, res) => {
 
  // Choose download strategy based on format check results
  const useSimpleFormat = !formatCheck.success || formatCheck.strategy === 'optimistic' || formatCheck.skipFormatCheck;
- const ytDlpArgs = buildYtDlpArgs(tempFile, youtubeUrl, useSimpleFormat);
+ const ytDlpArgs = buildYtDlpArgs(tempFile, youtubeUrl, useSimpleFormat, workingDir);
 
  console.log(`[${id}] yt-dlp command (${useSimpleFormat ? 'SIMPLE' : 'ADVANCED'}): ${YT_DLP_PATH} ${ytDlpArgs.join(' ')}`);
  console.log(`[${id}] Expected output file: ${tempFile}`);
- console.log(`[${id}] Working directory: ${process.cwd()}`);
+ console.log(`[${id}] Working directory: ${workingDir}`);
+ console.log(`[${id}] Process current directory: ${process.cwd()}`);
 
  try {
   try {
-   const fallbackResult = await executeWithFallbackStrategies(ytDlpArgs, {purpose: 'download', timeout: 300000, maxBuffer: 1024 * 1024 * 50});
+   const fallbackResult = await executeWithFallbackStrategies(ytDlpArgs, {
+    purpose: 'download',
+    timeout: 300000,
+    maxBuffer: 1024 * 1024 * 50,
+    workingDir: workingDir, // 🚨 FIXED: Pass working directory context
+   });
 
    // Safely destructure with fallback values
    const {output = '', strategy = 'unknown'} = fallbackResult || {};
    console.log(`[${id}] download strategy used: ${strategy}`);
    console.log(`[${id}] yt-dlp output: ${output.substring(0, 500)}...`);
 
-   // Check if file exists after download
+   // Check if file exists after download with enhanced debugging
    console.log(`[${id}] Checking if file exists: ${tempFile}`);
+   console.log(`[${id}] Working directory for file check: ${workingDir}`);
+   console.log(`[${id}] Process current directory: ${process.cwd()}`);
+
    if (fs.existsSync(tempFile)) {
     console.log(`[${id}] ✅ File found: ${tempFile}`);
     const stats = fs.statSync(tempFile);
     console.log(`[${id}] File size: ${stats.size} bytes`);
    } else {
     console.log(`[${id}] ❌ File not found: ${tempFile}`);
-    // List files in working directory to see what was created
-    const files = fs.readdirSync(process.cwd()).filter((f) => f.includes(id) || f.endsWith('.mp4'));
-    console.log(`[${id}] Files in working directory matching ID or .mp4: ${files.join(', ')}`);
+
+    // 🚨 ENHANCED DEBUGGING: Check multiple possible locations
+    const debugLocations = [process.cwd(), workingDir, path.dirname(tempFile), '/home/site/wwwroot', '/home/site/wwwroot/backend'].filter(Boolean).filter((loc, index, arr) => arr.indexOf(loc) === index); // Remove duplicates
+
+    console.log(`[${id}] 🔍 Searching for files in ${debugLocations.length} locations...`);
+
+    for (const location of debugLocations) {
+     try {
+      if (fs.existsSync(location)) {
+       const files = fs
+        .readdirSync(location)
+        .filter((f) => f.includes(id) || f.endsWith('.mp4') || f.includes('youtube'))
+        .slice(0, 10); // Limit to 10 files to avoid log spam
+       console.log(`[${id}] 📁 ${location}: ${files.length > 0 ? files.join(', ') : 'No matching files'}`);
+      }
+     } catch (dirError) {
+      console.log(`[${id}] ❌ Cannot read ${location}: ${dirError.message}`);
+     }
+    }
    }
   } catch (downloadErr) {
    console.log(`[${id}] 🔄 Primary download failed, trying backup strategy with simpler format selection`);
+
+   // 🚨 CRITICAL FIX: Backup strategy with proper output path
+   const backupOutputPath = workingDir ? path.relative(workingDir, tempFile) : path.basename(tempFile);
 
    // Backup strategy: Use much simpler format selection
    const backupArgs = [
@@ -3507,26 +3582,52 @@ app.post('/api/shorts', async (req, res) => {
     '--fragment-retries',
     '3',
     '-o',
-    tempFile,
+    backupOutputPath, // 🚨 FIXED: Use calculated output path
     youtubeUrl,
    ];
 
    console.log(`[${id}] 🔄 Backup command: ${YT_DLP_PATH} ${backupArgs.join(' ')}`);
-   const backupResult = await executeWithFallbackStrategies(backupArgs, {purpose: 'backup-download', timeout: 300000, maxBuffer: 1024 * 1024 * 50});
+   console.log(`[${id}] 🔄 Backup working directory: ${workingDir}`);
+   console.log(`[${id}] 🔄 Backup output path: ${backupOutputPath}`);
+
+   const backupResult = await executeWithFallbackStrategies(backupArgs, {
+    purpose: 'backup-download',
+    timeout: 300000,
+    maxBuffer: 1024 * 1024 * 50,
+    workingDir: workingDir, // 🚨 FIXED: Pass working directory context
+   });
    console.log(`[${id}] ✅ Backup download successful with strategy: ${backupResult?.strategy || 'unknown'}`);
    console.log(`[${id}] Backup yt-dlp output: ${backupResult?.output?.substring(0, 500) || ''}...`);
 
-   // Check if file exists after backup download
+   // Check if file exists after backup download with enhanced debugging
    console.log(`[${id}] Checking if backup file exists: ${tempFile}`);
+   console.log(`[${id}] Backup working directory: ${workingDir}`);
+
    if (fs.existsSync(tempFile)) {
     console.log(`[${id}] ✅ Backup file found: ${tempFile}`);
     const stats = fs.statSync(tempFile);
     console.log(`[${id}] Backup file size: ${stats.size} bytes`);
    } else {
     console.log(`[${id}] ❌ Backup file not found: ${tempFile}`);
-    // List files in working directory to see what was created
-    const files = fs.readdirSync(process.cwd()).filter((f) => f.includes(id) || f.endsWith('.mp4'));
-    console.log(`[${id}] Files in working directory after backup: ${files.join(', ')}`);
+
+    // Enhanced debugging for backup as well
+    const debugLocations = [process.cwd(), workingDir, path.dirname(tempFile), '/home/site/wwwroot', '/home/site/wwwroot/backend'].filter(Boolean).filter((loc, index, arr) => arr.indexOf(loc) === index);
+
+    console.log(`[${id}] 🔍 Backup search in ${debugLocations.length} locations...`);
+
+    for (const location of debugLocations) {
+     try {
+      if (fs.existsSync(location)) {
+       const files = fs
+        .readdirSync(location)
+        .filter((f) => f.includes(id) || f.endsWith('.mp4'))
+        .slice(0, 5);
+       console.log(`[${id}] 📁 ${location}: ${files.length > 0 ? files.join(', ') : 'No files'}`);
+      }
+     } catch (dirError) {
+      console.log(`[${id}] ❌ Cannot read ${location}: ${dirError.message}`);
+     }
+    }
    }
   }
   console.timeEnd(`[${id}] yt-dlp download`);
@@ -3592,10 +3693,15 @@ app.post('/api/shorts', async (req, res) => {
   return res.status(500).json({
    error: 'Downloaded file not found',
    details: `Expected file: ${tempFile}`,
+   workingDir: workingDir,
+   processDir: process.cwd(),
   });
  }
 
- const cutFile = path.join(process.cwd(), `${id}-short.mp4`);
+ // 🚨 CRITICAL FIX: Use same working directory for cut file as temp file
+ const cutFile = path.join(workingDir, `${id}-short.mp4`);
+ console.log(`[${id}] 📍 Cut file path: ${cutFile}`);
+ console.log(`[${id}] 📁 Cut file directory: ${path.dirname(cutFile)}`);
  const videoFilters = buildVideoFilters(needsUpscaling, aspectRatio, videoWidth, videoHeight);
  const ffmpegArgs = buildFfmpegArgs(start, end, tempFile, cutFile, videoFilters, aspectRatio, needsUpscaling);
 
