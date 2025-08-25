@@ -65,21 +65,24 @@ class EnhancedCorsManager {
     const originalJson = res.json;
     const originalStatus = res.status;
 
+    // Store reference to corsManager instance for proper context
+    const corsManager = this;
+
     // Override response methods to ensure CORS headers
     res.send = function (body) {
-     this.addCorsHeadersToResponse(res, req.headers.origin);
-     return originalSend.call(this, body);
-    }.bind(this);
+     corsManager.addCorsHeadersToResponse(res, req.headers.origin);
+     return originalSend.call(res, body);
+    };
 
     res.json = function (obj) {
-     this.addCorsHeadersToResponse(res, req.headers.origin);
-     return originalJson.call(this, obj);
-    }.bind(this);
+     corsManager.addCorsHeadersToResponse(res, req.headers.origin);
+     return originalJson.call(res, obj);
+    };
 
     res.status = function (code) {
-     this.addCorsHeadersToResponse(res, req.headers.origin);
-     return originalStatus.call(this, code);
-    }.bind(this);
+     corsManager.addCorsHeadersToResponse(res, req.headers.origin);
+     return originalStatus.call(res, code);
+    };
 
     next();
    });

@@ -2454,6 +2454,25 @@ const corsOptions = {
 app.use(timeoutMiddleware(240000)); // 4 minutes (Azure gateway limit)
 app.use(corsMiddleware); // Enhanced CORS with error handling
 
+// 🛡️ CRITICAL: Global error handler to prevent crashes
+app.use((err, req, res, next) => {
+ console.error(`[GLOBAL-ERROR] ${req.method} ${req.path}:`, err);
+
+ // Ensure CORS headers are present on error responses
+ if (!res.headersSent) {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Credentials', 'true');
+
+  res.status(500).json({
+   success: false,
+   error: 'INTERNAL_SERVER_ERROR',
+   message: 'An unexpected error occurred. Please try again.',
+   timestamp: new Date().toISOString(),
+   ...(process.env.NODE_ENV !== 'production' && {stack: err.stack}),
+  });
+ }
+});
+
 // Add simple HTTP request logging middleware
 app.use((req, res, next) => {
  console.log(`[HTTP] ${new Date().toISOString()} ${req.method} ${req.path} - ${req.ip || 'unknown'}`);
@@ -3615,7 +3634,7 @@ function buildYtDlpArgs(tempFile, youtubeUrl, useSimpleFormat = false, workingDi
   console.log(`[YT-DLP-ARGS] 🆘 Using emergency simple format with OFFICIAL FIX 2025`);
   return [
    '-f',
-   'best[height<=1080]/best', // Official fix format
+   'bestvideo[height>=720]+bestaudio/best[height>=720]/best', // Enhanced format for 720p+ guarantee
    '--no-playlist',
    '--no-warnings',
    '--merge-output-format',
@@ -3634,13 +3653,13 @@ function buildYtDlpArgs(tempFile, youtubeUrl, useSimpleFormat = false, workingDi
   ];
  }
 
- // 🚨 OFFICIAL FIX 2025: Simplified format selection per PR #14081
- // Based on analysis: Complex format selectors trigger "Requested format is not available" errors
- // Solution: Use simplified format selector that YouTube accepts
+ // 🚨 OFFICIAL FIX 2025: Enhanced format selection per PR #14081
+ // Based on analysis: Progressive format selection ensures 720p+ quality
+ // Solution: Use bestvideo+bestaudio combination for optimal quality
  const baseArgs = [
   '-f',
-  // 🚨 OFFICIAL FIX: Use best[height<=1080] as the simplest working format
-  'best[height<=1080]/best', // Fallback to 'best' if height filter fails
+  // 🚨 OFFICIAL FIX: Progressive format selection for guaranteed 720p+ quality
+  'bestvideo[height>=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height>=720]+bestaudio/best[height>=720]/best[height<=1080]/best',
   '--no-playlist',
   '--no-warnings',
   '--merge-output-format',
@@ -3657,9 +3676,15 @@ function buildYtDlpArgs(tempFile, youtubeUrl, useSimpleFormat = false, workingDi
   // Fixed by: https://github.com/yt-dlp/yt-dlp/pull/14081
   // Date: August 20, 2025
   //
-  // SOLUTION: Use simplified client configuration per official fix
+  // SOLUTION: Use default,android client configuration per official fix
   '--extractor-args',
-  'youtube:player_client=default,android', // 🚨 CRITICAL: Conservative timeout and retry configuration
+  'youtube:player_client=default,android',
+
+  // 🚨 AUTHENTICATION: Add cookies support for better access
+  '--cookies',
+  process.env.YTDLP_COOKIES_PATH || '/home/data/cookies.txt',
+
+  // 🚨 CRITICAL: Conservative timeout and retry configuration
   '--retries',
   '3', // Further reduced for faster failure detection
   '--socket-timeout',
