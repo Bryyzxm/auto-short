@@ -9,7 +9,7 @@ const cors = require('cors');
  */
 class EnhancedCorsManager {
  constructor() {
-  this.productionOrigins = ['https://auto-short.azurewebsites.net', 'https://autoshort.azurewebsites.net', 'https://www.auto-short.com', 'https://auto-short.com'];
+  this.productionOrigins = ['https://auto-short.azurewebsites.net', 'https://autoshort.azurewebsites.net', 'https://www.auto-short.com', 'https://auto-short.com', 'https://auto-short.vercel.app'];
 
   this.developmentOrigins = ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:5173', 'http://127.0.0.1:3000', 'http://127.0.0.1:3001', 'http://127.0.0.1:5173'];
 
