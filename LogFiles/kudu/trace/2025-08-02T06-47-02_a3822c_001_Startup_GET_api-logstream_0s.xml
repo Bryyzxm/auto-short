@@ -1,0 +1,5 @@
+<step title="Startup Request" date="2025-08-02T06:47:02.239" instance="a3822c" url="/api/logstream/" method="GET" type="request" pid="823,1,15" ScmType="GitHubAction" >
+  <step title="Cleanup Xml Logs" date="2025-08-02T06:47:02.320" >
+    <step title="Cleanup Infos" date="2025-08-02T06:47:02.360" totalFiles="352" totalCleanup="192" /><!-- duration: 9ms -->
+  </step><!-- duration: 78ms -->
+</step><!-- duration: 160ms -->

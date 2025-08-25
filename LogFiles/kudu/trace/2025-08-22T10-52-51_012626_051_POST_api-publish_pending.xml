@@ -1,0 +1,17 @@
+<step title="Incoming Request" date="2025-08-22T10:52:51.696" instance="012626" url="/api/publish?async=true&amp;deployer=GITHUB_ONE_DEPLOY&amp;type=zip&amp;message=%7B%22type%22%3A%22deployment%22%2C%22sha%22%3A%22711277acf171e40f07e36248effde2ec2b138136%22%2C%22repoName%22%3A%22Bryyzxm%2Fauto-short%22%2C%22actor%22%3A%22Bryyzxm%22%2C%22slotName%22%3A%22Production%22%2C%22commitMessage%22%3A%22Menerapkan%20perbaikan%20Azure%20yang%20komprehensif%20untuk%20yt-dlp%2C%20meningkatkan%20konfigurasi%20dan%20proses%20startup%22%7D" method="POST" type="request" pid="822,1,24" Host="auto-short.scm.azurewebsites.net" User-Agent="GITHUBACTIONS_DeployWebAppToAzure_f81e7167bbeb51fd19821600e6284771686769097686e3cd36b60977e423344c" Authorization="Bea..." Content-Type="application/octet-stream" Cookie="ARRAffinity=0126262dad7bf6d8466f7b5ebab35827b82bb601182dd1915d36aa46f0d0c678;Path=/;HttpOnly;Secure;Domain=auto-short.scm.azurewebsites.net; ARRAffinitySameSite=0126262dad7bf6d8466f7b5ebab35827b82bb601182dd1915d36aa46f0d0c678;Path=/;HttpOnly;SameSite=None;Secure;Domain=auto-short.scm.azurewebsites.net" Transfer-Encoding="chunked" X-ARR-LOG-ID="7d14d8da-09db-4866-a92a-d4e458d6df8f" CLIENT-IP="172.184.213.163:32793" X-SITE-DEPLOYMENT-ID="auto-short" WAS-DEFAULT-HOSTNAME="auto-short.scm.azurewebsites.net" X-Forwarded-Proto="https" X-AppService-Proto="https" X-Forwarded-TlsVersion="1.3" X-WAWS-Unencoded-URL="/api/publish?async=true&amp;deployer=GITHUB_ONE_DEPLOY&amp;type=zip&amp;message=%7B%22type%22%3A%22deployment%22%2C%22sha%22%3A%22711277acf171e40f07e36248effde2ec2b138136%22%2C%22repoName%22%3A%22Bryyzxm%2Fauto-short%22%2C%22actor%22%3A%22Bryyzxm%22%2C%22slotName%22%3A%22Production%22%2C%22commitMessage%22%3A%22Menerapkan%20perbaikan%20Azure%20yang%20komprehensif%20untuk%20yt-dlp%2C%20meningkatkan%20konfigurasi%20dan%20proses%20startup%22%7D" X-Client-IP="172.184.213.163" X-Client-Port="32793" >
+  <step title="Cleanup Xml Logs" date="2025-08-22T10:52:51.735" >
+    <step title="Cleanup Infos" date="2025-08-22T10:52:51.770" totalFiles="1045" totalCleanup="885" /><!-- duration: 7ms -->
+  </step><!-- duration: 43ms -->
+  <step title="OneDeploy" date="2025-08-22T10:52:51.959" >
+    <step title="Starting PushDeployAsync" date="2025-08-22T10:52:51.976" /><!-- duration: 2ms -->
+    <step title="Removing node_modules symlink" date="2025-08-22T10:52:52.000" >
+      <step title="Writing artifact to /tmp/zipdeploy/98967393-dab9-422e-adc5-3eaf36942070.zip" date="2025-08-22T10:52:52.108" >
+        <step title="Writing multipart request body to /tmp/zipdeploy/98967393-dab9-422e-adc5-3eaf36942070.zip" date="2025-08-22T10:52:52.117" /><!-- duration: 9ms -->
+      </step><!-- duration: 4952ms -->
+      <step title="Start deployment in the background" date="2025-08-22T10:52:57.079" >
+        <step title="Acquiring Deployment Lock" date="2025-08-22T10:52:57.168" /><!-- duration: 1ms -->
+        <step title="Acquired Deployment Lock" date="2025-08-22T10:52:57.197" /><!-- duration: 2ms -->
+      </step><!-- duration: 252ms -->
+    </step><!-- duration: 5342ms -->
+    <step title="Outgoing response" date="2025-08-22T10:52:57.353" type="response" statusCode="202" statusText="Accepted" /><!-- duration: 2ms -->
+  </step><!-- duration: 5397ms -->

@@ -1,0 +1,21 @@
+<step title="Incoming Request" date="2025-08-02T03:04:40.461" instance="7f6884" url="/api/publish?async=true&amp;deployer=GITHUB_ONE_DEPLOY&amp;type=zip&amp;message=%7B%22type%22%3A%22deployment%22%2C%22sha%22%3A%2251308821c34b6d8376a3917ec7e93d386d0d7d08%22%2C%22repoName%22%3A%22Bryyzxm%2Fauto-short%22%2C%22actor%22%3A%22Bryyzxm%22%2C%22slotName%22%3A%22Production%22%2C%22commitMessage%22%3A%22Refactor%20pengelola%20cookie%20untuk%20menyederhanakan%20deteksi%20yt-dlp%20dan%20meningkatkan%20penanganan%20kesalahan%3B%20meningkatkan%20logika%20ekstraksi%20transkrip%20dengan%20metode%20pembantu%20untuk%20keterbacaan%20dan%20pemeliharaan%20yang%20lebih%20baik%3B%20memperbarui%20komponen%20UI%20untuk%20meningkatkan%20gaya%20dan%20aksesibilitas%20pesan%3B%20mengoptimalkan%20caching%20layanan%20transkrip%20dan%20penanganan%20permintaan.%22%7D" method="POST" type="request" pid="821,1,58" Host="auto-short.scm.azurewebsites.net" User-Agent="GITHUBACTIONS_DeployWebAppToAzure_f81e7167bbeb51fd19821600e6284771686769097686e3cd36b60977e423344c" Authorization="Bea..." Content-Type="application/octet-stream" Cookie="ARRAffinity=7f6884e57c32676ac9bcd2dd8c1e5911c0f7c9dd5a26c8e8b2aa06ac68c2f4da;Path=/;HttpOnly;Secure;Domain=auto-short.scm.azurewebsites.net; ARRAffinitySameSite=7f6884e57c32676ac9bcd2dd8c1e5911c0f7c9dd5a26c8e8b2aa06ac68c2f4da;Path=/;HttpOnly;SameSite=None;Secure;Domain=auto-short.scm.azurewebsites.net" Transfer-Encoding="chunked" X-ARR-LOG-ID="2ffe09ac-e06f-4563-bb01-3fa65fa6e753" CLIENT-IP="74.235.126.83:3105" X-SITE-DEPLOYMENT-ID="auto-short" WAS-DEFAULT-HOSTNAME="auto-short.scm.azurewebsites.net" X-Forwarded-Proto="https" X-AppService-Proto="https" X-Forwarded-TlsVersion="1.3" X-WAWS-Unencoded-URL="/api/publish?async=true&amp;deployer=GITHUB_ONE_DEPLOY&amp;type=zip&amp;message=%7B%22type%22%3A%22deployment%22%2C%22sha%22%3A%2251308821c34b6d8376a3917ec7e93d386d0d7d08%22%2C%22repoName%22%3A%22Bryyzxm%2Fauto-short%22%2C%22actor%22%3A%22Bryyzxm%22%2C%22slotName%22%3A%22Production%22%2C%22commitMessage%22%3A%22Refactor%20pengelola%20cookie%20untuk%20menyederhanakan%20deteksi%20yt-dlp%20dan%20meningkatkan%20penanganan%20kesalahan%3B%20meningkatkan%20logika%20ekstraksi%20transkrip%20dengan%20metode%20pembantu%20untuk%20keterbacaan%20dan%20pemeliharaan%20yang%20lebih%20baik%3B%20memperbarui%20komponen%20UI%20untuk%20meningkatkan%20gaya%20dan%20aksesibilitas%20pesan%3B%20mengoptimalkan%20caching%20layanan%20transkrip%20dan%20penanganan%20permintaan.%22%7D" X-Client-IP="74.235.126.83" X-Client-Port="3105" >
+  <step title="Cleanup Xml Logs" date="2025-08-02T03:04:40.469" >
+    <step title="Cleanup Infos" date="2025-08-02T03:04:40.483" totalFiles="249" totalCleanup="89" /><!-- duration: 3ms -->
+  </step><!-- duration: 22ms -->
+  <step title="OneDeploy" date="2025-08-02T03:04:40.538" >
+    <step title="None repository commit" date="2025-08-02T03:04:40.553" >
+      <step title="Commit id: d70e44bd-9f0b-4a9a-b529-165c907a2764" date="2025-08-02T03:04:40.556" Message="N/A" AuthorName="N/A" AuthorEmail="N/A" /><!-- duration: 3ms -->
+    </step><!-- duration: 21ms -->
+    <step title="Starting PushDeployAsync" date="2025-08-02T03:04:40.577" /><!-- duration: 4ms -->
+    <step title="Removing node_modules symlink" date="2025-08-02T03:04:40.603" >
+      <step title="Removing _del_node_modules symlink" date="2025-08-02T03:04:40.921" >
+        <step title="Writing artifact to /tmp/zipdeploy/e2b54226-8880-481f-98bf-ead9155c9293.zip" date="2025-08-02T03:04:40.933" >
+          <step title="Writing multipart request body to /tmp/zipdeploy/e2b54226-8880-481f-98bf-ead9155c9293.zip" date="2025-08-02T03:04:40.940" /><!-- duration: 15ms -->
+        </step><!-- duration: 9604ms -->
+        <step title="Start deployment in the background" date="2025-08-02T03:04:50.557" >
+          <step title="Acquiring Deployment Lock" date="2025-08-02T03:04:50.598" /><!-- duration: 3ms -->
+          <step title="Acquired Deployment Lock" date="2025-08-02T03:04:50.651" /><!-- duration: 3ms -->
+        </step><!-- duration: 180ms -->
+      </step><!-- duration: 9825ms -->
+      <step title="Outgoing response" date="2025-08-02T03:04:50.759" type="response" statusCode="202" statusText="Accepted" /><!-- duration: 4ms -->
+    </step><!-- duration: 10163ms -->

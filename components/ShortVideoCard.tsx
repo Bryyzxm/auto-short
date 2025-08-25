@@ -46,6 +46,7 @@ export const ShortVideoCard: React.FC<ShortVideoCardProps> = ({shortVideo, isAct
  const [playerError, setPlayerError] = useState(false);
  const [isDownloading, setIsDownloading] = useState(false);
  const [downloadError, setDownloadError] = useState<string | null>(null);
+ const [downloadProgress, setDownloadProgress] = useState<string>('');
  const [transcript, setTranscript] = useState<string>('');
  const [transcriptLoading, setTranscriptLoading] = useState(false);
  const [showFullTranscript, setShowFullTranscript] = useState(false);
@@ -196,7 +197,10 @@ export const ShortVideoCard: React.FC<ShortVideoCardProps> = ({shortVideo, isAct
  const handleDownload = async () => {
   setIsDownloading(true);
   setDownloadError(null);
+  setDownloadProgress('Memulai pemrosesan video...');
+
   try {
+   // Step 1: Create video processing job
    const response = await fetch(`${BACKEND_URL}/api/shorts`, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -207,20 +211,83 @@ export const ShortVideoCard: React.FC<ShortVideoCardProps> = ({shortVideo, isAct
      aspectRatio: aspectRatio,
     }),
    });
+
    if (!response.ok) {
     const err = await response.json().catch(() => ({}));
     throw new Error(err.error || 'Gagal memproses video.');
    }
-   const data = await response.json();
-   if (data.downloadUrl) {
-    window.open(`${BACKEND_URL}${data.downloadUrl}`, '_blank');
-   } else {
+
+   const jobData = await response.json();
+
+   // Step 2: Handle immediate success (fallback) or async job
+   if (jobData.downloadUrl) {
+    // Direct download URL (legacy path)
+    setDownloadProgress('Mengunduh video...');
+    window.open(`${BACKEND_URL}${jobData.downloadUrl}`, '_blank');
+    return;
+   }
+
+   if (!jobData.jobId) {
     throw new Error('Link unduhan tidak ditemukan.');
    }
+
+   // Step 3: Poll job status until completion
+   const jobId = jobData.jobId;
+   const maxWaitTime = 300000; // 5 minutes max wait
+   const pollInterval = 2000; // Poll every 2 seconds
+   const startTime = Date.now();
+
+   setDownloadProgress('Video sedang diproses...');
+
+   while (Date.now() - startTime < maxWaitTime) {
+    await new Promise((resolve) => setTimeout(resolve, pollInterval));
+
+    const jobResponse = await fetch(`${BACKEND_URL}/api/jobs/${jobId}`);
+    if (!jobResponse.ok) {
+     throw new Error('Gagal memeriksa status pemrosesan video.');
+    }
+
+    const jobStatus = await jobResponse.json();
+
+    // Update progress message
+    if (jobStatus.message) {
+     setDownloadProgress(jobStatus.message);
+    }
+
+    // Check job completion
+    if (jobStatus.status === 'completed' && jobStatus.result) {
+     setDownloadProgress('Menyiapkan unduhan...');
+
+     if (jobStatus.result.video) {
+      // Download base64 video
+      const link = document.createElement('a');
+      link.href = `data:video/mp4;base64,${jobStatus.result.video}`;
+      link.download = jobStatus.result.filename || `segment_${shortVideo.youtubeVideoId}.mp4`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setDownloadProgress('Video berhasil diunduh!');
+      return;
+     } else if (jobStatus.result.downloadUrl) {
+      // Download via URL
+      window.open(`${BACKEND_URL}${jobStatus.result.downloadUrl}`, '_blank');
+      setDownloadProgress('Video berhasil diunduh!');
+      return;
+     } else {
+      throw new Error('Hasil pemrosesan video tidak valid.');
+     }
+    } else if (jobStatus.status === 'failed') {
+     throw new Error(jobStatus.error || 'Pemrosesan video gagal.');
+    }
+   }
+
+   throw new Error('Pemrosesan video membutuhkan waktu terlalu lama. Silakan coba lagi.');
   } catch (e: any) {
    setDownloadError(e.message || 'Terjadi kesalahan saat mengunduh.');
+   setDownloadProgress('');
   } finally {
    setIsDownloading(false);
+   setTimeout(() => setDownloadProgress(''), 3000); // Clear progress after 3 seconds
   }
  };
 
@@ -464,6 +531,7 @@ export const ShortVideoCard: React.FC<ShortVideoCardProps> = ({shortVideo, isAct
       {isDownloading ? 'Memproses...' : 'Download'}
      </button>
     </div>
+    {isDownloading && downloadProgress && <div className="mt-2 text-xs text-blue-400">{downloadProgress}</div>}
     {downloadError && <div className="mt-2 text-xs text-red-400">{downloadError}</div>}
    </div>
   </div>

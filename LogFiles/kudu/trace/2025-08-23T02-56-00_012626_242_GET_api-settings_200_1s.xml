@@ -1,0 +1,6 @@
+<step title="Incoming Request" date="2025-08-23T02:56:00.787" instance="012626" url="/api/settings" method="GET" type="request" pid="822,1,77" Host="auto-short.scm.azurewebsites.net" User-Agent="GITHUBACTIONS_DeployWebAppToAzure_f81e7167bbeb51fd19821600e6284771686769097686e3cd36b60977e423344c" Authorization="Bea..." Content-Type="application/json; charset=utf-8" Content-Length="0" X-ARR-LOG-ID="02c93af5-0118-422e-9104-f5a5937a60b3" CLIENT-IP="172.172.87.244:52224" X-SITE-DEPLOYMENT-ID="auto-short" WAS-DEFAULT-HOSTNAME="auto-short.scm.azurewebsites.net" X-Forwarded-Proto="https" X-AppService-Proto="https" X-Forwarded-TlsVersion="1.3" X-WAWS-Unencoded-URL="/api/settings" X-Client-IP="172.172.87.244" X-Client-Port="52224" >
+  <step title="Cleanup Xml Logs" date="2025-08-23T02:56:00.796" >
+    <step title="Cleanup Infos" date="2025-08-23T02:56:00.842" totalFiles="1226" totalCleanup="1066" /><!-- duration: 14ms -->
+  </step><!-- duration: 66ms -->
+  <step title="Outgoing response" date="2025-08-23T02:56:01.511" type="response" statusCode="200" statusText="OK" /><!-- duration: 3ms -->
+</step><!-- duration: 755ms -->

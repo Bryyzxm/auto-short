@@ -1,0 +1,17 @@
+<step title="Incoming Request" date="2025-08-02T04:21:46.894" instance="a3822c" url="/api/publish?async=true&amp;deployer=GITHUB_ONE_DEPLOY&amp;type=zip&amp;message=%7B%22type%22%3A%22deployment%22%2C%22sha%22%3A%2227707f01e7bd1e85c513902984aa181b7d09beef%22%2C%22repoName%22%3A%22Bryyzxm%2Fauto-short%22%2C%22actor%22%3A%22Bryyzxm%22%2C%22slotName%22%3A%22Production%22%2C%22commitMessage%22%3A%22Tingkatkan%20konfigurasi%20CORS%20dan%20tambahkan%20middleware%20batas%20waktu%20permintaan%3B%20meningkatkan%20penanganan%20kesalahan%20dengan%20pesan%20yang%20mudah%20digunakan%20dalam%20bahasa%20Indonesia%20untuk%20kegagalan%20ekstraksi%20transkrip.%22%7D" method="POST" type="request" pid="822,1,26" Host="auto-short.scm.azurewebsites.net" User-Agent="GITHUBACTIONS_DeployWebAppToAzure_f81e7167bbeb51fd19821600e6284771686769097686e3cd36b60977e423344c" Authorization="Bea..." Content-Type="application/octet-stream" Cookie="ARRAffinity=a3822c2d8e6c282e858ccf385ab6ea78b8bef2fd91cc6dcf216d29853550333c;Path=/;HttpOnly;Secure;Domain=auto-short.scm.azurewebsites.net; ARRAffinitySameSite=a3822c2d8e6c282e858ccf385ab6ea78b8bef2fd91cc6dcf216d29853550333c;Path=/;HttpOnly;SameSite=None;Secure;Domain=auto-short.scm.azurewebsites.net" Transfer-Encoding="chunked" X-ARR-LOG-ID="2310c3b4-6e01-47ec-8774-d2731b9fe449" CLIENT-IP="135.232.225.18:64529" X-SITE-DEPLOYMENT-ID="auto-short" WAS-DEFAULT-HOSTNAME="auto-short.scm.azurewebsites.net" X-Forwarded-Proto="https" X-AppService-Proto="https" X-Forwarded-TlsVersion="1.3" X-WAWS-Unencoded-URL="/api/publish?async=true&amp;deployer=GITHUB_ONE_DEPLOY&amp;type=zip&amp;message=%7B%22type%22%3A%22deployment%22%2C%22sha%22%3A%2227707f01e7bd1e85c513902984aa181b7d09beef%22%2C%22repoName%22%3A%22Bryyzxm%2Fauto-short%22%2C%22actor%22%3A%22Bryyzxm%22%2C%22slotName%22%3A%22Production%22%2C%22commitMessage%22%3A%22Tingkatkan%20konfigurasi%20CORS%20dan%20tambahkan%20middleware%20batas%20waktu%20permintaan%3B%20meningkatkan%20penanganan%20kesalahan%20dengan%20pesan%20yang%20mudah%20digunakan%20dalam%20bahasa%20Indonesia%20untuk%20kegagalan%20ekstraksi%20transkrip.%22%7D" X-Client-IP="135.232.225.18" X-Client-Port="64529" >
+  <step title="Cleanup Xml Logs" date="2025-08-02T04:21:46.913" >
+    <step title="Cleanup Infos" date="2025-08-02T04:21:46.933" totalFiles="281" totalCleanup="121" /><!-- duration: 8ms -->
+  </step><!-- duration: 30ms -->
+  <step title="OneDeploy" date="2025-08-02T04:21:47.084" >
+    <step title="Starting PushDeployAsync" date="2025-08-02T04:21:47.103" /><!-- duration: 9ms -->
+    <step title="Removing node_modules symlink" date="2025-08-02T04:21:47.152" >
+      <step title="Writing artifact to /tmp/zipdeploy/3ecc820b-be8f-4d52-b88a-b4162a1476c0.zip" date="2025-08-02T04:21:47.304" >
+        <step title="Writing multipart request body to /tmp/zipdeploy/3ecc820b-be8f-4d52-b88a-b4162a1476c0.zip" date="2025-08-02T04:21:47.323" /><!-- duration: 2ms -->
+      </step><!-- duration: 9272ms -->
+      <step title="Start deployment in the background" date="2025-08-02T04:21:56.670" >
+        <step title="Acquiring Deployment Lock" date="2025-08-02T04:21:56.790" /><!-- duration: 9ms -->
+        <step title="Acquired Deployment Lock" date="2025-08-02T04:21:57.272" /><!-- duration: 50ms -->
+      </step><!-- duration: 873ms -->
+    </step><!-- duration: 10421ms -->
+    <step title="Outgoing response" date="2025-08-02T04:21:57.583" type="response" statusCode="202" statusText="Accepted" /><!-- duration: 10ms -->
+  </step><!-- duration: 10511ms -->

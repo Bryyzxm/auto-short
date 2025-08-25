@@ -1,0 +1,4 @@
+<step title="Incoming Request" date="2025-08-25T09:52:09.558" instance="463d02" url="/dump" method="GET" type="request" pid="823,1,53" Host="auto-short.scm.azurewebsites.net" User-Agent="AZURECLI/2.76.0 (MSI)" Accept-Encoding="identity" Authorization="Bea..." x-ms-client-request-id="238daf5b-8199-11f0-a6d5-b4a9fcc67b7f" X-ARR-LOG-ID="238daf5b-8199-11f0-a6d5-b4a9fcc67b7f" CLIENT-IP="103.148.111.32:64613" X-SITE-DEPLOYMENT-ID="auto-short" WAS-DEFAULT-HOSTNAME="auto-short.scm.azurewebsites.net" X-Forwarded-Proto="https" X-AppService-Proto="https" X-Forwarded-TlsVersion="1.3" X-WAWS-Unencoded-URL="/dump" X-Client-IP="103.148.111.32" X-Client-Port="64613" >
+  <step title="Cleanup Xml Logs" date="2025-08-25T09:52:09.675" >
+    <step title="Cleanup Infos" date="2025-08-25T09:52:09.919" totalFiles="1968" totalCleanup="1808" /><!-- duration: 116ms -->
+  </step><!-- duration: 389ms -->

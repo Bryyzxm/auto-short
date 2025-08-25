@@ -1,0 +1,17 @@
+<step title="Incoming Request" date="2025-07-28T11:11:37.624" instance="e0ee0e" url="/api/publish?async=true&amp;deployer=GITHUB_ONE_DEPLOY&amp;type=zip&amp;message=%7B%22type%22%3A%22deployment%22%2C%22sha%22%3A%22d597e42ea5c9cfce66dc860ec57293f13d2cbb2e%22%2C%22repoName%22%3A%22Bryyzxm%2Fauto-short%22%2C%22actor%22%3A%22Bryyzxm%22%2C%22slotName%22%3A%22Production%22%2C%22commitMessage%22%3A%22Add%20or%20update%20the%20Azure%20App%20Service%20build%20and%20deployment%20workflow%20config%22%7D" method="POST" type="request" pid="821,1,5" Host="auto-short.scm.azurewebsites.net" User-Agent="GITHUBACTIONS_DeployWebAppToAzure_f81e7167bbeb51fd19821600e6284771686769097686e3cd36b60977e423344c" Authorization="Bea..." Content-Type="application/octet-stream" Cookie="ARRAffinity=e0ee0eaeea38d3539c3d09dd42ff27537326c0ce614fb93c76ae34e669333d5b;Path=/;HttpOnly;Secure;Domain=auto-short.scm.azurewebsites.net; ARRAffinitySameSite=e0ee0eaeea38d3539c3d09dd42ff27537326c0ce614fb93c76ae34e669333d5b;Path=/;HttpOnly;SameSite=None;Secure;Domain=auto-short.scm.azurewebsites.net" Transfer-Encoding="chunked" X-ARR-LOG-ID="f082ee0a-b62a-4ac8-a7a8-05c8c2d8d017" CLIENT-IP="20.161.30.195:34841" X-SITE-DEPLOYMENT-ID="auto-short" WAS-DEFAULT-HOSTNAME="auto-short.scm.azurewebsites.net" X-Forwarded-Proto="https" X-AppService-Proto="https" X-Forwarded-TlsVersion="1.3" X-WAWS-Unencoded-URL="/api/publish?async=true&amp;deployer=GITHUB_ONE_DEPLOY&amp;type=zip&amp;message=%7B%22type%22%3A%22deployment%22%2C%22sha%22%3A%22d597e42ea5c9cfce66dc860ec57293f13d2cbb2e%22%2C%22repoName%22%3A%22Bryyzxm%2Fauto-short%22%2C%22actor%22%3A%22Bryyzxm%22%2C%22slotName%22%3A%22Production%22%2C%22commitMessage%22%3A%22Add%20or%20update%20the%20Azure%20App%20Service%20build%20and%20deployment%20workflow%20config%22%7D" X-Client-IP="20.161.30.195" X-Client-Port="34841" >
+  <step title="Cleanup Xml Logs" date="2025-07-28T11:11:37.628" /><!-- duration: 8ms -->
+  <step title="OneDeploy" date="2025-07-28T11:11:37.685" >
+    <step title="None repository commit" date="2025-07-28T11:11:37.699" >
+      <step title="Commit id: 34fbaba9-4a4b-48fb-bd52-90daac822f93" date="2025-07-28T11:11:37.704" Message="N/A" AuthorName="N/A" AuthorEmail="N/A" /><!-- duration: 5ms -->
+    </step><!-- duration: 14ms -->
+    <step title="Starting PushDeployAsync" date="2025-07-28T11:11:37.722" /><!-- duration: 3ms -->
+    <step title="Writing artifact to /tmp/zipdeploy/159e48f4-389b-4f6e-8dab-65e8f2e5104a.zip" date="2025-07-28T11:11:37.737" >
+      <step title="Writing multipart request body to /tmp/zipdeploy/159e48f4-389b-4f6e-8dab-65e8f2e5104a.zip" date="2025-07-28T11:11:37.741" /><!-- duration: 3ms -->
+    </step><!-- duration: 5897ms -->
+    <step title="Start deployment in the background" date="2025-07-28T11:11:43.655" >
+      <step title="Acquiring Deployment Lock" date="2025-07-28T11:11:43.916" /><!-- duration: 3ms -->
+      <step title="Acquired Deployment Lock" date="2025-07-28T11:11:43.952" /><!-- duration: 4ms -->
+    </step><!-- duration: 374ms -->
+  </step><!-- duration: 6349ms -->
+  <step title="Outgoing response" date="2025-07-28T11:11:44.042" type="response" statusCode="202" statusText="Accepted" /><!-- duration: 4ms -->
+</step><!-- duration: 6426ms -->

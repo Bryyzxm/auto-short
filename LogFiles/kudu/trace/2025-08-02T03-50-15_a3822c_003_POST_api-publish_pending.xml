@@ -1,0 +1,21 @@
+<step title="Incoming Request" date="2025-08-02T03:50:15.353" instance="a3822c" url="/api/publish?async=true&amp;deployer=GITHUB_ONE_DEPLOY&amp;type=zip&amp;message=%7B%22type%22%3A%22deployment%22%2C%22sha%22%3A%22751a89d519d7acba8c520fb7fcc42466a5ade35b%22%2C%22repoName%22%3A%22Bryyzxm%2Fauto-short%22%2C%22actor%22%3A%22Bryyzxm%22%2C%22slotName%22%3A%22Production%22%2C%22commitMessage%22%3A%22Refactor%20skrip%20penerapan%20Azure%3A%20konsolidasikan%20ke%20dalam%20satu%20direktori%20untuk%20kejelasan%2C%20perbarui%20package.json%20dengan%20skrip%20startup%20baru%2C%20dan%20tingkatkan%20dokumentasi%20penerapan.%22%7D" method="POST" type="request" pid="822,1,15" Host="auto-short.scm.azurewebsites.net" User-Agent="GITHUBACTIONS_DeployWebAppToAzure_f81e7167bbeb51fd19821600e6284771686769097686e3cd36b60977e423344c" Authorization="Bea..." Content-Type="application/octet-stream" Cookie="ARRAffinity=a3822c2d8e6c282e858ccf385ab6ea78b8bef2fd91cc6dcf216d29853550333c;Path=/;HttpOnly;Secure;Domain=auto-short.scm.azurewebsites.net; ARRAffinitySameSite=a3822c2d8e6c282e858ccf385ab6ea78b8bef2fd91cc6dcf216d29853550333c;Path=/;HttpOnly;SameSite=None;Secure;Domain=auto-short.scm.azurewebsites.net" Transfer-Encoding="chunked" X-ARR-LOG-ID="c8e63f10-b5a6-4c2d-848e-544ccb788bf3" CLIENT-IP="172.182.195.131:4120" X-SITE-DEPLOYMENT-ID="auto-short" WAS-DEFAULT-HOSTNAME="auto-short.scm.azurewebsites.net" X-Forwarded-Proto="https" X-AppService-Proto="https" X-Forwarded-TlsVersion="1.3" X-WAWS-Unencoded-URL="/api/publish?async=true&amp;deployer=GITHUB_ONE_DEPLOY&amp;type=zip&amp;message=%7B%22type%22%3A%22deployment%22%2C%22sha%22%3A%22751a89d519d7acba8c520fb7fcc42466a5ade35b%22%2C%22repoName%22%3A%22Bryyzxm%2Fauto-short%22%2C%22actor%22%3A%22Bryyzxm%22%2C%22slotName%22%3A%22Production%22%2C%22commitMessage%22%3A%22Refactor%20skrip%20penerapan%20Azure%3A%20konsolidasikan%20ke%20dalam%20satu%20direktori%20untuk%20kejelasan%2C%20perbarui%20package.json%20dengan%20skrip%20startup%20baru%2C%20dan%20tingkatkan%20dokumentasi%20penerapan.%22%7D" X-Client-IP="172.182.195.131" X-Client-Port="4120" >
+  <step title="Cleanup Xml Logs" date="2025-08-02T03:50:15.362" >
+    <step title="Cleanup Infos" date="2025-08-02T03:50:15.373" totalFiles="258" totalCleanup="98" /><!-- duration: 8ms -->
+  </step><!-- duration: 21ms -->
+  <step title="OneDeploy" date="2025-08-02T03:50:15.866" >
+    <step title="None repository commit" date="2025-08-02T03:50:15.925" >
+      <step title="Commit id: f0c52979-2d2d-46c4-ae5a-01ed47fd8763" date="2025-08-02T03:50:15.927" Message="N/A" AuthorName="N/A" AuthorEmail="N/A" /><!-- duration: 10ms -->
+    </step><!-- duration: 19ms -->
+    <step title="Starting PushDeployAsync" date="2025-08-02T03:50:15.947" /><!-- duration: 1ms -->
+    <step title="Removing node_modules symlink" date="2025-08-02T03:50:15.997" >
+      <step title="Removing _del_node_modules symlink" date="2025-08-02T03:50:16.136" >
+        <step title="Writing artifact to /tmp/zipdeploy/71882a72-0c74-4cda-9f9f-89baf2740b42.zip" date="2025-08-02T03:50:16.197" >
+          <step title="Writing multipart request body to /tmp/zipdeploy/71882a72-0c74-4cda-9f9f-89baf2740b42.zip" date="2025-08-02T03:50:16.217" /><!-- duration: 2ms -->
+        </step><!-- duration: 10534ms -->
+        <step title="Start deployment in the background" date="2025-08-02T03:50:26.764" >
+          <step title="Acquiring Deployment Lock" date="2025-08-02T03:50:26.851" /><!-- duration: 10ms -->
+          <step title="Acquired Deployment Lock" date="2025-08-02T03:50:26.965" /><!-- duration: 8ms -->
+        </step><!-- duration: 389ms -->
+      </step><!-- duration: 11057ms -->
+      <step title="Outgoing response" date="2025-08-02T03:50:27.233" type="response" statusCode="202" statusText="Accepted" /><!-- duration: 2ms -->
+    </step><!-- duration: 11246ms -->

@@ -1,0 +1,17 @@
+<step title="Incoming Request" date="2025-08-25T03:21:21.620" instance="012626" url="/api/publish?async=true&amp;deployer=GITHUB_ONE_DEPLOY&amp;type=zip&amp;message=%7B%22type%22%3A%22deployment%22%2C%22sha%22%3A%22752640164a2ebda8565b70700b797c0e6156bd33%22%2C%22repoName%22%3A%22Bryyzxm%2Fauto-short%22%2C%22actor%22%3A%22Bryyzxm%22%2C%22slotName%22%3A%22Production%22%2C%22commitMessage%22%3A%22Menerapkan%20skrip%20instalasi%20dan%20verifikasi%20Azure%20FFmpeg%20yang%20komprehensif%3B%20meningkatkan%20fungsi%20pemrosesan%20video%20untuk%20mencegah%20kesalahan%20NaN%20dan%20meningkatkan%20penanganan%20kesalahan.%22%7D" method="POST" type="request" pid="825,1,68" Host="auto-short.scm.azurewebsites.net" User-Agent="GITHUBACTIONS_DeployWebAppToAzure_f81e7167bbeb51fd19821600e6284771686769097686e3cd36b60977e423344c" Authorization="Bea..." Content-Type="application/octet-stream" Cookie="ARRAffinity=0126262dad7bf6d8466f7b5ebab35827b82bb601182dd1915d36aa46f0d0c678;Path=/;HttpOnly;Secure;Domain=auto-short.scm.azurewebsites.net; ARRAffinitySameSite=0126262dad7bf6d8466f7b5ebab35827b82bb601182dd1915d36aa46f0d0c678;Path=/;HttpOnly;SameSite=None;Secure;Domain=auto-short.scm.azurewebsites.net" Transfer-Encoding="chunked" X-ARR-LOG-ID="7d6af841-e1fb-4421-a442-8a97055aa6d7" CLIENT-IP="20.97.198.245:47145" X-SITE-DEPLOYMENT-ID="auto-short" WAS-DEFAULT-HOSTNAME="auto-short.scm.azurewebsites.net" X-Forwarded-Proto="https" X-AppService-Proto="https" X-Forwarded-TlsVersion="1.3" X-WAWS-Unencoded-URL="/api/publish?async=true&amp;deployer=GITHUB_ONE_DEPLOY&amp;type=zip&amp;message=%7B%22type%22%3A%22deployment%22%2C%22sha%22%3A%22752640164a2ebda8565b70700b797c0e6156bd33%22%2C%22repoName%22%3A%22Bryyzxm%2Fauto-short%22%2C%22actor%22%3A%22Bryyzxm%22%2C%22slotName%22%3A%22Production%22%2C%22commitMessage%22%3A%22Menerapkan%20skrip%20instalasi%20dan%20verifikasi%20Azure%20FFmpeg%20yang%20komprehensif%3B%20meningkatkan%20fungsi%20pemrosesan%20video%20untuk%20mencegah%20kesalahan%20NaN%20dan%20meningkatkan%20penanganan%20kesalahan.%22%7D" X-Client-IP="20.97.198.245" X-Client-Port="47145" >
+  <step title="Cleanup Xml Logs" date="2025-08-25T03:21:21.622" >
+    <step title="Cleanup Infos" date="2025-08-25T03:21:21.649" totalFiles="1733" totalCleanup="1573" /><!-- duration: 3ms -->
+  </step><!-- duration: 38ms -->
+  <step title="OneDeploy" date="2025-08-25T03:21:21.846" >
+    <step title="Starting PushDeployAsync" date="2025-08-25T03:21:22.221" /><!-- duration: 8ms -->
+    <step title="Removing node_modules symlink" date="2025-08-25T03:21:22.287" >
+      <step title="Writing artifact to /tmp/zipdeploy/32b05abc-8081-4661-bc48-2cc3c38c0a29.zip" date="2025-08-25T03:21:22.442" >
+        <step title="Writing multipart request body to /tmp/zipdeploy/32b05abc-8081-4661-bc48-2cc3c38c0a29.zip" date="2025-08-25T03:21:22.511" /><!-- duration: 49ms -->
+      </step><!-- duration: 8584ms -->
+      <step title="Start deployment in the background" date="2025-08-25T03:21:31.075" >
+        <step title="Acquiring Deployment Lock" date="2025-08-25T03:21:31.396" /><!-- duration: 2ms -->
+        <step title="Acquired Deployment Lock" date="2025-08-25T03:21:31.441" /><!-- duration: 5ms -->
+      </step><!-- duration: 580ms -->
+    </step><!-- duration: 9394ms -->
+    <step title="Outgoing response" date="2025-08-25T03:21:31.687" type="response" statusCode="202" statusText="Accepted" /><!-- duration: 2ms -->
+  </step><!-- duration: 9844ms -->

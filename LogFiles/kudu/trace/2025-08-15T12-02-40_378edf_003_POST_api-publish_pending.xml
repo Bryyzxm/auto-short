@@ -1,0 +1,21 @@
+<step title="Incoming Request" date="2025-08-15T12:02:40.012" instance="378edf" url="/api/publish?async=true&amp;deployer=GITHUB_ONE_DEPLOY&amp;type=zip&amp;message=%7B%22type%22%3A%22deployment%22%2C%22sha%22%3A%22d2b917fbda9f00f55dd3e76f1e40e8fafae14fc3%22%2C%22repoName%22%3A%22Bryyzxm%2Fauto-short%22%2C%22actor%22%3A%22Bryyzxm%22%2C%22slotName%22%3A%22Production%22%2C%22commitMessage%22%3A%22Menambahkan%20utilitas%20diagnostik%20untuk%20analisis%20kegagalan%20eksekusi%20yt-dlp%20di%20Azure%3B%20memperkenalkan%20skrip%20untuk%20memeriksa%20jalur%20biner%2C%20ketergantungan%20sistem%2C%20dan%20kondisi%20spawn%20dengan%20logging%20yang%20komprehensif%3B%20meningkatkan%20penanganan%20kesalahan%20dan%20validasi%20sebelum%20eksekusi.%22%7D" method="POST" type="request" pid="823,1,5" Host="auto-short.scm.azurewebsites.net" User-Agent="GITHUBACTIONS_DeployWebAppToAzure_f81e7167bbeb51fd19821600e6284771686769097686e3cd36b60977e423344c" Authorization="Bea..." Content-Type="application/octet-stream" Cookie="ARRAffinity=378edfce271436517950788fe4512f9ff5f554211c9bdccd63796f2a24a09e02;Path=/;HttpOnly;Secure;Domain=auto-short.scm.azurewebsites.net; ARRAffinitySameSite=378edfce271436517950788fe4512f9ff5f554211c9bdccd63796f2a24a09e02;Path=/;HttpOnly;SameSite=None;Secure;Domain=auto-short.scm.azurewebsites.net" Transfer-Encoding="chunked" X-ARR-LOG-ID="b2424db9-9957-43e9-8098-b2dcf7fa1530" CLIENT-IP="64.236.141.208:31681" X-SITE-DEPLOYMENT-ID="auto-short" WAS-DEFAULT-HOSTNAME="auto-short.scm.azurewebsites.net" X-Forwarded-Proto="https" X-AppService-Proto="https" X-Forwarded-TlsVersion="1.3" X-WAWS-Unencoded-URL="/api/publish?async=true&amp;deployer=GITHUB_ONE_DEPLOY&amp;type=zip&amp;message=%7B%22type%22%3A%22deployment%22%2C%22sha%22%3A%22d2b917fbda9f00f55dd3e76f1e40e8fafae14fc3%22%2C%22repoName%22%3A%22Bryyzxm%2Fauto-short%22%2C%22actor%22%3A%22Bryyzxm%22%2C%22slotName%22%3A%22Production%22%2C%22commitMessage%22%3A%22Menambahkan%20utilitas%20diagnostik%20untuk%20analisis%20kegagalan%20eksekusi%20yt-dlp%20di%20Azure%3B%20memperkenalkan%20skrip%20untuk%20memeriksa%20jalur%20biner%2C%20ketergantungan%20sistem%2C%20dan%20kondisi%20spawn%20dengan%20logging%20yang%20komprehensif%3B%20meningkatkan%20penanganan%20kesalahan%20dan%20validasi%20sebelum%20eksekusi.%22%7D" X-Client-IP="64.236.141.208" X-Client-Port="31681" >
+  <step title="Cleanup Xml Logs" date="2025-08-15T12:02:40.014" >
+    <step title="Cleanup Infos" date="2025-08-15T12:02:40.023" totalFiles="666" totalCleanup="506" /><!-- duration: 2ms -->
+  </step><!-- duration: 12ms -->
+  <step title="OneDeploy" date="2025-08-15T12:02:40.132" >
+    <step title="None repository commit" date="2025-08-15T12:02:40.142" >
+      <step title="Commit id: 2af4dd96-9aa1-433f-bf46-4aca0af18f86" date="2025-08-15T12:02:40.143" Message="N/A" AuthorName="N/A" AuthorEmail="N/A" /><!-- duration: 1ms -->
+    </step><!-- duration: 4ms -->
+    <step title="Starting PushDeployAsync" date="2025-08-15T12:02:40.146" /><!-- duration: 1ms -->
+    <step title="Removing node_modules symlink" date="2025-08-15T12:02:40.156" >
+      <step title="Removing _del_node_modules symlink" date="2025-08-15T12:02:40.257" >
+        <step title="Writing artifact to /tmp/zipdeploy/321680e5-f608-4d0f-a62d-48ff2ded7ae1.zip" date="2025-08-15T12:02:40.294" >
+          <step title="Writing multipart request body to /tmp/zipdeploy/321680e5-f608-4d0f-a62d-48ff2ded7ae1.zip" date="2025-08-15T12:02:40.303" /><!-- duration: 1ms -->
+        </step><!-- duration: 8047ms -->
+        <step title="Start deployment in the background" date="2025-08-15T12:02:48.357" >
+          <step title="Acquiring Deployment Lock" date="2025-08-15T12:02:48.424" /><!-- duration: 1ms -->
+          <step title="Acquired Deployment Lock" date="2025-08-15T12:02:48.613" /><!-- duration: 2ms -->
+        </step><!-- duration: 910ms -->
+      </step><!-- duration: 9051ms -->
+      <step title="Outgoing response" date="2025-08-15T12:02:49.377" type="response" statusCode="202" statusText="Accepted" /><!-- duration: 9ms -->
+    </step><!-- duration: 9232ms -->

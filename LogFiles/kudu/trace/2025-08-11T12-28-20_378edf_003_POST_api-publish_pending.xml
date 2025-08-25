@@ -1,0 +1,21 @@
+<step title="Incoming Request" date="2025-08-11T12:28:20.880" instance="378edf" url="/api/publish?async=true&amp;deployer=GITHUB_ONE_DEPLOY&amp;type=zip&amp;message=%7B%22type%22%3A%22deployment%22%2C%22sha%22%3A%224ea8a256d16840ed7313b56a9bcc2e4bba3f56e8%22%2C%22repoName%22%3A%22Bryyzxm%2Fauto-short%22%2C%22actor%22%3A%22Bryyzxm%22%2C%22slotName%22%3A%22Production%22%2C%22commitMessage%22%3A%22Menambahkan%20utilitas%20untuk%20mendiagnosis%20dan%20memperbaiki%20masalah%20cookie%20Azure%3B%20memperbarui%20skrip%20untuk%20memperbarui%20cookies%20di%20Azure%20App%20Service%20dengan%20dukungan%20kompresi%20dan%20encoding%20URL%3B%20meningkatkan%20validasi%20dan%20penanganan%20kesalahan.%22%7D" method="POST" type="request" pid="825,1,16" Host="auto-short.scm.azurewebsites.net" User-Agent="GITHUBACTIONS_DeployWebAppToAzure_f81e7167bbeb51fd19821600e6284771686769097686e3cd36b60977e423344c" Authorization="Bea..." Content-Type="application/octet-stream" Cookie="ARRAffinity=378edfce271436517950788fe4512f9ff5f554211c9bdccd63796f2a24a09e02;Path=/;HttpOnly;Secure;Domain=auto-short.scm.azurewebsites.net; ARRAffinitySameSite=378edfce271436517950788fe4512f9ff5f554211c9bdccd63796f2a24a09e02;Path=/;HttpOnly;SameSite=None;Secure;Domain=auto-short.scm.azurewebsites.net" Transfer-Encoding="chunked" X-ARR-LOG-ID="1b7f0e15-3cdc-450a-9c1b-8af2c08eb7cd" CLIENT-IP="64.236.169.7:18433" X-SITE-DEPLOYMENT-ID="auto-short" WAS-DEFAULT-HOSTNAME="auto-short.scm.azurewebsites.net" X-Forwarded-Proto="https" X-AppService-Proto="https" X-Forwarded-TlsVersion="1.3" X-WAWS-Unencoded-URL="/api/publish?async=true&amp;deployer=GITHUB_ONE_DEPLOY&amp;type=zip&amp;message=%7B%22type%22%3A%22deployment%22%2C%22sha%22%3A%224ea8a256d16840ed7313b56a9bcc2e4bba3f56e8%22%2C%22repoName%22%3A%22Bryyzxm%2Fauto-short%22%2C%22actor%22%3A%22Bryyzxm%22%2C%22slotName%22%3A%22Production%22%2C%22commitMessage%22%3A%22Menambahkan%20utilitas%20untuk%20mendiagnosis%20dan%20memperbaiki%20masalah%20cookie%20Azure%3B%20memperbarui%20skrip%20untuk%20memperbarui%20cookies%20di%20Azure%20App%20Service%20dengan%20dukungan%20kompresi%20dan%20encoding%20URL%3B%20meningkatkan%20validasi%20dan%20penanganan%20kesalahan.%22%7D" X-Client-IP="64.236.169.7" X-Client-Port="18433" >
+  <step title="Cleanup Xml Logs" date="2025-08-11T12:28:20.886" >
+    <step title="Cleanup Infos" date="2025-08-11T12:28:20.908" totalFiles="610" totalCleanup="450" /><!-- duration: 2ms -->
+  </step><!-- duration: 27ms -->
+  <step title="OneDeploy" date="2025-08-11T12:28:21.038" >
+    <step title="None repository commit" date="2025-08-11T12:28:21.050" >
+      <step title="Commit id: f614bbc6-be02-47ec-b2d9-0ddcc258e090" date="2025-08-11T12:28:21.051" Message="N/A" AuthorName="N/A" AuthorEmail="N/A" /><!-- duration: 1ms -->
+    </step><!-- duration: 3ms -->
+    <step title="Starting PushDeployAsync" date="2025-08-11T12:28:21.055" /><!-- duration: 1ms -->
+    <step title="Removing node_modules symlink" date="2025-08-11T12:28:21.070" >
+      <step title="Removing _del_node_modules symlink" date="2025-08-11T12:28:21.140" >
+        <step title="Writing artifact to /tmp/zipdeploy/cd1c972f-d683-499f-967a-82e235d9e0ef.zip" date="2025-08-11T12:28:21.179" >
+          <step title="Writing multipart request body to /tmp/zipdeploy/cd1c972f-d683-499f-967a-82e235d9e0ef.zip" date="2025-08-11T12:28:21.209" /><!-- duration: 1ms -->
+        </step><!-- duration: 6573ms -->
+        <step title="Start deployment in the background" date="2025-08-11T12:28:27.764" >
+          <step title="Acquiring Deployment Lock" date="2025-08-11T12:28:27.945" /><!-- duration: 1ms -->
+          <step title="Acquired Deployment Lock" date="2025-08-11T12:28:27.968" /><!-- duration: 1ms -->
+        </step><!-- duration: 306ms -->
+      </step><!-- duration: 6935ms -->
+      <step title="Outgoing response" date="2025-08-11T12:28:28.085" type="response" statusCode="202" statusText="Accepted" /><!-- duration: 16ms -->
+    </step><!-- duration: 7032ms -->

@@ -1,0 +1,1 @@
+2025-07-29T09:42:57  Startup Request, url: /detectors, method: GET, type: request, pid: 821,1,14, ScmType: GitHubAction
