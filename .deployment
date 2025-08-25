@@ -1,0 +1,8 @@
+# Azure App Service Startup Configuration for Linux
+# This file should be placed in the root directory (/home/site/wwwroot/)
+
+# Method 1: Using .deployment file
+# Create this file to tell Azure how to deploy and start your app
+
+[config]
+command = bash backend/startup.sh
