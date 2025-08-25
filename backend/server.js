@@ -606,6 +606,143 @@ try {
 
 console.log(`[YT-DLP] Resolved binary path: ${YT_DLP_PATH} (source=${YT_DLP_SOURCE})`);
 
+// ===================================
+// 🎬 FFMPEG PATH RESOLUTION
+// ===================================
+
+let FFMPEG_PATH = 'ffmpeg';
+let FFPROBE_PATH = 'ffprobe';
+let FFMPEG_SOURCE = 'system';
+
+// Function to resolve FFmpeg path for Azure environment
+function resolveFFmpegPath() {
+ console.log('[FFMPEG-RESOLVE] 🔧 Starting FFmpeg path resolution...');
+
+ // Priority order for FFmpeg binary paths
+ const ffmpegCandidates = [
+  // Azure vendor directory (from startup script)
+  path.join(__dirname, 'vendor', 'ffmpeg', 'ffmpeg'),
+  // Local vendor directory
+  path.join(__dirname, 'vendor', 'ffmpeg', 'bin', 'ffmpeg'),
+  // Node modules global bins
+  path.join(__dirname, 'node_modules', '.bin', 'ffmpeg'),
+  // System PATH
+  'ffmpeg',
+ ];
+
+ const ffprobeCandidates = [
+  // Azure vendor directory (from startup script)
+  path.join(__dirname, 'vendor', 'ffmpeg', 'ffprobe'),
+  // Local vendor directory
+  path.join(__dirname, 'vendor', 'ffmpeg', 'bin', 'ffprobe'),
+  // Node modules global bins
+  path.join(__dirname, 'node_modules', '.bin', 'ffprobe'),
+  // System PATH
+  'ffprobe',
+ ];
+
+ // Function to test if a binary exists and is executable
+ function testBinary(binaryPath) {
+  try {
+   // Test if file exists for absolute paths
+   if (path.isAbsolute(binaryPath) && !fs.existsSync(binaryPath)) {
+    return false;
+   }
+
+   // Test execution
+   execSync(`${binaryPath} -version`, {
+    stdio: 'pipe',
+    timeout: 5000,
+    encoding: 'utf8',
+   });
+   return true;
+  } catch (error) {
+   return false;
+  }
+ }
+
+ // Test FFmpeg
+ let ffmpegFound = false;
+ for (const candidate of ffmpegCandidates) {
+  console.log(`[FFMPEG-RESOLVE] 🧪 Testing FFmpeg: ${candidate}`);
+  if (testBinary(candidate)) {
+   FFMPEG_PATH = candidate;
+   FFMPEG_SOURCE = path.isAbsolute(candidate) ? 'vendor' : 'system';
+   ffmpegFound = true;
+   console.log(`[FFMPEG-RESOLVE] ✅ FFmpeg found: ${FFMPEG_PATH}`);
+   break;
+  }
+ }
+
+ // Test FFprobe
+ let ffprobeFound = false;
+ for (const candidate of ffprobeCandidates) {
+  console.log(`[FFMPEG-RESOLVE] 🧪 Testing FFprobe: ${candidate}`);
+  if (testBinary(candidate)) {
+   FFPROBE_PATH = candidate;
+   ffprobeFound = true;
+   console.log(`[FFMPEG-RESOLVE] ✅ FFprobe found: ${FFPROBE_PATH}`);
+   break;
+  }
+ }
+
+ // Update PATH if using vendor binaries
+ if (FFMPEG_SOURCE === 'vendor') {
+  const vendorDir = path.dirname(FFMPEG_PATH);
+  const currentPath = process.env.PATH || '';
+
+  if (!currentPath.includes(vendorDir)) {
+   process.env.PATH = `${vendorDir}:${currentPath}`;
+   console.log(`[FFMPEG-RESOLVE] 🛣️ Added to PATH: ${vendorDir}`);
+  }
+ }
+
+ return {
+  ffmpeg: ffmpegFound,
+  ffprobe: ffprobeFound,
+  ffmpegPath: FFMPEG_PATH,
+  ffprobePath: FFPROBE_PATH,
+  source: FFMPEG_SOURCE,
+ };
+}
+
+try {
+ const ffmpegResolution = resolveFFmpegPath();
+
+ if (ffmpegResolution.ffmpeg && ffmpegResolution.ffprobe) {
+  console.log(`[FFMPEG] ✅ FFmpeg resolution successful`);
+  console.log(`[FFMPEG] 📹 FFmpeg: ${ffmpegResolution.ffmpegPath} (${ffmpegResolution.source})`);
+  console.log(`[FFMPEG] 🔍 FFprobe: ${ffmpegResolution.ffprobePath} (${ffmpegResolution.source})`);
+
+  // Test functionality
+  try {
+   const ffmpegVersion = execSync(`${FFMPEG_PATH} -version 2>&1 | head -1`, {encoding: 'utf8', timeout: 5000});
+   console.log(`[FFMPEG] 🎬 Version: ${ffmpegVersion.trim()}`);
+  } catch (versionError) {
+   console.warn(`[FFMPEG] ⚠️ Version check failed: ${versionError.message}`);
+  }
+ } else {
+  console.error(`[FFMPEG] ❌ FFmpeg resolution failed`);
+  console.error(`[FFMPEG] 📹 FFmpeg available: ${ffmpegResolution.ffmpeg}`);
+  console.error(`[FFMPEG] 🔍 FFprobe available: ${ffmpegResolution.ffprobe}`);
+  console.error(`[FFMPEG] ⚠️ Video processing will be limited`);
+
+  // Create flag file to indicate FFmpeg unavailability
+  try {
+   fs.writeFileSync(path.join(__dirname, 'ffmpeg-unavailable'), 'FFmpeg not available during startup');
+  } catch (flagError) {
+   console.warn(`[FFMPEG] ⚠️ Could not create unavailable flag: ${flagError.message}`);
+  }
+ }
+} catch (ffmpegError) {
+ console.error(`[FFMPEG] ❌ FFmpeg setup failed: ${ffmpegError.message}`);
+ FFMPEG_PATH = 'ffmpeg'; // Fallback
+ FFPROBE_PATH = 'ffprobe'; // Fallback
+ FFMPEG_SOURCE = 'fallback';
+}
+
+console.log(`[FFMPEG] Final paths - FFmpeg: ${FFMPEG_PATH}, FFprobe: ${FFPROBE_PATH} (source: ${FFMPEG_SOURCE})`);
+
 // Configurable cookies path for bypassing YouTube bot detection
 // Use the comprehensive cookies file (31KB) instead of minimal generated one
 let YTDLP_COOKIES_PATH = process.env.YTDLP_COOKIES_PATH || path.join(__dirname, 'cookies.txt');
@@ -3406,7 +3543,7 @@ function analyzeVideoResolution(id, tempFile) {
 
  // Check if ffprobe is available
  try {
-  execSync('which ffprobe', {encoding: 'utf8', shell: true});
+  execSync(`${FFPROBE_PATH} -version`, {encoding: 'utf8', timeout: 5000});
   console.log(`[${id}] ✅ ffprobe available`);
  } catch (e) {
   console.warn(`[${id}] ❌ ffprobe not available:`, e.message);
@@ -3415,7 +3552,7 @@ function analyzeVideoResolution(id, tempFile) {
  }
 
  try {
-  const ffprobeResult = execSync(`ffprobe -v quiet -print_format json -show_streams "${tempFile}"`, {encoding: 'utf8', shell: true});
+  const ffprobeResult = execSync(`${FFPROBE_PATH} -v quiet -print_format json -show_streams "${tempFile}"`, {encoding: 'utf8', timeout: 10000});
   const videoInfo = JSON.parse(ffprobeResult);
   const videoStream = videoInfo.streams.find((s) => s.codec_type === 'video');
 
@@ -3527,7 +3664,7 @@ function buildVideoFilters(needsUpscaling, aspectRatio, videoWidth, videoHeight)
 }
 
 // Build FFmpeg arguments for video processing
-function buildFfmpegArgs(start, end, tempFile, cutFile, videoFilters, aspectRatio, needsUpscaling) {
+function buildFfmpegArgs(start, end, tempFile, cutFile, videoFilters, aspectRatio, needsUpscaling, ffmpegPath = 'ffmpeg') {
  console.log(`🔧 Building FFmpeg arguments...`);
  console.log(`📊 Parameters: start=${start}, end=${end}, aspectRatio=${aspectRatio}, needsUpscaling=${needsUpscaling}`);
  console.log(`🎬 Filters to apply: [${videoFilters.join(', ')}]`);
@@ -3571,7 +3708,7 @@ function buildFfmpegArgs(start, end, tempFile, cutFile, videoFilters, aspectRati
 
  ffmpegArgs.push(cutFile);
 
- console.log(`✅ Final FFmpeg command: ffmpeg ${ffmpegArgs.join(' ')}`);
+ console.log(`✅ Final FFmpeg command: ${ffmpegPath} ${ffmpegArgs.join(' ')}`);
  return ffmpegArgs;
 }
 
@@ -3859,10 +3996,10 @@ app.post('/api/shorts', async (req, res) => {
  console.log(`[${id}] 📍 Cut file path: ${cutFile}`);
  console.log(`[${id}] 📁 Cut file directory: ${path.dirname(cutFile)}`);
  const videoFilters = buildVideoFilters(needsUpscaling, aspectRatio, videoWidth, videoHeight);
- const ffmpegArgs = buildFfmpegArgs(start, end, tempFile, cutFile, videoFilters, aspectRatio, needsUpscaling);
+ const ffmpegArgs = buildFfmpegArgs(start, end, tempFile, cutFile, videoFilters, aspectRatio, needsUpscaling, FFMPEG_PATH);
 
  console.time(`[${id}] ffmpeg cut`);
- execFile('ffmpeg', ffmpegArgs, (err2, stdout2, stderr2) => {
+ execFile(FFMPEG_PATH, ffmpegArgs, (err2, stdout2, stderr2) => {
   console.timeEnd(`[${id}] ffmpeg cut`);
   fs.unlink(tempFile, () => {});
 
@@ -3885,7 +4022,7 @@ app.post('/api/shorts', async (req, res) => {
 
   // Verify final output resolution
   try {
-   const finalProbeResult = execSync(`ffprobe -v quiet -print_format json -show_streams "${cutFile}"`, {encoding: 'utf8', shell: true});
+   const finalProbeResult = execSync(`${FFPROBE_PATH} -v quiet -print_format json -show_streams "${cutFile}"`, {encoding: 'utf8', timeout: 10000});
    const finalVideoInfo = JSON.parse(finalProbeResult);
    const finalVideoStream = finalVideoInfo.streams.find((s) => s.codec_type === 'video');
 
