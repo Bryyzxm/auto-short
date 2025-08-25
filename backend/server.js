@@ -2146,6 +2146,7 @@ async function executeFfprobeSecurely(filePath, options = {}) {
    stdio: ['pipe', 'pipe', 'pipe'],
    timeout: options.timeout || 30000,
    maxBuffer: options.maxBuffer || 1024 * 1024, // 1MB
+   shell: true,
    ...options,
   });
 
@@ -3402,7 +3403,7 @@ function handleDownloadError(err) {
 // Analyze video resolution and determine if upscaling is needed
 function analyzeVideoResolution(id, tempFile) {
  try {
-  const ffprobeResult = execSync(`ffprobe -v quiet -print_format json -show_streams "${tempFile}"`, {encoding: 'utf8'});
+  const ffprobeResult = execSync(`ffprobe -v quiet -print_format json -show_streams "${tempFile}"`, {encoding: 'utf8', shell: true});
   const videoInfo = JSON.parse(ffprobeResult);
   const videoStream = videoInfo.streams.find((s) => s.codec_type === 'video');
 
@@ -3773,7 +3774,7 @@ app.post('/api/shorts', async (req, res) => {
  const ffmpegArgs = buildFfmpegArgs(start, end, tempFile, cutFile, videoFilters, aspectRatio, needsUpscaling);
 
  console.time(`[${id}] ffmpeg cut`);
- execFile('ffmpeg', ffmpegArgs, (err2, stdout2, stderr2) => {
+ execFile('ffmpeg', ffmpegArgs, {shell: true}, (err2, stdout2, stderr2) => {
   console.timeEnd(`[${id}] ffmpeg cut`);
   fs.unlink(tempFile, () => {});
 
@@ -3796,7 +3797,7 @@ app.post('/api/shorts', async (req, res) => {
 
   // Verify final output resolution
   try {
-   const finalProbeResult = execSync(`ffprobe -v quiet -print_format json -show_streams "${cutFile}"`, {encoding: 'utf8'});
+   const finalProbeResult = execSync(`ffprobe -v quiet -print_format json -show_streams "${cutFile}"`, {encoding: 'utf8', shell: true});
    const finalVideoInfo = JSON.parse(finalProbeResult);
    const finalVideoStream = finalVideoInfo.streams.find((s) => s.codec_type === 'video');
 
