@@ -233,11 +233,11 @@ export const ShortVideoCard: React.FC<ShortVideoCardProps> = ({shortVideo, isAct
 
    // Step 3: Poll job status until completion
    const jobId = jobData.jobId;
-   const maxWaitTime = 300000; // 5 minutes max wait
+   const maxWaitTime = 1800000; // 30 minutes max wait (increased for video processing)
    const pollInterval = 2000; // Poll every 2 seconds
    const startTime = Date.now();
 
-   setDownloadProgress('Video sedang diproses...');
+   setDownloadProgress('Video sedang diproses, harap tunggu...');
 
    while (Date.now() - startTime < maxWaitTime) {
     await new Promise((resolve) => setTimeout(resolve, pollInterval));
@@ -249,9 +249,20 @@ export const ShortVideoCard: React.FC<ShortVideoCardProps> = ({shortVideo, isAct
 
     const jobStatus = await jobResponse.json();
 
-    // Update progress message
+    // Update progress message with more context
     if (jobStatus.message) {
-     setDownloadProgress(jobStatus.message);
+     const elapsedMinutes = Math.floor((Date.now() - startTime) / 60000);
+     setDownloadProgress(`${jobStatus.message} (${elapsedMinutes} menit berjalan)`);
+    }
+
+    // Show time-based progress hints
+    const elapsed = Date.now() - startTime;
+    if (elapsed > 120000 && elapsed < 300000) {
+     // 2-5 minutes
+     setDownloadProgress(jobStatus.message || 'Video besar sedang diproses, harap bersabar...');
+    } else if (elapsed > 300000) {
+     // > 5 minutes
+     setDownloadProgress(jobStatus.message || 'Pemrosesan membutuhkan waktu lama karena kualitas tinggi. Mohon tunggu...');
     }
 
     // Check job completion
@@ -281,7 +292,7 @@ export const ShortVideoCard: React.FC<ShortVideoCardProps> = ({shortVideo, isAct
     }
    }
 
-   throw new Error('Pemrosesan video membutuhkan waktu terlalu lama. Silakan coba lagi.');
+   throw new Error('Pemrosesan video membutuhkan waktu lebih dari 30 menit. Video mungkin terlalu besar atau kompleks. Silakan coba dengan video yang lebih pendek.');
   } catch (e: any) {
    setDownloadError(e.message || 'Terjadi kesalahan saat mengunduh.');
    setDownloadProgress('');

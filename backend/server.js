@@ -3953,9 +3953,33 @@ function buildFfmpegArgs(start, end, tempFile, cutFile, videoFilters, aspectRati
   console.log(`📋 Using stream copy for original aspect ratio without upscaling`);
   ffmpegArgs.push('-c', 'copy');
  } else {
-  const crf = needsUpscaling ? '16' : '18';
-  console.log(`🎥 Using video encoding with CRF=${crf}`);
-  ffmpegArgs.push('-c:v', 'libx264', '-crf', crf, '-preset', 'medium', '-profile:v', 'high', '-level:v', '4.0', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-movflags', '+faststart');
+  const crf = needsUpscaling ? '18' : '20';
+  console.log(`🎥 Using video encoding with CRF=${crf} for 720p quality`);
+  ffmpegArgs.push(
+   '-c:v',
+   'libx264',
+   '-crf',
+   crf,
+   '-preset',
+   'fast', // Use 'fast' instead of 'medium' for better performance
+   '-profile:v',
+   'high',
+   '-level:v',
+   '4.0',
+   '-pix_fmt',
+   'yuv420p',
+   '-c:a',
+   'aac',
+   '-b:a',
+   '128k',
+   '-ar',
+   '44100',
+   '-movflags',
+   '+faststart',
+   // Add threading for faster processing
+   '-threads',
+   '0'
+  );
  }
 
  ffmpegArgs.push(cutFile);
@@ -4003,16 +4027,52 @@ async function processSegmentWithQualityAssurance(id, inputFile, outputFile, sta
   const videoFilters = buildVideoFilters(needsUpscaling, aspect, videoWidth, videoHeight);
   const ffmpegArgs = buildFfmpegArgs(start, end, inputFile, outputFile, videoFilters, aspect, needsUpscaling, FFMPEG_PATH);
 
-  // Run FFmpeg
+  // Run FFmpeg with timeout and progress monitoring
   await new Promise((resolve, reject) => {
    console.time(`[${id}] ffmpeg segment`);
-   execFile(FFMPEG_PATH, ffmpegArgs, (err, stdout, stderr) => {
+
+   // Set FFmpeg timeout (5 minutes max for processing)
+   const ffmpegTimeout = setTimeout(() => {
+    if (ffmpegProcess && !ffmpegProcess.killed) {
+     console.log(`[${id}] ⚠️ FFmpeg timeout - killing process`);
+     ffmpegProcess.kill('SIGKILL');
+     reject(new Error('FFmpeg processing timed out after 5 minutes'));
+    }
+   }, 300000); // 5 minutes
+
+   const ffmpegProcess = execFile(FFMPEG_PATH, ffmpegArgs, (err, stdout, stderr) => {
+    clearTimeout(ffmpegTimeout);
     console.timeEnd(`[${id}] ffmpeg segment`);
+
     if (err) {
      console.error(`[${id}] ffmpeg error: ${err.message}`);
-     return reject(new Error(`ffmpeg failed: ${err.message}\n${stderr || ''}`));
+     console.error(`[${id}] ffmpeg stderr: ${stderr || 'No stderr'}`);
+     return reject(new Error(`FFmpeg failed: ${err.message}\n${stderr || ''}`));
     }
+
+    console.log(`[${id}] ✅ FFmpeg completed successfully`);
     resolve();
+   });
+
+   // Monitor FFmpeg progress (basic implementation)
+   let progressTimer = setInterval(() => {
+    if (fs.existsSync(outputFile)) {
+     try {
+      const stats = fs.statSync(outputFile);
+      if (stats.size > 0) {
+       console.log(`[${id}] 📊 FFmpeg progress: output file size ${stats.size} bytes`);
+      }
+     } catch (e) {
+      // Ignore stat errors during processing
+     }
+    }
+   }, 10000); // Check every 10 seconds
+
+   ffmpegProcess.on('exit', () => {
+    if (progressTimer) {
+     clearInterval(progressTimer);
+     progressTimer = null;
+    }
    });
   });
 

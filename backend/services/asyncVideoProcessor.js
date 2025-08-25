@@ -191,14 +191,12 @@ async function processVideoAsync(params, progressCallback) {
   const stats = fs.statSync(tempFile);
   console.log(`[${id}] ✅ Download completed! File size: ${stats.size} bytes`);
 
-  progressCallback(70, 'Processing video with FFmpeg...');
+  progressCallback(70, 'Memulai pemrosesan video dengan FFmpeg...');
 
   // Process video with FFmpeg
   const outputFile = await processVideoWithFFmpeg(id, tempFile, start, end, aspectRatio, progressCallback);
 
-  progressCallback(90, 'Finalizing and preparing download...');
-
-  // Read the final file
+  progressCallback(90, 'Finalisasi dan menyiapkan unduhan...'); // Read the final file
   const videoBuffer = fs.readFileSync(outputFile);
   const base64Video = videoBuffer.toString('base64');
 
@@ -210,7 +208,7 @@ async function processVideoAsync(params, progressCallback) {
    console.warn(`[${id}] Cleanup warning: ${cleanupError.message}`);
   }
 
-  progressCallback(100, 'Video processing completed successfully!');
+  progressCallback(100, 'Video berhasil diproses!');
 
   return {
    success: true,
@@ -244,12 +242,24 @@ async function processVideoWithFFmpeg(id, inputFile, start, end, aspectRatio, pr
  // For now, return a placeholder - will be integrated with existing FFmpeg code
  const outputFile = inputFile.replace('.mp4', '_processed.mp4');
 
- progressCallback(80, 'Cutting and encoding video...');
+ progressCallback(75, 'Memotong dan mengenkode video...');
 
  // Import and use existing FFmpeg functions
  const processSegmentWithQualityAssurance = global.processSegmentWithQualityAssurance;
 
- return await processSegmentWithQualityAssurance(id, inputFile, outputFile, start, end, aspectRatio);
+ // Add progress monitoring for FFmpeg
+ const progressMonitor = (progress, message) => {
+  progressCallback(75 + progress * 0.15, message || 'Memproses video...');
+ };
+
+ try {
+  const result = await processSegmentWithQualityAssurance(id, inputFile, outputFile, start, end, aspectRatio, progressMonitor);
+  progressCallback(88, 'Video berhasil diproses, menyiapkan output...');
+  return result;
+ } catch (error) {
+  console.error(`[${id}] FFmpeg processing failed:`, error);
+  throw new Error(`Video processing failed: ${error.message}`);
+ }
 }
 
 module.exports = {processVideoAsync};

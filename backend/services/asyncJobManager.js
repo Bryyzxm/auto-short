@@ -12,7 +12,7 @@ class AsyncJobManager {
   this.jobs = new Map(); // Store job status and data
   this.activeJobs = new Set(); // Track active job IDs
   this.maxConcurrentJobs = 3; // Limit concurrent processing
-  this.jobTimeout = 900000; // 15 minutes max job time
+  this.jobTimeout = 1800000; // 30 minutes max job time (increased for video processing)
   this.cleanupInterval = 300000; // Clean completed jobs every 5 minutes
 
   // Start cleanup timer
@@ -72,7 +72,7 @@ class AsyncJobManager {
    // Set timeout for job
    const timeoutId = setTimeout(() => {
     if (this.jobs.has(jobId) && this.jobs.get(jobId).status === 'processing') {
-     this.failJob(jobId, 'Job timed out after 15 minutes');
+     this.failJob(jobId, 'Job timed out after 30 minutes - video processing took too long');
     }
    }, this.jobTimeout);
 
@@ -108,16 +108,31 @@ class AsyncJobManager {
  }
 
  /**
-  * Mark job as failed
+  * Mark job as failed with detailed error categorization
   */
  failJob(jobId, errorMessage) {
   if (this.jobs.has(jobId)) {
    const job = this.jobs.get(jobId);
+
+   // Categorize the error for better user feedback
+   let userFriendlyMessage = errorMessage;
+   if (errorMessage.includes('timeout') || errorMessage.includes('timed out')) {
+    userFriendlyMessage = 'Video processing took too long. This may happen with very large videos. Try using a shorter video clip.';
+   } else if (errorMessage.includes('FFmpeg') || errorMessage.includes('ffmpeg')) {
+    userFriendlyMessage = 'Video encoding failed. The video format may not be supported or the file may be corrupted.';
+   } else if (errorMessage.includes('download') || errorMessage.includes('yt-dlp')) {
+    userFriendlyMessage = 'Failed to download video from YouTube. The video may be private, deleted, or restricted.';
+   } else if (errorMessage.includes('format') || errorMessage.includes('quality')) {
+    userFriendlyMessage = 'Video format check failed. Try with a different video or check if the video is available.';
+   }
+
    job.status = 'failed';
-   job.message = errorMessage;
-   job.error = errorMessage;
+   job.message = userFriendlyMessage;
+   job.error = errorMessage; // Keep technical error for debugging
    job.completedAt = new Date().toISOString();
    this.activeJobs.delete(jobId);
+
+   console.error(`❌ [AsyncJob] Job ${jobId} failed: ${errorMessage}`);
   }
  }
 
