@@ -2,6 +2,8 @@
 // 🔄 ASYNC JOB PROCESSING SYSTEM
 // ================================
 
+const {v4: uuidv4} = require('uuid');
+
 /**
  * Job processing system to handle long-running video downloads asynchronously
  */
