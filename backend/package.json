@@ -19,7 +19,10 @@
   "cookie-backup": "node cookie-refresh-utility.js --backup",
   "test-bot-detection": "node enhanced-bot-detection-test.js",
   "azure-fix": "node scripts/azure-startup-fix.js",
-  "azure-test": "node scripts/azure-startup-fix.js && yt-dlp --list-formats --extractor-args 'youtube:player_client=default,tv_simply,web,android;bypass_native_jsi' https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+  "azure-test": "node scripts/azure-startup-fix.js && yt-dlp --list-formats --extractor-args 'youtube:player_client=default,tv_simply,web,android;bypass_native_jsi' https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+  "azure:install-ffmpeg": "apt-get update && apt-get install -y ffmpeg",
+  "azure:verify-ffmpeg": "ffmpeg -version && ffprobe -version || echo 'FFmpeg not available'",
+  "azure:setup": "npm run azure:install-ffmpeg && npm run azure:verify-ffmpeg"
  },
  "dependencies": {
   "axios": "^1.11.0",

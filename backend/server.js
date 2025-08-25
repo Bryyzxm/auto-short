@@ -3402,6 +3402,18 @@ function handleDownloadError(err) {
 
 // Analyze video resolution and determine if upscaling is needed
 function analyzeVideoResolution(id, tempFile) {
+ console.log(`[${id}] 🔍 Starting video resolution analysis...`);
+
+ // Check if ffprobe is available
+ try {
+  execSync('which ffprobe', {encoding: 'utf8', shell: true});
+  console.log(`[${id}] ✅ ffprobe available`);
+ } catch (e) {
+  console.warn(`[${id}] ❌ ffprobe not available:`, e.message);
+  console.warn(`[${id}] 🔄 Using safe fallback resolution (1280x720)`);
+  return {videoWidth: 1280, videoHeight: 720, needsUpscaling: false, fallbackUsed: true};
+ }
+
  try {
   const ffprobeResult = execSync(`ffprobe -v quiet -print_format json -show_streams "${tempFile}"`, {encoding: 'utf8', shell: true});
   const videoInfo = JSON.parse(ffprobeResult);
@@ -3410,18 +3422,28 @@ function analyzeVideoResolution(id, tempFile) {
   if (videoStream) {
    const videoWidth = parseInt(videoStream.width);
    const videoHeight = parseInt(videoStream.height);
+
+   // Validate dimensions
+   if (isNaN(videoWidth) || isNaN(videoHeight) || videoWidth <= 0 || videoHeight <= 0) {
+    console.warn(`[${id}] ⚠️ Invalid video dimensions: ${videoWidth}x${videoHeight}, using fallback`);
+    return {videoWidth: 1280, videoHeight: 720, needsUpscaling: false, fallbackUsed: true};
+   }
+
    const needsUpscaling = videoHeight < 720;
 
-   console.log(`[${id}] Video resolution: ${videoWidth}x${videoHeight} (${videoHeight}p)`);
+   console.log(`[${id}] ✅ Video resolution: ${videoWidth}x${videoHeight} (${videoHeight}p)`);
    console.log(`[${id}] ${needsUpscaling ? '📈 UPSCALING REQUIRED' : '✅ Resolution adequate'}: ${videoHeight}p`);
 
-   return {videoWidth, videoHeight, needsUpscaling};
+   return {videoWidth, videoHeight, needsUpscaling, fallbackUsed: false};
+  } else {
+   console.warn(`[${id}] ⚠️ No video stream found, using fallback resolution`);
+   return {videoWidth: 1280, videoHeight: 720, needsUpscaling: false, fallbackUsed: true};
   }
  } catch (e) {
-  console.warn(`[${id}] Could not determine video resolution, assuming upscaling needed:`, e.message);
+  console.warn(`[${id}] ❌ Could not analyze video resolution:`, e.message);
+  console.warn(`[${id}] 🔄 Using safe fallback resolution (1280x720)`);
+  return {videoWidth: 1280, videoHeight: 720, needsUpscaling: false, fallbackUsed: true};
  }
-
- return {videoWidth: 0, videoHeight: 0, needsUpscaling: true};
 }
 
 // Helper function to ensure even dimensions for FFmpeg
@@ -3448,42 +3470,108 @@ function buildCropFilter(targetWidth, currentHeight) {
 function buildVideoFilters(needsUpscaling, aspectRatio, videoWidth, videoHeight) {
  const videoFilters = [];
 
+ console.log(`🔧 Building video filters - needsUpscaling: ${needsUpscaling}, aspectRatio: ${aspectRatio}, dimensions: ${videoWidth}x${videoHeight}`);
+
+ // Validate input dimensions
+ if (isNaN(videoWidth) || isNaN(videoHeight) || videoWidth <= 0 || videoHeight <= 0) {
+  console.warn(`⚠️ Invalid video dimensions: ${videoWidth}x${videoHeight}, using safe defaults`);
+  videoWidth = 1280;
+  videoHeight = 720;
+  needsUpscaling = false;
+ }
+
  if (needsUpscaling) {
   const targetHeight = 720;
   const targetWidth = Math.round((targetHeight * videoWidth) / videoHeight);
-  const evenWidth = ensureEvenDimension(targetWidth, true);
-  videoFilters.push(`scale=${evenWidth}:${targetHeight}:flags=lanczos`);
+
+  // Validate calculated dimensions
+  if (isNaN(targetWidth) || targetWidth <= 0) {
+   console.warn(`⚠️ Invalid calculated width: ${targetWidth}, using safe default`);
+   const safeWidth = 1280; // Use safe default
+   const evenWidth = ensureEvenDimension(safeWidth, true);
+   videoFilters.push(`scale=${evenWidth}:${targetHeight}:flags=lanczos`);
+  } else {
+   const evenWidth = ensureEvenDimension(targetWidth, true);
+   videoFilters.push(`scale=${evenWidth}:${targetHeight}:flags=lanczos`);
+  }
+
+  console.log(`📈 Added upscaling filter: scale=${evenWidth}:${targetHeight}`);
  }
 
  if (aspectRatio === '9:16') {
   const currentHeight = needsUpscaling ? 720 : videoHeight;
   const targetWidth = Math.round(currentHeight * (9 / 16));
-  videoFilters.push(buildCropFilter(targetWidth, currentHeight));
+
+  // Validate aspect ratio calculation
+  if (isNaN(targetWidth) || targetWidth <= 0) {
+   console.warn(`⚠️ Invalid calculated 9:16 width: ${targetWidth}, skipping crop`);
+  } else {
+   videoFilters.push(buildCropFilter(targetWidth, currentHeight));
+   console.log(`📐 Added 9:16 crop filter for width: ${targetWidth}`);
+  }
  } else if (aspectRatio === '16:9') {
   const currentHeight = needsUpscaling ? 720 : videoHeight;
   const targetWidth = Math.round(currentHeight * (16 / 9));
-  videoFilters.push(buildCropFilter(targetWidth, currentHeight));
+
+  // Validate aspect ratio calculation
+  if (isNaN(targetWidth) || targetWidth <= 0) {
+   console.warn(`⚠️ Invalid calculated 16:9 width: ${targetWidth}, skipping crop`);
+  } else {
+   videoFilters.push(buildCropFilter(targetWidth, currentHeight));
+   console.log(`📐 Added 16:9 crop filter for width: ${targetWidth}`);
+  }
  }
 
+ console.log(`✅ Final video filters: [${videoFilters.join(', ')}]`);
  return videoFilters;
 }
 
 // Build FFmpeg arguments for video processing
 function buildFfmpegArgs(start, end, tempFile, cutFile, videoFilters, aspectRatio, needsUpscaling) {
+ console.log(`🔧 Building FFmpeg arguments...`);
+ console.log(`📊 Parameters: start=${start}, end=${end}, aspectRatio=${aspectRatio}, needsUpscaling=${needsUpscaling}`);
+ console.log(`🎬 Filters to apply: [${videoFilters.join(', ')}]`);
+
  let ffmpegArgs = ['-y', '-ss', String(start), '-to', String(end), '-i', tempFile];
 
+ // Validate and sanitize video filters before adding
  if (videoFilters.length > 0) {
-  ffmpegArgs.push('-vf', videoFilters.join(','));
+  const validFilters = videoFilters.filter((filter) => {
+   // Check for NaN values in filters
+   if (filter.includes('NaN')) {
+    console.warn(`⚠️ Skipping invalid filter containing NaN: ${filter}`);
+    return false;
+   }
+
+   // Check for empty or malformed filters
+   if (!filter || filter.trim() === '') {
+    console.warn(`⚠️ Skipping empty filter`);
+    return false;
+   }
+
+   return true;
+  });
+
+  if (validFilters.length > 0) {
+   console.log(`✅ Adding ${validFilters.length} valid video filters`);
+   ffmpegArgs.push('-vf', validFilters.join(','));
+  } else {
+   console.warn(`⚠️ No valid video filters to apply`);
+  }
  }
 
  if (aspectRatio === 'original' && !needsUpscaling) {
+  console.log(`📋 Using stream copy for original aspect ratio without upscaling`);
   ffmpegArgs.push('-c', 'copy');
  } else {
   const crf = needsUpscaling ? '16' : '18';
+  console.log(`🎥 Using video encoding with CRF=${crf}`);
   ffmpegArgs.push('-c:v', 'libx264', '-crf', crf, '-preset', 'medium', '-profile:v', 'high', '-level:v', '4.0', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-movflags', '+faststart');
  }
 
  ffmpegArgs.push(cutFile);
+
+ console.log(`✅ Final FFmpeg command: ffmpeg ${ffmpegArgs.join(' ')}`);
  return ffmpegArgs;
 }
 
