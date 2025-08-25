@@ -7,7 +7,8 @@ const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const {execFile, execSync, spawn} = require('child_process');
-const {v4: uuidv4} = require('uuid');
+const uuid = require('uuid');
+const {v4: uuidv4} = uuid;
 const path = require('path');
 
 // Import enhanced error handling
