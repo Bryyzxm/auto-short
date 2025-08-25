@@ -19,9 +19,9 @@ const antiDetectionTranscript = require('./services/antiDetectionTranscript.js')
 const robustTranscriptServiceV2 = require('./services/robustTranscriptServiceV2.js');
 
 // Import async job system and enhanced CORS
-const {jobManager} = require('./services/asyncJobManager');
-const {corsMiddleware, errorCorsMiddleware, timeoutMiddleware} = require('./services/enhancedCorsManager');
-const {processVideoAsync} = require('./services/asyncVideoProcessor');
+const { jobManager } = require('./services/asyncJobManager');
+const { corsMiddleware, errorCorsMiddleware, timeoutMiddleware } = require('./services/enhancedCorsManager');
+const { processVideoAsync } = require('./services/asyncVideoProcessor');
 
 // ================================
 // 🔧 AZURE ENVIRONMENT DETECTION & UTILITIES
@@ -3938,83 +3938,6 @@ function buildFfmpegArgs(start, end, tempFile, cutFile, videoFilters, aspectRati
  return ffmpegArgs;
 }
 
-//
-// High-level segment processing used by the async video processor
-//
-async function processSegmentWithQualityAssurance(id, inputFile, outputFile, start, end, aspectRatio) {
- try {
-  console.log(`[${id}] 🎯 Starting segment processing`);
-  console.log(`[${id}] ▶️ Input: ${inputFile}`);
-  console.log(`[${id}] 💾 Output: ${outputFile}`);
-  console.log(`[${id}] ⏱️ Range: ${start}s → ${end}s, Aspect: ${aspectRatio}`);
-
-  // Probe source to get dimensions
-  const probeData = await new Promise((resolve, reject) => {
-   execFile(FFPROBE_PATH, ['-v', 'quiet', '-print_format', 'json', '-show_streams', inputFile], (err, stdout, stderr) => {
-    if (err) return reject(new Error(`ffprobe failed: ${err.message}`));
-    try {
-     resolve(JSON.parse(stdout || '{}'));
-    } catch (e) {
-     reject(new Error(`ffprobe output parse error: ${e.message}`));
-    }
-   });
-  });
-
-  const videoStream = Array.isArray(probeData?.streams) ? probeData.streams.find((s) => s.codec_type === 'video') : null;
-  let videoWidth = Number(videoStream?.width) || 1280;
-  let videoHeight = Number(videoStream?.height) || 720;
-  const srcAspect = videoWidth && videoHeight ? videoWidth / videoHeight : 16 / 9;
-
-  // Normalize aspect ratio value
-  const aspect = ['9:16', '16:9', 'original'].includes(aspectRatio) ? aspectRatio : 'original';
-
-  // Decide if upscaling is needed – target 720p height for processing
-  const needsUpscaling = videoHeight < 720;
-
-  console.log(`[${id}] 📐 Source resolution: ${videoWidth}x${videoHeight} (≈${srcAspect.toFixed(3)})`);
-  console.log(`[${id}] 📏 Target aspect: ${aspect}, Upscale: ${needsUpscaling}`);
-
-  const videoFilters = buildVideoFilters(needsUpscaling, aspect, videoWidth, videoHeight);
-  const ffmpegArgs = buildFfmpegArgs(start, end, inputFile, outputFile, videoFilters, aspect, needsUpscaling, FFMPEG_PATH);
-
-  // Run FFmpeg
-  await new Promise((resolve, reject) => {
-   console.time(`[${id}] ffmpeg segment`);
-   execFile(FFMPEG_PATH, ffmpegArgs, (err, stdout, stderr) => {
-    console.timeEnd(`[${id}] ffmpeg segment`);
-    if (err) {
-     console.error(`[${id}] ffmpeg error: ${err.message}`);
-     return reject(new Error(`ffmpeg failed: ${err.message}\n${stderr || ''}`));
-    }
-    resolve();
-   });
-  });
-
-  if (!fs.existsSync(outputFile)) {
-   throw new Error(`Output file not found after processing: ${outputFile}`);
-  }
-
-  // Log final probe (best effort)
-  try {
-   execFile(FFPROBE_PATH, ['-v', 'quiet', '-print_format', 'json', '-show_streams', outputFile], (probeErr, probeStdout) => {
-    if (!probeErr && probeStdout) {
-     const outProbe = JSON.parse(probeStdout);
-     const outStream = outProbe.streams?.find((s) => s.codec_type === 'video');
-     if (outStream) {
-      console.log(`[${id}] ✅ Output resolution: ${outStream.width}x${outStream.height}`);
-     }
-    }
-   });
-  } catch (_) {}
-
-  console.log(`[${id}] ✅ Segment processing completed: ${outputFile}`);
-  return outputFile;
- } catch (error) {
-  console.error(`[${id}] ❌ Segment processing failed: ${error.message}`);
-  throw error;
- }
-}
-
 // Schedule file cleanup
 function scheduleFileCleanup(cutFile) {
  setTimeout(() => {
@@ -4026,49 +3949,6 @@ function scheduleFileCleanup(cutFile) {
    });
   }
  }, 30000);
-}
-
-// Safety cleanup utilities
-function cleanupOldVttFiles() {
- try {
-  const outDir = path.join(__dirname, '..', 'outputs');
-  if (!fs.existsSync(outDir)) return;
-  const now = Date.now();
-  for (const f of fs.readdirSync(outDir)) {
-   if (f.endsWith('.vtt')) {
-    const fp = path.join(outDir, f);
-    const age = now - fs.statSync(fp).mtimeMs;
-    if (age > 60 * 60 * 1000) {
-     try {
-      fs.unlinkSync(fp);
-     } catch (_) {}
-    }
-   }
-  }
- } catch (e) {
-  console.warn(`[CLEANUP] VTT cleanup warning: ${e.message}`);
- }
-}
-
-function cleanupOldMp4Files() {
- try {
-  const outDir = path.join(__dirname, '..', 'outputs');
-  if (!fs.existsSync(outDir)) return;
-  const now = Date.now();
-  for (const f of fs.readdirSync(outDir)) {
-   if (f.endsWith('.mp4')) {
-    const fp = path.join(outDir, f);
-    const age = now - fs.statSync(fp).mtimeMs;
-    if (age > 60 * 60 * 1000) {
-     try {
-      fs.unlinkSync(fp);
-     } catch (_) {}
-    }
-   }
-  }
- } catch (e) {
-  console.warn(`[CLEANUP] MP4 cleanup warning: ${e.message}`);
- }
 }
 
 // Main endpoint with reduced complexity
@@ -4083,7 +3963,11 @@ app.post('/api/shorts', async (req, res) => {
 
  try {
   // Create async job for video processing
-  const jobId = await jobManager.createJob('video_processing', {youtubeUrl, start, end, aspectRatio}, processVideoAsync);
+  const jobId = await jobManager.createJob(
+   'video_processing',
+   {youtubeUrl, start, end, aspectRatio},
+   processVideoAsync
+  );
 
   // Return job ID immediately to prevent timeout
   res.status(202).json({
@@ -4092,14 +3976,15 @@ app.post('/api/shorts', async (req, res) => {
    jobId: jobId,
    status: 'processing',
    pollingUrl: `/api/jobs/${jobId}`,
-   estimatedTime: '3-5 minutes',
+   estimatedTime: '3-5 minutes'
   });
+
  } catch (error) {
   console.error('❌ [Job Creation] Error:', error);
   return res.status(503).json({
    success: false,
    error: 'SERVICE_UNAVAILABLE',
-   message: error.message || 'Service temporarily unavailable',
+   message: error.message || 'Service temporarily unavailable'
   });
  }
 });
@@ -4113,7 +3998,7 @@ app.get('/api/jobs/:jobId', (req, res) => {
   return res.status(404).json({
    success: false,
    error: 'JOB_NOT_FOUND',
-   message: 'Job not found or expired',
+   message: 'Job not found or expired'
   });
  }
 
@@ -4126,7 +4011,7 @@ app.get('/api/jobs/:jobId', (req, res) => {
   message: job.message,
   createdAt: job.createdAt,
   startedAt: job.startedAt,
-  completedAt: job.completedAt,
+  completedAt: job.completedAt
  };
 
  // Include result or error if job is completed
@@ -4145,7 +4030,7 @@ app.get('/api/jobs', (req, res) => {
   return res.status(403).json({
    success: false,
    error: 'FORBIDDEN',
-   message: 'Debug endpoint not available in production',
+   message: 'Debug endpoint not available in production'
   });
  }
 
@@ -4153,9 +4038,9 @@ app.get('/api/jobs', (req, res) => {
  res.json({
   success: true,
   jobs: jobs,
-  activeCount: jobs.filter((j) => j.status === 'processing' || j.status === 'queued').length,
-  completedCount: jobs.filter((j) => j.status === 'completed').length,
-  failedCount: jobs.filter((j) => j.status === 'failed').length,
+  activeCount: jobs.filter(j => j.status === 'processing' || j.status === 'queued').length,
+  completedCount: jobs.filter(j => j.status === 'completed').length,
+  failedCount: jobs.filter(j => j.status === 'failed').length
  });
 });
 
@@ -4167,9 +4052,300 @@ global.executeWithFallbackStrategies = executeWithFallbackStrategies;
 global.YT_DLP_PATH = YT_DLP_PATH;
 global.processSegmentWithQualityAssurance = processSegmentWithQualityAssurance;
 
-// ================================
-// 🚀 SERVER ENDPOINTS
-// ================================
+// Add anti-detection debug endpoint
+   });
+
+   // Safely destructure with fallback values
+   const {output = '', strategy = 'unknown'} = fallbackResult || {};
+   console.log(`[${id}] download strategy used: ${strategy}`);
+   console.log(`[${id}] yt-dlp output: ${output.substring(0, 500)}...`);
+
+   // Check if file exists after download with enhanced debugging
+   console.log(`[${id}] Checking if file exists: ${tempFile}`);
+   console.log(`[${id}] Working directory for file check: ${workingDir}`);
+   console.log(`[${id}] Process current directory: ${process.cwd()}`);
+
+   if (fs.existsSync(tempFile)) {
+    console.log(`[${id}] ✅ File found: ${tempFile}`);
+    const stats = fs.statSync(tempFile);
+    console.log(`[${id}] File size: ${stats.size} bytes`);
+   } else {
+    console.log(`[${id}] ❌ File not found: ${tempFile}`);
+
+    // 🚨 ENHANCED DEBUGGING: Check multiple possible locations
+    const debugLocations = [process.cwd(), workingDir, path.dirname(tempFile), '/home/site/wwwroot', '/home/site/wwwroot/backend'].filter(Boolean).filter((loc, index, arr) => arr.indexOf(loc) === index); // Remove duplicates
+
+    console.log(`[${id}] 🔍 Searching for files in ${debugLocations.length} locations...`);
+
+    for (const location of debugLocations) {
+     try {
+      if (fs.existsSync(location)) {
+       const files = fs
+        .readdirSync(location)
+        .filter((f) => f.includes(id) || f.endsWith('.mp4') || f.includes('youtube'))
+        .slice(0, 10); // Limit to 10 files to avoid log spam
+       console.log(`[${id}] 📁 ${location}: ${files.length > 0 ? files.join(', ') : 'No matching files'}`);
+      }
+     } catch (dirError) {
+      console.log(`[${id}] ❌ Cannot read ${location}: ${dirError.message}`);
+     }
+    }
+   }
+  } catch (downloadErr) {
+   console.log(`[${id}] 🔄 Primary download failed, trying backup strategy with ultra-simplified format`);
+
+   // 🚨 CRITICAL FIX: Backup strategy with proper output path
+   const backupOutputPath = workingDir ? path.relative(workingDir, tempFile) : path.basename(tempFile);
+
+   // 🚨 ULTRA-SIMPLIFIED backup strategy: Use absolute minimum args to bypass YouTube restrictions
+   const backupArgs = [
+    '-f',
+    'best', // 🚨 ULTRA-SIMPLIFIED: Just 'best' - no format selectors that can trigger restrictions
+    '--no-playlist',
+    '--no-warnings',
+    '--merge-output-format',
+    'mp4',
+    '--user-agent',
+    'Mozilla/5.0 (Linux; Android 10; SM-G975F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36',
+    '--extractor-args',
+    'youtube:player_client=android',
+    '--socket-timeout',
+    '20', // 🚨 Even more aggressive timeout for backup
+    '--retries',
+    '2', // 🚨 Minimal retries for backup
+    '-o',
+    backupOutputPath, // 🚨 FIXED: Use calculated output path
+    youtubeUrl,
+   ];
+
+   console.log(`[${id}] 🔄 Backup command: ${YT_DLP_PATH} ${backupArgs.join(' ')}`);
+   console.log(`[${id}] 🔄 Backup working directory: ${workingDir}`);
+   console.log(`[${id}] 🔄 Backup output path: ${backupOutputPath}`);
+
+   const backupResult = await executeWithFallbackStrategies(backupArgs, {
+    purpose: 'backup-download',
+    timeout: 300000,
+    maxBuffer: 1024 * 1024 * 50,
+    workingDir: workingDir, // 🚨 FIXED: Pass working directory context
+   });
+   console.log(`[${id}] ✅ Backup download successful with strategy: ${backupResult?.strategy || 'unknown'}`);
+   console.log(`[${id}] Backup yt-dlp output: ${backupResult?.output?.substring(0, 500) || ''}...`);
+
+   // Check if file exists after backup download with enhanced debugging
+   console.log(`[${id}] Checking if backup file exists: ${tempFile}`);
+   console.log(`[${id}] Backup working directory: ${workingDir}`);
+
+   if (fs.existsSync(tempFile)) {
+    console.log(`[${id}] ✅ Backup file found: ${tempFile}`);
+    const stats = fs.statSync(tempFile);
+    console.log(`[${id}] Backup file size: ${stats.size} bytes`);
+   } else {
+    console.log(`[${id}] ❌ Backup file not found: ${tempFile}`);
+
+    // Enhanced debugging for backup as well
+    const debugLocations = [process.cwd(), workingDir, path.dirname(tempFile), '/home/site/wwwroot', '/home/site/wwwroot/backend'].filter(Boolean).filter((loc, index, arr) => arr.indexOf(loc) === index);
+
+    console.log(`[${id}] 🔍 Backup search in ${debugLocations.length} locations...`);
+
+    for (const location of debugLocations) {
+     try {
+      if (fs.existsSync(location)) {
+       const files = fs
+        .readdirSync(location)
+        .filter((f) => f.includes(id) || f.endsWith('.mp4'))
+        .slice(0, 5);
+       console.log(`[${id}] 📁 ${location}: ${files.length > 0 ? files.join(', ') : 'No files'}`);
+      }
+     } catch (dirError) {
+      console.log(`[${id}] ❌ Cannot read ${location}: ${dirError.message}`);
+     }
+    }
+   }
+  }
+  console.timeEnd(`[${id}] yt-dlp download`);
+  console.log(`[${id}] yt-dlp download successful`);
+
+  if (!fs.existsSync(tempFile)) {
+   throw new Error('Downloaded file not found');
+  }
+
+  const stats = fs.statSync(tempFile);
+  if (stats.size < 1024) {
+   throw new Error('Downloaded file too small (likely corrupted)');
+  }
+
+  console.log(`[${id}] Video downloaded successfully: ${(stats.size / 1024 / 1024).toFixed(2)} MB`);
+ } catch (err) {
+  console.timeEnd(`[${id}] yt-dlp download`);
+  console.error(`[${id}] yt-dlp error:`, err.message);
+
+  // Enhanced error analysis for better debugging
+  let errorCategory = 'unknown';
+  if (err.message.includes('No such format') || err.message.includes('format not available')) {
+   errorCategory = 'format_issue';
+   console.log(`[${id}] 🔍 Format issue detected - running emergency format check`);
+
+   // Try to get more detailed format information
+   try {
+    const emergencyFormatCheck = await executeWithFallbackStrategies(['--list-formats', '--no-warnings', youtubeUrl], {purpose: 'emergency-formats', timeout: 30000});
+    console.log(`[${id}] 🆘 Emergency format check result:`, emergencyFormatCheck?.output?.substring(0, 500));
+   } catch (formatErr) {
+    console.log(`[${id}] 🆘 Emergency format check also failed:`, formatErr.message);
+   }
+  } else if (err.message.includes('429') || err.message.includes('Too Many Requests')) {
+   errorCategory = 'rate_limit';
+  } else if (err.message.includes('unavailable') || err.message.includes('not available')) {
+   errorCategory = 'video_unavailable';
+  }
+
+  console.log(`[${id}] 📊 Error category: ${errorCategory}`);
+
+  const {errorDetails, userFriendlyError} = handleDownloadError(err);
+
+  return res.status(500).json({
+   error: userFriendlyError,
+   technical_details: errorDetails,
+   error_message: err.message?.substring(0, 500) + '...',
+   environment: {
+    platform: process.platform,
+    node_env: process.env.NODE_ENV,
+    azure_env: process.env.WEBSITE_HOSTNAME || 'local',
+    ytdlp_path: YT_DLP_PATH,
+    timestamp: new Date().toISOString(),
+   },
+   request_info: {id, url: youtubeUrl, duration: `${start}s - ${end}s`},
+   command: `${process.platform === 'win32' ? YT_DLP_PATH : 'yt-dlp'} [args_hidden_for_security]`,
+  });
+ }
+
+ // Analyze video and process with FFmpeg
+ const {videoWidth, videoHeight, needsUpscaling} = analyzeVideoResolution(id, tempFile);
+
+ if (!fs.existsSync(tempFile)) {
+  return res.status(500).json({
+   error: 'Downloaded file not found',
+   details: `Expected file: ${tempFile}`,
+   workingDir: workingDir,
+   processDir: process.cwd(),
+  });
+ }
+
+ // 🚨 CRITICAL FIX: Use same working directory for cut file as temp file
+ const cutFile = path.join(workingDir, `${id}-short.mp4`);
+ console.log(`[${id}] 📍 Cut file path: ${cutFile}`);
+ console.log(`[${id}] 📁 Cut file directory: ${path.dirname(cutFile)}`);
+ const videoFilters = buildVideoFilters(needsUpscaling, aspectRatio, videoWidth, videoHeight);
+ const ffmpegArgs = buildFfmpegArgs(start, end, tempFile, cutFile, videoFilters, aspectRatio, needsUpscaling, FFMPEG_PATH);
+
+ console.time(`[${id}] ffmpeg cut`);
+ execFile(FFMPEG_PATH, ffmpegArgs, (err2, stdout2, stderr2) => {
+  console.timeEnd(`[${id}] ffmpeg cut`);
+  fs.unlink(tempFile, () => {});
+
+  if (err2) {
+   console.error(`[${id}] ffmpeg error:`, err2.message);
+   return res.status(500).json({
+    error: 'ffmpeg failed',
+    details: err2.message,
+    stderr: stderr2,
+    command: `ffmpeg ${ffmpegArgs.join(' ')}`,
+   });
+  }
+
+  if (!fs.existsSync(cutFile)) {
+   return res.status(500).json({
+    error: 'Cut file not found',
+    details: `Expected file: ${cutFile}`,
+   });
+  }
+
+  // Verify final output resolution
+  try {
+   const finalProbeResult = execSync(`${FFPROBE_PATH} -v quiet -print_format json -show_streams "${cutFile}"`, {encoding: 'utf8', timeout: 10000});
+   const finalVideoInfo = JSON.parse(finalProbeResult);
+   const finalVideoStream = finalVideoInfo.streams.find((s) => s.codec_type === 'video');
+
+   if (finalVideoStream) {
+    const finalWidth = parseInt(finalVideoStream.width);
+    const finalHeight = parseInt(finalVideoStream.height);
+    console.log(`[${id}] ✅ Final output resolution: ${finalWidth}x${finalHeight} (${finalHeight}p)`);
+   }
+  } catch (e) {
+   console.warn(`[${id}] Could not verify final resolution:`, e.message);
+  }
+
+  console.log(`[${id}] Selesai proses. Download: /outputs/${path.basename(cutFile)}`);
+  scheduleFileCleanup(cutFile);
+  res.json({downloadUrl: `/outputs/${path.basename(cutFile)}`});
+ });
+});
+
+// Proxy endpoint for transcript (to avoid CORS)
+app.get('/api/transcript', async (req, res) => {
+ const {videoId} = req.query;
+ if (!videoId) return res.status(400).json({error: 'videoId required'});
+ try {
+  const apiUrl = `https://yt.lemnoslife.com/noKey/transcript?videoId=${videoId}`;
+  const apiRes = await fetch(apiUrl);
+  if (!apiRes.ok) {
+   return res.status(apiRes.status).json({error: 'Failed to fetch transcript', status: apiRes.status});
+  }
+  const data = await apiRes.json();
+  res.json(data);
+ } catch (err) {
+  res.status(500).json({error: 'Proxy transcript error', details: err.message});
+ }
+});
+
+// Cache untuk menyimpan transkrip yang sudah diunduh
+// Enhanced transcript cache with anti-detection support
+const transcriptCache = new Map();
+const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
+const FAILED_CACHE_DURATION = 10 * 60 * 1000; // 10 minutes for failed attempts
+
+// Helper function untuk membersihkan file VTT lama
+function cleanupOldVttFiles() {
+ try {
+  const files = fs.readdirSync(process.cwd());
+  const vttFiles = files.filter((file) => file.endsWith('.vtt'));
+  vttFiles.forEach((file) => {
+   try {
+    fs.unlinkSync(path.join(process.cwd(), file));
+    console.log(`Cleaned up old VTT file: ${file}`);
+   } catch (e) {
+    console.warn(`Failed to cleanup VTT file ${file}:`, e.message);
+   }
+  });
+ } catch (e) {
+  console.warn('Failed to cleanup old VTT files:', e.message);
+ }
+}
+
+// Helper function untuk membersihkan file MP4 lama
+function cleanupOldMp4Files() {
+ try {
+  const files = fs.readdirSync(process.cwd());
+  const mp4Files = files.filter((file) => file.endsWith('.mp4') && file.includes('-'));
+  mp4Files.forEach((file) => {
+   try {
+    const filePath = path.join(process.cwd(), file);
+    const stats = fs.statSync(filePath);
+    const now = new Date();
+    const fileAge = now - stats.mtime;
+
+    // Delete files older than 1 hour
+    if (fileAge > 60 * 60 * 1000) {
+     fs.unlinkSync(filePath);
+     console.log(`Cleaned up old MP4 file: ${file}`);
+    }
+   } catch (e) {
+    console.warn(`Failed to cleanup MP4 file ${file}:`, e.message);
+   }
+  });
+ } catch (e) {
+  console.warn('Failed to cleanup old MP4 files:', e.message);
+ }
+}
 
 // Add anti-detection debug endpoint
 app.get('/api/transcript-stats', (req, res) => {
