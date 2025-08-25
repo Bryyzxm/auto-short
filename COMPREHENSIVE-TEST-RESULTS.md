@@ -96,7 +96,7 @@
 ### **Backend Endpoints Enhanced**
 
 - **`/api/intelligent-segments`**: ✅ Enhanced with AI segmentation and fallbacks
-- **`/api/upload-transcript`**: ✅ Enhanced with dual processing modes
+  -- **`/api/upload-transcript`**: REMOVED from the active codebase. Documentation retained for historical reference.
 - **Error Handling**: ✅ Comprehensive error management and status reporting
 - **Backward Compatibility**: ✅ Maintains compatibility with existing frontend
 
@@ -133,7 +133,7 @@
  "transcriptFull": "Welcome to this technology podcast. Today we're discussing AI. Machine learning algorithms have revolutionized data analysis.",
  "keyQuote": "Machine learning algorithms have revolutionized data analysis",
  "duration": 20,
- "hasManualTranscript": true,
+ // Note: `hasManualTranscript` field has been removed. Check `transcriptExcerpt`/`transcriptFull` instead.
  "hasAIGenerated": true,
  "aiQualityScore": 0.5,
  "contentType": "unknown"

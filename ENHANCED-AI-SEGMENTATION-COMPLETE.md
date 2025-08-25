@@ -32,7 +32,7 @@ Successfully completed comprehensive enhancement of the video segmentation syste
 ### 3. Backend Integration (`backend/server.js`)
 
 - **Enhanced Intelligent Segments Endpoint**: `/api/intelligent-segments` now uses AI segmentation
-- **Enhanced Transcript Upload Endpoint**: `/api/upload-transcript` supports both modes
+  -- **Enhanced Transcript Upload Endpoint**: `/api/upload-transcript` (REMOVED from codebase)
 - **Graceful Fallbacks**: Legacy processing when AI services unavailable
 - **Comprehensive Error Handling**: Detailed error messages and recovery
 - **Performance Monitoring**: Detailed logging and metrics

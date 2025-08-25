@@ -1,3 +1,11 @@
+# Manual Transcript Upload Feature - (REMOVED)
+
+This document previously described the Manual Transcript Upload feature. The feature and its related API endpoint (`/api/upload-transcript`) and frontend components have been removed from the codebase to reduce maintenance and surface area.
+
+If you need to reintroduce this capability in the future, re-open this document and follow the previous implementation notes, but prefer a separately versioned service with robust validations and tests.
+
+## 🎯 Feature Overview
+
 # Manual Transcript Upload Feature - Implementation Summary
 
 ## 🎯 Feature Overview
@@ -71,8 +79,8 @@ segments: [JSON string] (Array of existing video segments)
     "title": "Introduction",
     "startTimeSeconds": 0,
     "endTimeSeconds": 30,
-    "transcriptExcerpt": "Welcome to this tutorial...",
-    "hasManualTranscript": true
+    "transcriptExcerpt": "Welcome to this tutorial..."
+    // The explicit "hasManualTranscript" flag was removed; presence of transcriptExcerpt/transcriptFull indicates transcript data is available.
    }
   ],
   "stats": {

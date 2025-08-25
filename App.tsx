@@ -2,8 +2,7 @@ import React, {useState, useCallback} from 'react';
 import {YouTubeInputForm} from './components/YouTubeInputForm';
 import {ShortVideoCard} from './components/ShortVideoCard';
 import {LoadingSpinner} from './components/LoadingSpinner';
-import {TranscriptErrorHandler} from './components/TranscriptUploadFallback';
-import {ManualTranscriptUpload} from './components/ManualTranscriptUpload';
+// Manual transcript upload feature removed. Transcript extraction relies on automated backends.
 import {generateShortsIdeas} from './services/groqService';
 import type {ShortVideo} from './types';
 import {InfoIcon} from './components/icons';
@@ -298,7 +297,7 @@ const App: React.FC = () => {
   try {
    const response = await fetch(`${BACKEND_URL}/api/intelligent-segments`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({
      videoId,
      targetSegmentCount: targetCount,
@@ -597,12 +596,7 @@ const App: React.FC = () => {
     }
     const videoDuration = await getVideoDuration(videoId, transcriptData);
     try {
-     const ideas = await generateShortsIdeas(
-      url,
-      transcriptData.transcript,
-      videoDuration,
-      transcriptData.segments
-     );
+     const ideas = await generateShortsIdeas(url, transcriptData.transcript, videoDuration, transcriptData.segments);
      if (!ideas || ideas.length === 0) {
       setError('AI tidak dapat mengidentifikasi segmen menarik dari video ini. Video mungkin tidak cocok untuk format pendek.');
       setIsLoading(false);
@@ -673,68 +667,11 @@ const App: React.FC = () => {
      aspectRatio={aspectRatio}
      setAspectRatio={setAspectRatio}
     />
-    {/* Manual Transcript Upload - Always visible */}
-    <div className="mt-6">
-     <div className="p-6 bg-gray-800 rounded-lg border border-gray-600">
-      <div className="flex items-center justify-between mb-4">
-       <div>
-        <h3 className="text-lg font-semibold text-gray-200">Manual Transcript Upload</h3>
-        <p className="text-sm text-gray-400">Saat ini transcript belum bisa ditampilkan otomatis.</p>
-        <p className="text-xs text-gray-500 mt-1">Upload file transcript (.srt atau .txt) untuk menampilkan teks yang sesuai dengan setiap segmen video.</p>
-       </div>
-      </div>
-
-      {!currentVideoId && (
-       <div className="text-center py-4 text-gray-500">
-        <p className="text-sm">Masukkan URL Youtube pada kolom diatas untuk upload fil transcript. Kamu bisa mengupload file transcript bahkan sebelum membuat segmen.</p>
-       </div>
-      )}
-
-      {currentVideoId && !showManualUpload && (
-       <div className="text-center py-4">
-        {!backendStatus.isOnline && (
-         <div className="mb-4 p-3 bg-red-800/30 border border-red-600/30 rounded-lg">
-          <p className="text-sm text-red-200">⚠️ Backend server is offline. Manual transcript upload will not work until the backend is available.</p>
-         </div>
-        )}
-        <button
-         onClick={toggleManualUpload}
-         className={`px-6 py-3 rounded-lg transition-colors font-medium ${backendStatus.isOnline ? 'bg-purple-600 text-white hover:bg-purple-700' : 'bg-gray-600 text-gray-300 cursor-not-allowed'}`}
-         disabled={isLoading || !backendStatus.isOnline}
-        >
-         Upload Transcript File
-        </button>
-        {generatedShorts.length === 0 && <p className="mt-2 text-xs text-gray-500">No video segments yet? No problem! Upload a transcript and we'll create segments automatically.</p>}
-       </div>
-      )}
-
-      {showManualUpload && currentVideoId && (
-       <ManualTranscriptUpload
-        videoId={currentVideoId}
-        existingSegments={generatedShorts}
-        onSuccess={handleTranscriptUploadSuccess}
-        onError={handleTranscriptUploadError}
-        backendUrl={BACKEND_URL}
-       />
-      )}
-
-      {transcriptUploadError && (
-       <div className="mt-4 p-4 bg-red-800 bg-opacity-70 text-red-200 border border-red-600 rounded-lg">
-        <p className="font-semibold">Upload Error:</p>
-        <p>{transcriptUploadError}</p>
-       </div>
-      )}
-     </div>
-    </div>{' '}
     {isLoading && <LoadingSpinner />}
-    {/* Show transcript upload interface when YouTube is blocking */}
+    {/* Show error if transcript extraction fails; manual upload is no longer available */}
     {showTranscriptUpload && currentVideoId && (
-     <div className="mt-6">
-      <TranscriptErrorHandler
-       error="All transcript extraction services failed"
-       videoId={currentVideoId}
-       onRetry={handleManualTranscript}
-      />
+     <div className="mt-6 p-4 bg-yellow-900 rounded-lg text-yellow-200">
+      <p>Transcript extraction failed. Please try again later or use a different video. Manual transcript upload is no longer supported.</p>
      </div>
     )}
     {error && !showTranscriptUpload && (
@@ -766,29 +703,7 @@ const App: React.FC = () => {
       <p>Tidak ada hasil untuk ditampilkan. Masukkan URL YouTube dan klik "Generate Clip Segments" untuk melihat saran bertenaga AI.</p>
      </div>
     )}
-    <div className="mt-10 p-4 bg-yellow-700 bg-opacity-30 text-yellow-200 border border-yellow-600 rounded-lg text-sm flex items-start space-x-3">
-     <InfoIcon className="w-6 h-6 flex-shrink-0 mt-0.5 text-yellow-400" />
-     <div>
-      <h4 className="font-semibold text-yellow-100">Cara Upload Transcript Manual</h4>
-      <p>1. Copy URL Youtube yang kamu mau.</p>
-      <p className="mt-1">
-       2. Kunjungi{' '}
-       <a
-        href="https://downsub.com/"
-        className="font-bold italic underline"
-        target="_blank"
-        rel="noopener noreferrer"
-       >
-        Downsub
-       </a>
-       , paste URL Youtube tersebut dan download tipe file SRT.
-      </p>
-      <p className="mt-1">3. Paste URL Youtube lagi di website Autoshort.</p>
-      <p className="mt-1">4. Klik tombol upload transcript file, lalu upload file SRT yang sudah kamu download.</p>
-      <p className="mt-1">5. Klik tombol generate clip segments dan tunggu hasilnya.</p>
-      <p className="mt-1">*Fitur upload transcript hanya sementara. Developer sedang berusaha memperbaiki agar fitur transcript otomatis bisa bekerja.</p>
-     </div>
-    </div>
+    {/* ...existing code... */}
    </main>
 
    <footer className="w-full max-w-4xl mt-12 text-center text-gray-500">

@@ -101,61 +101,59 @@ class EnhancedTranscriptProcessor {
   const isSequenceNumber = (line) => /^\d+$/.test(line);
 
   const handleSequenceNumber = (line) => ({
-    index: parseInt(line),
-    text: '',
+   index: parseInt(line),
+   text: '',
   });
 
   const handleTimestampLine = (timestampLine) => {
-    const timestamps = this.parseTimestampLine(timestampLine);
-    if (timestamps) {
-      return { start: timestamps.start, end: timestamps.end };
-    } else {
-      console.warn(`[SRT-PARSER] Invalid timestamp: ${timestampLine}`);
-      return null;
-    }
+   const timestamps = this.parseTimestampLine(timestampLine);
+   if (timestamps) {
+    return {start: timestamps.start, end: timestamps.end};
+   } else {
+    console.warn(`[SRT-PARSER] Invalid timestamp: ${timestampLine}`);
+    return null;
+   }
   };
 
   const addSegmentIfValid = (segment) => {
-    if (segment && segment.text) {
-      segments.push(segment);
-    }
+   if (segment && segment.text) {
+    segments.push(segment);
+   }
   };
 
   while (lineIndex < lines.length) {
-    const line = lines[lineIndex].trim();
+   const line = lines[lineIndex].trim();
 
-    if (!line) {
+   if (!line) {
+    lineIndex++;
+    continue;
+   }
+
+   if (isSequenceNumber(line)) {
+    addSegmentIfValid(currentSegment);
+    currentSegment = handleSequenceNumber(line);
+    lineIndex++;
+
+    if (lineIndex < lines.length) {
+     const timestampLine = lines[lineIndex].trim();
+     const timestamps = handleTimestampLine(timestampLine);
+
+     if (timestamps) {
+      currentSegment.start = timestamps.start;
+      currentSegment.end = timestamps.end;
+      lineIndex++;
+     } else {
+      currentSegment = null;
       lineIndex++;
       continue;
+     }
     }
-
-    if (isSequenceNumber(line)) {
-      addSegmentIfValid(currentSegment);
-      currentSegment = handleSequenceNumber(line);
-      lineIndex++;
-
-      if (lineIndex < lines.length) {
-        const timestampLine = lines[lineIndex].trim();
-        const timestamps = handleTimestampLine(timestampLine);
-
-        if (timestamps) {
-          currentSegment.start = timestamps.start;
-          currentSegment.end = timestamps.end;
-          lineIndex++;
-        } else {
-          currentSegment = null;
-          lineIndex++;
-          continue;
-        }
-      }
-    } else if (currentSegment) {
-      currentSegment.text = currentSegment.text
-        ? currentSegment.text + ' ' + line
-        : line;
-      lineIndex++;
-    } else {
-      lineIndex++;
-    }
+   } else if (currentSegment) {
+    currentSegment.text = currentSegment.text ? currentSegment.text + ' ' + line : line;
+    lineIndex++;
+   } else {
+    lineIndex++;
+   }
   }
 
   addSegmentIfValid(currentSegment);
@@ -496,7 +494,6 @@ class EnhancedTranscriptProcessor {
      ...videoSegment,
      transcriptExcerpt: this.createExcerpt(combinedText, 300),
      transcriptFull: combinedText,
-     hasManualTranscript: true,
      transcriptQuality: this.calculateTextQuality(combinedText),
      matchedTranscriptSegments: overlappingTranscripts.length,
     };
@@ -509,7 +506,6 @@ class EnhancedTranscriptProcessor {
     // Keep original segment without transcript
     updatedSegments.push({
      ...videoSegment,
-     hasManualTranscript: false,
     });
 
     console.log(`[TRANSCRIPT-PROCESSOR] ⚠️ No transcript match for segment "${videoSegment.title || 'Untitled'}"`);
@@ -819,7 +815,6 @@ class EnhancedTranscriptProcessor {
    transcriptExcerpt: aiSegment.text, // Use full text instead of truncated excerpt
    transcriptFull: aiSegment.text,
    keyQuote: aiSegment.keyQuote,
-   hasManualTranscript: true,
    hasAIGenerated: true,
    aiQualityScore: aiResult.metadata?.qualityScore || 0.8,
    contentType: aiResult.analysis?.contentType || 'video',
@@ -879,7 +874,6 @@ class EnhancedTranscriptProcessor {
      endTimeSeconds: currentEnd,
      youtubeVideoId: videoId,
      transcriptExcerpt: combinedText,
-     hasManualTranscript: true,
      thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
      duration: currentEnd - currentStart,
     });

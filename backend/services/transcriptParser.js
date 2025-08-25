@@ -169,11 +169,10 @@ function synchronizeWithSegments(transcriptSegments, videoSegments) {
   return {
    ...segment,
    transcriptExcerpt: combinedTranscript || segment.transcriptExcerpt || '',
-   hasManualTranscript: combinedTranscript.length > 0,
   };
  });
 
- const successfulMatches = updatedSegments.filter((s) => s.hasManualTranscript).length;
+ const successfulMatches = updatedSegments.filter((s) => s.transcriptExcerpt && s.transcriptExcerpt.length > 0).length;
  console.log(`[TRANSCRIPT-SYNC] ✅ Successfully matched ${successfulMatches}/${videoSegments.length} segments with transcript data`);
 
  return updatedSegments;
