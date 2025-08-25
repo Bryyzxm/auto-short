@@ -3862,7 +3862,7 @@ app.post('/api/shorts', async (req, res) => {
  const ffmpegArgs = buildFfmpegArgs(start, end, tempFile, cutFile, videoFilters, aspectRatio, needsUpscaling);
 
  console.time(`[${id}] ffmpeg cut`);
- execFile('ffmpeg', ffmpegArgs, {shell: true}, (err2, stdout2, stderr2) => {
+ execFile('ffmpeg', ffmpegArgs, (err2, stdout2, stderr2) => {
   console.timeEnd(`[${id}] ffmpeg cut`);
   fs.unlink(tempFile, () => {});
 
