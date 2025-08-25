@@ -743,6 +743,87 @@ try {
 
 console.log(`[FFMPEG] Final paths - FFmpeg: ${FFMPEG_PATH}, FFprobe: ${FFPROBE_PATH} (source: ${FFMPEG_SOURCE})`);
 
+// 🚀 ENHANCED FFMPEG DETECTION WITH RETRY LOGIC
+// ================================================
+// Handle case where FFmpeg installation happens in background after server startup
+
+let ffmpegRetryCount = 0;
+const maxRetries = 12; // 12 retries = 2 minutes of checking
+const retryInterval = 10000; // 10 seconds between retries
+
+function recheckFFmpegAvailability() {
+ if (ffmpegRetryCount >= maxRetries) {
+  console.log('[FFMPEG-RETRY] ⏰ Stopped checking - maximum retries reached');
+  return;
+ }
+
+ ffmpegRetryCount++;
+ console.log(`[FFMPEG-RETRY] 🔄 Recheck attempt ${ffmpegRetryCount}/${maxRetries} (${retryInterval / 1000}s intervals)`);
+
+ // Check if vendor directory now exists
+ const vendorFFmpegPath = path.join(__dirname, 'vendor', 'ffmpeg', 'ffmpeg');
+ const vendorFFprobePath = path.join(__dirname, 'vendor', 'ffmpeg', 'ffprobe');
+
+ if (fs.existsSync(vendorFFmpegPath) && fs.existsSync(vendorFFprobePath)) {
+  try {
+   // Test functionality
+   execSync(`${vendorFFmpegPath} -version`, {stdio: 'pipe', timeout: 5000});
+   execSync(`${vendorFFprobePath} -version`, {stdio: 'pipe', timeout: 5000});
+
+   // Update paths
+   FFMPEG_PATH = vendorFFmpegPath;
+   FFPROBE_PATH = vendorFFprobePath;
+   FFMPEG_SOURCE = 'vendor-delayed';
+
+   // Update PATH
+   const vendorDir = path.dirname(vendorFFmpegPath);
+   const currentPath = process.env.PATH || '';
+   if (!currentPath.includes(vendorDir)) {
+    process.env.PATH = `${vendorDir}:${currentPath}`;
+    console.log(`[FFMPEG-RETRY] 🛣️ Updated PATH: ${vendorDir}`);
+   }
+
+   console.log('[FFMPEG-RETRY] 🎉 FFmpeg now available!');
+   console.log(`[FFMPEG-RETRY] 📹 FFmpeg: ${FFMPEG_PATH}`);
+   console.log(`[FFMPEG-RETRY] 🔍 FFprobe: ${FFPROBE_PATH}`);
+
+   // Test version
+   try {
+    const version = execSync(`${FFMPEG_PATH} -version 2>&1 | head -1`, {encoding: 'utf8', timeout: 5000});
+    console.log(`[FFMPEG-RETRY] 🎬 Version: ${version.trim()}`);
+   } catch (versionError) {
+    console.warn(`[FFMPEG-RETRY] ⚠️ Version check failed: ${versionError.message}`);
+   }
+
+   // Remove unavailable flag if it exists
+   try {
+    const flagPath = path.join(__dirname, 'ffmpeg-unavailable');
+    if (fs.existsSync(flagPath)) {
+     fs.unlinkSync(flagPath);
+     console.log('[FFMPEG-RETRY] 🗑️ Removed unavailable flag');
+    }
+   } catch (flagError) {
+    console.warn(`[FFMPEG-RETRY] ⚠️ Could not remove flag: ${flagError.message}`);
+   }
+
+   return; // Stop retrying
+  } catch (testError) {
+   console.log(`[FFMPEG-RETRY] ❌ Binaries exist but not functional: ${testError.message}`);
+  }
+ }
+
+ // Schedule next retry if binaries not ready yet
+ console.log(`[FFMPEG-RETRY] ⏳ FFmpeg not ready yet, retrying in ${retryInterval / 1000}s...`);
+ setTimeout(recheckFFmpegAvailability, retryInterval);
+}
+
+// Start delayed checking only if FFmpeg not found initially
+if (FFMPEG_SOURCE === 'system' || FFMPEG_SOURCE === 'fallback') {
+ console.log('[FFMPEG-RETRY] 🕒 Starting delayed FFmpeg detection...');
+ console.log('[FFMPEG-RETRY] 💡 This handles background installation from setup-ffmpeg.sh');
+ setTimeout(recheckFFmpegAvailability, 5000); // Start checking after 5 seconds
+}
+
 // Configurable cookies path for bypassing YouTube bot detection
 // Use the comprehensive cookies file (31KB) instead of minimal generated one
 let YTDLP_COOKIES_PATH = process.env.YTDLP_COOKIES_PATH || path.join(__dirname, 'cookies.txt');
@@ -2500,7 +2581,162 @@ app.get('/health', async (req, res) => {
   };
  }
 
+ // Add FFmpeg status information
+ healthInfo.ffmpeg = {
+  ffmpegPath: FFMPEG_PATH,
+  ffprobePath: FFPROBE_PATH,
+  source: FFMPEG_SOURCE,
+  retryCount: ffmpegRetryCount || 0,
+ };
+
+ // Test FFmpeg availability
+ try {
+  const ffmpegTest = execSync(`${FFMPEG_PATH} -version 2>&1 | head -1`, {
+   encoding: 'utf8',
+   timeout: 3000,
+   stdio: 'pipe',
+  });
+  healthInfo.ffmpeg.available = true;
+  healthInfo.ffmpeg.version = ffmpegTest.trim();
+ } catch (ffmpegError) {
+  healthInfo.ffmpeg.available = false;
+  healthInfo.ffmpeg.error = ffmpegError.message;
+ }
+
+ // Check for installation log
+ try {
+  const installLogPath = path.join(__dirname, 'vendor', 'ffmpeg', 'install.log');
+  if (fs.existsSync(installLogPath)) {
+   const logContent = fs.readFileSync(installLogPath, 'utf8');
+   const logLines = logContent.split('\n').filter((line) => line.trim());
+   healthInfo.ffmpeg.installLog = {
+    lastEntries: logLines.slice(-5), // Last 5 entries
+    totalLines: logLines.length,
+   };
+  }
+ } catch (logError) {
+  // Log reading failed, not critical
+ }
+
  res.json(healthInfo);
+});
+
+// 🎬 FFmpeg Status Endpoint
+// =========================
+app.get('/api/ffmpeg-status', async (req, res) => {
+ try {
+  const status = {
+   paths: {
+    ffmpeg: FFMPEG_PATH,
+    ffprobe: FFPROBE_PATH,
+   },
+   source: FFMPEG_SOURCE,
+   retryInfo: {
+    count: ffmpegRetryCount || 0,
+    maxRetries: maxRetries || 12,
+    isRetrying: ffmpegRetryCount > 0 && ffmpegRetryCount < (maxRetries || 12),
+   },
+   timestamp: new Date().toISOString(),
+  };
+
+  // Test FFmpeg availability
+  try {
+   const ffmpegTest = execSync(`${FFMPEG_PATH} -version`, {
+    encoding: 'utf8',
+    timeout: 5000,
+    stdio: 'pipe',
+   });
+
+   status.ffmpeg = {
+    available: true,
+    version: ffmpegTest.split('\n')[0],
+    fullOutput: ffmpegTest,
+   };
+  } catch (ffmpegError) {
+   status.ffmpeg = {
+    available: false,
+    error: ffmpegError.message,
+    code: ffmpegError.code,
+   };
+  }
+
+  // Test FFprobe availability
+  try {
+   const ffprobeTest = execSync(`${FFPROBE_PATH} -version`, {
+    encoding: 'utf8',
+    timeout: 5000,
+    stdio: 'pipe',
+   });
+
+   status.ffprobe = {
+    available: true,
+    version: ffprobeTest.split('\n')[0],
+   };
+  } catch (ffprobeError) {
+   status.ffprobe = {
+    available: false,
+    error: ffprobeError.message,
+    code: ffprobeError.code,
+   };
+  }
+
+  // Check vendor directory
+  const vendorDir = path.join(__dirname, 'vendor', 'ffmpeg');
+  status.vendorDirectory = {
+   exists: fs.existsSync(vendorDir),
+   path: vendorDir,
+  };
+
+  if (status.vendorDirectory.exists) {
+   try {
+    const files = fs.readdirSync(vendorDir);
+    status.vendorDirectory.files = files;
+    status.vendorDirectory.ffmpegExists = files.includes('ffmpeg');
+    status.vendorDirectory.ffprobeExists = files.includes('ffprobe');
+   } catch (readError) {
+    status.vendorDirectory.error = readError.message;
+   }
+  }
+
+  // Check installation log
+  const installLogPath = path.join(vendorDir, 'install.log');
+  if (fs.existsSync(installLogPath)) {
+   try {
+    const logContent = fs.readFileSync(installLogPath, 'utf8');
+    const logLines = logContent.split('\n').filter((line) => line.trim());
+    status.installLog = {
+     exists: true,
+     lastEntries: logLines.slice(-10), // Last 10 entries
+     totalLines: logLines.length,
+     fullPath: installLogPath,
+    };
+   } catch (logError) {
+    status.installLog = {
+     exists: true,
+     error: logError.message,
+    };
+   }
+  } else {
+   status.installLog = {
+    exists: false,
+    path: installLogPath,
+   };
+  }
+
+  // Overall status
+  status.overall = {
+   ready: status.ffmpeg.available && status.ffprobe.available,
+   message: status.ffmpeg.available && status.ffprobe.available ? 'FFmpeg is ready for video processing' : 'FFmpeg is not available - video processing disabled',
+  };
+
+  res.json(status);
+ } catch (error) {
+  res.status(500).json({
+   error: 'Failed to get FFmpeg status',
+   message: error.message,
+   timestamp: new Date().toISOString(),
+  });
+ }
 });
 
 // 🚨 DEBUG ENDPOINT: Production diagnostics with Azure awareness

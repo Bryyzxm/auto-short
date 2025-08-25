@@ -1,3 +1,96 @@
+# 🚀 CRITICAL: Azure App Service FFmpeg Configuration Commands
+
+## 🎯 THE SOLUTION: Configure Custom Startup Command
+
+**CRITICAL DISCOVERY**: The root cause is that Azure App Service is **NOT executing our custom startup.sh script**.
+Instead, it uses its own auto-generated command that skips FFmpeg installation entirely.
+
+**Evidence from fresh logs:**
+
+```log
+2025-08-25T05:09:03.9638820Z PATH="$PATH:/home/site/wwwroot" cd backend && npm install && npm start
+```
+
+Azure generates its own startup script that bypasses our custom `startup.sh` completely.
+
+## 🔧 REQUIRED CONFIGURATION COMMANDS
+
+### Option 1: Azure CLI Configuration (RECOMMENDED)
+
+```bash
+# Configure Azure to use our custom startup script
+az webapp config set \
+  --resource-group "auto-short-rg" \
+  --name "auto-short" \
+  --startup-file "bash /home/site/wwwroot/backend/startup.sh"
+
+# Restart the app to apply changes
+az webapp restart \
+  --resource-group "auto-short-rg" \
+  --name "auto-short"
+```
+
+### Option 2: Azure Portal Configuration
+
+1. Go to Azure Portal > Your App Service > Configuration
+2. Under "General Settings" tab
+3. Find "Startup Command" field
+4. Enter: `bash /home/site/wwwroot/backend/startup.sh`
+5. Click "Save"
+6. Restart the app
+
+### Option 3: Alternative Startup Command
+
+If the above doesn't work, try:
+
+```bash
+az webapp config set \
+  --resource-group "auto-short-rg" \
+  --name "auto-short" \
+  --startup-file "cd /home/site/wwwroot/backend && bash startup.sh"
+```
+
+## 📋 VERIFICATION STEPS
+
+After configuring the startup command:
+
+1. **Monitor Deployment Logs:**
+
+   - Check Azure logs for "🚀 Azure App Service Enhanced Startup Script"
+   - Look for "✅ FFmpeg installation verification successful"
+
+2. **Expected Log Output:**
+
+   ```
+   🚀 Azure App Service Enhanced Startup Script
+   🔧 Setting up FFmpeg for Azure App Service...
+   📦 Installing FFmpeg static binaries from johnvansickle.com...
+   ✅ FFmpeg installation verification successful
+   🚀 Starting Node.js Application...
+   ```
+
+3. **Test Video Processing:**
+   - Try downloading/segmenting a video
+   - FFmpeg ENOENT errors should be eliminated
+
+## 🔥 WHAT THIS FIXES
+
+✅ **Before:** Azure ignores startup.sh → No FFmpeg → ENOENT errors
+✅ **After:** Azure runs startup.sh → FFmpeg installed → Video processing works
+
+## 🎯 EXPECTED OUTCOME
+
+- ✅ FFmpeg static binaries installed automatically
+- ✅ Video segments downloadable at 720p minimum quality
+- ❌ "spawn ffmpeg ENOENT" errors eliminated
+- ✅ Production-ready video processing pipeline
+
+## 🚨 CRITICAL NEXT STEP
+
+**YOU MUST RUN ONE OF THE AZURE CLI COMMANDS ABOVE** to configure the custom startup command. The code changes alone are not sufficient - Azure needs to be explicitly told to use our startup script.
+
+---
+
 # FFmpeg ENOENT Comprehensive Fix - Resolution Complete
 
 ## Problem Analysis
