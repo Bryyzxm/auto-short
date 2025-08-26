@@ -13,6 +13,7 @@ const path = require('path');
 
 // Import enhanced error handling
 const errorHandler = require('./services/errorHandler');
+const enhancedAntiBotService = require('./services/enhancedAntiBotService');
 const fs = require('fs');
 const ytdlp = require('yt-dlp-exec');
 const {YoutubeTranscript} = require('youtube-transcript');
@@ -1888,8 +1889,21 @@ async function executeYtDlpSecurelyCore(args, options = {}) {
   console.log('[YT-DLP-EXEC] 🛡️ Applying enhanced anti-detection measures...');
 
   // Extract video ID for rate limiting
+  // Extract video ID for bot detection analysis
   const videoId = extractVideoId(finalArgs);
   if (videoId) {
+   // Check if we're in cooldown after recent bot detection
+   if (enhancedAntiBotService.isInCooldown()) {
+    console.log(`[YT-DLP-EXEC] ⏳ Anti-bot cooldown active, delaying request for ${videoId}`);
+    const stats = enhancedAntiBotService.getStats();
+    await new Promise((resolve) => setTimeout(resolve, Math.min(stats.cooldownRemaining, 30000)));
+   }
+
+   // Apply enhanced anti-bot arguments
+   const enhancedArgs = enhancedAntiBotService.getEnhancedArgs(finalArgs, videoId);
+   finalArgs.length = 0;
+   finalArgs.push(...enhancedArgs);
+
    try {
     await RATE_LIMITER.checkAndWait(videoId);
    } catch (error) {
@@ -2126,6 +2140,17 @@ async function executeYtDlpSecurelyCore(args, options = {}) {
      console.error('[YT-DLP-EXEC]   - Cookies file validity and freshness');
      console.error('[YT-DLP-EXEC]   - YouTube authentication status');
      console.error('[YT-DLP-EXEC]   - Bot detection countermeasures');
+    }
+
+    // Enhanced bot detection analysis
+    const isBotDetected = enhancedAntiBotService.isBotDetectionError(stderr);
+    if (isBotDetected) {
+     console.error('[YT-DLP-EXEC] 🤖 Bot detection confirmed, recording event');
+     enhancedAntiBotService.recordBotDetection();
+
+     // Provide specific bot detection error
+     reject(new Error(`YouTube bot detection triggered: ${stderr.substring(0, 200)}. Entering cooldown period.`));
+     return;
     }
 
     // Analyze stderr for specific error patterns
@@ -5003,6 +5028,25 @@ app.get('/api/enhanced-transcript/:videoId', async (req, res) => {
    origin: req.headers['origin'],
   });
 
+  // Enhanced error handling with bot detection analysis
+  const errorMessage = error.message || '';
+  const isBotDetected = errorMessage.toLowerCase().includes('sign in') || errorMessage.toLowerCase().includes('bot') || errorMessage.toLowerCase().includes('authentication') || errorMessage.toLowerCase().includes('cookies');
+
+  // Handle bot detection errors specifically
+  if (isBotDetected) {
+   console.error('[BULLETPROOF-API] 🤖 Bot detection error detected');
+   return res.status(423).json({
+    error: 'BOT_DETECTION',
+    message: 'YouTube bot detection triggered. Transcript extraction temporarily blocked.',
+    details: 'YouTube is currently blocking automated transcript requests. This is temporary.',
+    bulletproofStatus: 'bot_detected',
+    userFriendly: true,
+    errorType: 'bot_detection',
+    retryAfter: 300, // 5 minutes
+    suggestions: ['Try again in a few minutes', 'Use a different video', 'Check if the video has manual captions'],
+   });
+  }
+
   // Handle specific error types with appropriate HTTP status codes
   if (error instanceof TranscriptDisabledError || error.name === 'TranscriptDisabledError') {
    return res.status(404).json({
@@ -5025,13 +5069,16 @@ app.get('/api/enhanced-transcript/:videoId', async (req, res) => {
   }
 
   if (error instanceof NoValidTranscriptError || error.name === 'NoValidTranscriptError') {
-   return res.status(404).json({
-    error: 'TRANSCRIPT_NOT_FOUND',
-    message: 'A transcript for this video could not be found or is disabled by the owner.',
+   // Don't return 404 for extraction failures - use 503 to indicate temporary issue
+   return res.status(503).json({
+    error: 'TRANSCRIPT_EXTRACTION_FAILED',
+    message: 'Unable to extract transcript at this time. This may be temporary.',
     details: error.message,
     bulletproofStatus: 'handled_error',
     userFriendly: true,
-    errorType: 'transcript_not_found',
+    errorType: 'extraction_failed',
+    retryAfter: 180, // 3 minutes
+    suggestions: ['Try again in a few minutes', 'Check if the video has captions enabled', 'Try a different video'],
    });
   }
 

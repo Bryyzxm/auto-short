@@ -206,10 +206,34 @@ class SmartTranscriptManager {
 
     console.log(`[TRANSCRIPT] Backend returned unexpected format:`, data);
    } else {
-    const errorText = await response.text();
+    // Enhanced error handling for different status codes
+    const errorData = await response.json().catch(() => null);
+
+    if (response.status === 423 && errorData?.errorType === 'bot_detection') {
+     console.log(`[TRANSCRIPT] Backend bot detection triggered for ${videoId}, will retry with browser methods`);
+     // Don't throw error - let other strategies try
+     return null;
+    }
+
+    if (response.status === 503 && errorData?.errorType === 'extraction_failed') {
+     console.log(`[TRANSCRIPT] Backend extraction temporarily failed for ${videoId}, retrying after ${errorData.retryAfter || 180}s`);
+     // Don't throw error - let other strategies try
+     return null;
+    }
+
+    if (response.status === 404 && errorData?.errorType === 'transcript_disabled') {
+     console.log(`[TRANSCRIPT] Backend confirms transcript disabled for ${videoId}`);
+     throw new Error('TRANSCRIPT_DISABLED_BY_OWNER');
+    }
+
+    const errorText = errorData?.message || (await response.text());
     console.log(`[TRANSCRIPT] Backend error ${response.status}: ${errorText}`);
    }
   } catch (error: any) {
+   // Don't throw for network errors - let other strategies try
+   if (error.message === 'TRANSCRIPT_DISABLED_BY_OWNER') {
+    throw error; // Re-throw transcript disabled errors
+   }
    console.log(`[TRANSCRIPT] Backend request failed for ${videoId}:`, error.message);
   }
 

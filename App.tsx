@@ -519,6 +519,30 @@ const App: React.FC = () => {
 
    // Helper: handle errors from intelligent segmentation
    const handleIntelligentSegmentationError = (errorMessage: string) => {
+    // Enhanced error handling with specific user guidance
+    console.log(`[APP] Intelligent segments error: ${errorMessage}`);
+
+    // Check for bot detection errors
+    if (errorMessage.includes('bot detection') || errorMessage.includes('Sign in to confirm') || errorMessage.includes('BOT_DETECTION')) {
+     setError('YouTube sementara memblokir permintaan otomatis. Silakan tunggu beberapa menit dan coba lagi.');
+     setIsLoading(false);
+     return true;
+    }
+
+    // Check for temporary service issues (503 errors)
+    if (errorMessage.includes('Service temporarily unavailable') || errorMessage.includes('503') || errorMessage.includes('EXTRACTION_FAILED')) {
+     setError('Layanan ekstraksi transkrip sementara tidak tersedia. Silakan coba lagi dalam beberapa menit.');
+     setIsLoading(false);
+     return true;
+    }
+
+    // Check for processing timeout
+    if (errorMessage.includes('processing timeout') || errorMessage.includes('timeout')) {
+     setError('Video membutuhkan waktu lebih lama untuk diproses karena pembatasan YouTube. Silakan tunggu dan coba lagi dalam beberapa menit.');
+     setIsLoading(false);
+     return true;
+    }
+
     if (errorMessage.includes('Transkrip tidak tersedia') || errorMessage.includes('tidak memiliki subtitle') || errorMessage.includes('A valid transcript is not available for this video')) {
      setError('Transkrip otomatis tidak tersedia untuk video ini. Silakan coba video lain atau unggah file transkrip secara manual.');
      setCurrentVideoId(videoId);
