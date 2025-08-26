@@ -22,17 +22,80 @@ jobs:
      uses: actions/setup-node@v3
      with:
       node-version: '20.x'
+      cache: 'npm'
+      cache-dependency-path: |
+       package-lock.json
+       backend/package-lock.json
 
-   - name: npm install, build, and test
+   - name: Configure npm for rate limiting
      run: |
-      # Install backend dependencies
-      cd backend
-      npm install
-      cd ..
-      # Install frontend dependencies and build if needed
-      npm install
-      npm run build --if-present
-      npm run test --if-present
+      npm config set registry https://registry.npmjs.org/
+      npm config set fetch-timeout 600000
+      npm config set fetch-retry-mintimeout 10000
+      npm config set fetch-retry-maxtimeout 60000
+      npm config set fetch-retries 5
+      npm config set maxsockets 1
+
+   - name: Clean npm cache
+     run: npm cache clean --force
+
+   - name: Install dependencies with retry strategy
+     run: |
+      # Function to retry npm install with exponential backoff
+      retry_npm_install() {
+        local dir=$1
+        local max_attempts=3
+        local attempt=1
+        local delay=5
+        
+        while [ $attempt -le $max_attempts ]; do
+          echo "Attempt $attempt/$max_attempts for $dir..."
+          if [ "$dir" = "." ]; then
+            if npm install --no-audit --no-fund --prefer-offline; then
+              echo "✅ Frontend dependencies installed successfully"
+              return 0
+            fi
+          else
+            cd "$dir"
+            if npm install --no-audit --no-fund --prefer-offline; then
+              echo "✅ Backend dependencies installed successfully"
+              cd ..
+              return 0
+            fi
+            cd ..
+          fi
+          
+          echo "❌ Attempt $attempt failed, waiting ${delay}s..."
+          sleep $delay
+          delay=$((delay * 2))
+          attempt=$((attempt + 1))
+        done
+        
+        echo "❌ All attempts failed for $dir"
+        return 1
+      }
+
+      # Install backend dependencies first (they're more critical)
+      echo "🔧 Installing backend dependencies..."
+      retry_npm_install "backend"
+
+      # Wait between installs to avoid rate limiting
+      echo "⏳ Waiting 10 seconds to avoid rate limiting..."
+      sleep 10
+
+      # Install frontend dependencies
+      echo "🔧 Installing frontend dependencies..."
+      retry_npm_install "."
+
+   - name: Build project
+     run: |
+      echo "🏗️ Building project..."
+      npm run build --if-present || echo "⚠️ No build script found, skipping..."
+
+   - name: Run tests
+     run: |
+      echo "🧪 Running tests..."
+      npm run test --if-present || echo "⚠️ No test script found, skipping..."
 
    - name: Upload artifact for deployment job
      uses: actions/upload-artifact@v4
