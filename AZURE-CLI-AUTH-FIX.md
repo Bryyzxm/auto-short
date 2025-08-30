@@ -1,22 +1,23 @@
-# 🔧 Azure CLI Authentication Fix
+# 🔧 Azure CLI Authentication Fix (Updated)
 
 ## 🚨 Problem Identified
 
-**Error**: `AttributeError: Can't get attribute 'NormalizedResponse' on <module 'msal.throttled_http_client' ...>`
+**Error**: `ERROR: Please run 'az login' to setup account`
 
 **Root Cause**:
 
-- Azure CLI authentication issues due to corrupted/cached token files
-- Mismatched Python package versions in Azure CLI Docker image
-- MSAL (Microsoft Authentication Library) token cache conflicts
+- The "Clear Azure CLI token cache" step was running **AFTER** `azure/login@v2`
+- This deleted the authentication cache that was just created by the login action
+- Subsequent Azure CLI commands could not authenticate because the cache was cleared
 
 ## ✅ Solution Implemented
 
-### 1. **Token Cache Clearing**
+### 1. **Removed Token Cache Clearing After Login**
 
-Added a new step to clear Azure CLI token cache before any CLI operations:
+**Problem**: This step was invalidating authentication:
 
 ```yaml
+# REMOVED - This was causing the issue!
 - name: Clear Azure CLI token cache
   run: |
    echo "🧹 Clearing Azure CLI token cache to prevent authentication issues..."
@@ -24,15 +25,35 @@ Added a new step to clear Azure CLI token cache before any CLI operations:
    echo "✅ Token cache cleared"
 ```
 
+**Fix**: Removed the cache clearing step entirely since `azure/login@v2` handles authentication properly.
+
+### 2. **Proper Authentication Flow**
+
+**New Flow**:
+
+```yaml
+# 1. Login with federated credentials
+- name: Login to Azure
+  uses: azure/login@v2
+  with:
+   client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_... }}
+   tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_... }}
+   subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_... }}
+
+# 2. Use Azure CLI commands (authentication preserved)
+- name: Stop Azure Web App to prevent deployment conflicts
+  uses: Azure/cli@v2
+```
+
 **Why This Works**:
 
-- Removes corrupted/incompatible cached tokens
-- Forces fresh authentication using the federated credentials
-- Prevents MSAL library conflicts
+- `azure/login@v2` establishes authentication correctly
+- Authentication cache remains intact for subsequent CLI commands
+- No interference with the login process
 
-### 2. **Enhanced Error Handling**
+### 3. **Retained Retry Logic for Robustness**
 
-Added retry logic to all Azure CLI commands:
+All Azure CLI commands still have retry logic to handle transient issues:
 
 ```yaml
 # Example: Start app with retry
@@ -55,32 +76,22 @@ done
 - Handles transient Azure CLI failures
 - Automatic retries with delays
 - Better error reporting
-
-### 3. **Improved Workflow Robustness**
-
-**Steps Enhanced**:
-
-- ✅ **Stop Web App** - With status checking and retry
-- ✅ **Clear Deployment Locks** - With retry logic
-- ✅ **Start Web App** - With retry logic
-- ✅ **Verify Startup Command** - With retry logic
-- ✅ **App Restart** - With retry logic
+- Works with proper authentication
 
 ## 🎯 Expected Results
 
-### **Before Fix**:
+### **Before Fix**
 
-```
-❌ AttributeError: Can't get attribute 'NormalizedResponse'
+```text
+❌ ERROR: Please run 'az login' to setup account
 ❌ Azure CLI authentication failures
 ❌ Deployment step failures
 ```
 
-### **After Fix**:
+### **After Fix**
 
-```
-✅ 🧹 Clearing Azure CLI token cache to prevent authentication issues...
-✅ Token cache cleared
+```text
+✅ 🔑 Logged into Azure using federated credentials
 ✅ 🛑 Stopping Azure Web App to prevent deployment conflicts...
 ✅ Current app status: Running
 ✅ Web App stop command executed
@@ -91,40 +102,39 @@ done
 
 ## 🔍 How the Fix Works
 
-### **Step-by-Step Process**:
+### **Step-by-Step Process**
 
 1. **Login to Azure** - Uses federated credentials (working)
-2. **Clear Token Cache** - `rm -rf ~/.azure` (NEW FIX)
-3. **Stop App** - With status check and retry logic
-4. **Wait** - Allow complete shutdown
-5. **Clear Locks** - With retry logic
-6. **Deploy** - Clean deployment with retry
-7. **Start App** - With retry logic
-8. **Verify Config** - With retry logic
-9. **Health Check** - Multi-attempt validation
+2. **Stop App** - Uses authenticated CLI session
+3. **Wait** - Allow complete shutdown
+4. **Clear Locks** - With retry logic
+5. **Deploy** - Clean deployment with retry
+6. **Start App** - With retry logic
+7. **Verify Config** - With retry logic
+8. **Health Check** - Multi-attempt validation
 
-### **Why This Prevents the Error**:
+### **Why This Prevents the Error**
 
-- **Fresh Authentication**: Clearing `~/.azure` forces new token generation
-- **No Cache Conflicts**: Removes corrupted MSAL cache files
-- **Clean State**: Ensures Azure CLI starts with clean authentication state
+- **Proper Authentication Flow**: `azure/login@v2` establishes credentials correctly
+- **No Cache Interference**: Authentication cache remains intact
+- **Clean CLI State**: Azure CLI can access the established authentication
 - **Retry Logic**: Handles any remaining transient issues
 
 ## 🛡️ Additional Safeguards
 
-### **Multiple Retry Attempts**:
+### **Multiple Retry Attempts**
 
 - Each Azure CLI command retries up to 3 times
 - Progressive delays between retries (5-10 seconds)
 - Clear error messages for debugging
 
-### **Error Isolation**:
+### **Error Isolation**
 
 - Each step has independent error handling
 - Failed operations don't break the entire pipeline
 - Detailed logging for troubleshooting
 
-### **Timeout Management**:
+### **Timeout Management**
 
 - Appropriate delays between operations
 - Health checks with multiple attempts
@@ -132,26 +142,25 @@ done
 
 ## 🚀 Deployment Process Flow
 
-```
-1. 🔑 Login to Azure (federated auth)
-2. 🧹 Clear token cache (prevent MSAL errors)
-3. 🛑 Stop app (with retry)
-4. ⏳ Wait for shutdown
-5. 🔧 Clear locks (with retry)
-6. 📦 Deploy (with retry)
-7. 🚀 Start app (with retry)
-8. ✅ Verify config (with retry)
-9. 🔍 Health check (multi-attempt)
+```text
+1. 🔑 Login to Azure (federated auth) ✅
+2. 🛑 Stop app (with authenticated CLI) ✅
+3. ⏳ Wait for shutdown ✅
+4. 🔧 Clear locks (with retry) ✅
+5. 📦 Deploy (with retry) ✅
+6. 🚀 Start app (with retry) ✅
+7. ✅ Verify config (with retry) ✅
+8. 🔍 Health check (multi-attempt) ✅
 ```
 
 ## 📋 Verification
 
 After implementing this fix, the deployment should:
 
-- ✅ **No more AttributeError** from MSAL
+- ✅ **No more "az login" errors**
 - ✅ **Successful Azure CLI authentication**
 - ✅ **Reliable deployment process**
 - ✅ **Proper startup command configuration**
 - ✅ **Working health endpoint**
 
-The token cache clearing is a simple but effective solution that resolves the underlying MSAL authentication conflicts in the Azure CLI Docker environment.
+The key insight was that the token cache clearing step was interfering with the authentication established by `azure/login@v2`. Removing this interference allows the proper authentication flow to work correctly.
