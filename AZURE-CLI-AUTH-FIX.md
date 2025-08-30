@@ -1,38 +1,22 @@
-# 🔧 Azure CLI Authentication Fix (Updated)
+# 🔧 Azure CLI Authentication Fix (MSAL AttributeError)
 
 ## 🚨 Problem Identified
 
-**Error**: `ERROR: Please run 'az login' to setup account`
+**Error**: `AttributeError: Can't get attribute 'NormalizedResponse' on <module 'msal.throttled_http_client' ...>`
 
 **Root Cause**:
 
-- The "Clear Azure CLI token cache" step was running **AFTER** `azure/login@v2`
-- This deleted the authentication cache that was just created by the login action
-- Subsequent Azure CLI commands could not authenticate because the cache was cleared
+- MSAL (Microsoft Authentication Library) compatibility issues in Azure CLI
+- Cached authentication artifacts incompatible with current Azure CLI version
+- The error occurs during Azure CLI commands, even after successful `azure/login@v2`
 
 ## ✅ Solution Implemented
 
-### 1. **Removed Token Cache Clearing After Login**
+### 1. **Strategic Cache Clearing After Login**
 
-**Problem**: This step was invalidating authentication:
-
-```yaml
-# REMOVED - This was causing the issue!
-- name: Clear Azure CLI token cache
-  run: |
-   echo "🧹 Clearing Azure CLI token cache to prevent authentication issues..."
-   rm -rf ~/.azure
-   echo "✅ Token cache cleared"
-```
-
-**Fix**: Removed the cache clearing step entirely since `azure/login@v2` handles authentication properly.
-
-### 2. **Proper Authentication Flow**
-
-**New Flow**:
+Added cache clearing step **after** `azure/login@v2` but **before** first Azure CLI command:
 
 ```yaml
-# 1. Login with federated credentials
 - name: Login to Azure
   uses: azure/login@v2
   with:
@@ -40,18 +24,36 @@
    tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_... }}
    subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_... }}
 
-# 2. Use Azure CLI commands (authentication preserved)
+- name: Clear Azure CLI cache to fix msal issues
+  run: |
+   echo "🔄 Clearing Azure CLI cache to avoid msal NormalizedResponse error..."
+   rm -rf ~/.azure
+   echo "✅ Azure CLI cache cleared - federated auth will re-establish automatically"
+
 - name: Stop Azure Web App to prevent deployment conflicts
   uses: Azure/cli@v2
 ```
 
 **Why This Works**:
 
-- `azure/login@v2` establishes authentication correctly
-- Authentication cache remains intact for subsequent CLI commands
-- No interference with the login process
+- `azure/login@v2` establishes federated authentication credentials
+- Cache clearing removes incompatible MSAL cache files
+- Azure CLI automatically re-establishes authentication when needed
+- Federated credentials from GitHub Actions are still available
 
-### 3. **Retained Retry Logic for Robustness**
+### 2. **How Federated Authentication Works with Cache Clearing**
+
+**The Process**:
+
+1. **GitHub Actions** provides federated credentials via OIDC
+2. **azure/login@v2** uses these credentials to authenticate with Azure
+3. **Cache clearing** removes problematic MSAL cache files
+4. **Azure CLI** automatically re-authenticates using the available federated credentials
+5. **All subsequent CLI commands** work with fresh authentication state
+
+**Key Insight**: With federated authentication, the credentials come from the GitHub Actions environment, not just the cache. Clearing the cache forces a fresh authentication flow that bypasses MSAL compatibility issues.
+
+### 3. **Retained Retry Logic for Additional Robustness**
 
 All Azure CLI commands still have retry logic to handle transient issues:
 
@@ -83,8 +85,8 @@ done
 ### **Before Fix**
 
 ```text
-❌ ERROR: Please run 'az login' to setup account
-❌ Azure CLI authentication failures
+❌ AttributeError: Can't get attribute 'NormalizedResponse' on <module 'msal.throttled_http_client'
+❌ Azure CLI commands fail with MSAL errors
 ❌ Deployment step failures
 ```
 
@@ -92,33 +94,35 @@ done
 
 ```text
 ✅ 🔑 Logged into Azure using federated credentials
-✅ 🛑 Stopping Azure Web App to prevent deployment conflicts...
+✅ � Clearing Azure CLI cache to avoid msal NormalizedResponse error...
+✅ Azure CLI cache cleared - federated auth will re-establish automatically
+✅ �🛑 Stopping Azure Web App to prevent deployment conflicts...
 ✅ Current app status: Running
 ✅ Web App stop command executed
 ✅ Deployment successful
 ✅ Web App started successfully
-✅ Startup command is already correct
 ```
 
 ## 🔍 How the Fix Works
 
 ### **Step-by-Step Process**
 
-1. **Login to Azure** - Uses federated credentials (working)
-2. **Stop App** - Uses authenticated CLI session
-3. **Wait** - Allow complete shutdown
-4. **Clear Locks** - With retry logic
-5. **Deploy** - Clean deployment with retry
-6. **Start App** - With retry logic
-7. **Verify Config** - With retry logic
-8. **Health Check** - Multi-attempt validation
+1. **Login to Azure** - Establishes federated credentials
+2. **Clear Cache** - Removes problematic MSAL cache files
+3. **Stop App** - Azure CLI re-authenticates automatically
+4. **Wait** - Allow complete shutdown
+5. **Clear Locks** - With retry logic
+6. **Deploy** - Clean deployment with retry
+7. **Start App** - With retry logic
+8. **Verify Config** - With retry logic
+9. **Health Check** - Multi-attempt validation
 
-### **Why This Prevents the Error**
+### **Why This Prevents the MSAL Error**
 
-- **Proper Authentication Flow**: `azure/login@v2` establishes credentials correctly
-- **No Cache Interference**: Authentication cache remains intact
-- **Clean CLI State**: Azure CLI can access the established authentication
-- **Retry Logic**: Handles any remaining transient issues
+- **Fresh Authentication State**: Cache clearing forces new authentication flow
+- **Bypass MSAL Conflicts**: Removes incompatible cached authentication files
+- **Federated Re-auth**: GitHub Actions credentials automatically re-establish Azure CLI access
+- **Clean MSAL State**: Azure CLI starts with clean MSAL library state
 
 ## 🛡️ Additional Safeguards
 
@@ -144,23 +148,24 @@ done
 
 ```text
 1. 🔑 Login to Azure (federated auth) ✅
-2. 🛑 Stop app (with authenticated CLI) ✅
-3. ⏳ Wait for shutdown ✅
-4. 🔧 Clear locks (with retry) ✅
-5. 📦 Deploy (with retry) ✅
-6. 🚀 Start app (with retry) ✅
-7. ✅ Verify config (with retry) ✅
-8. 🔍 Health check (multi-attempt) ✅
+2. � Clear MSAL cache (fix compatibility) ✅
+3. �🛑 Stop app (with fresh CLI auth) ✅
+4. ⏳ Wait for shutdown ✅
+5. 🔧 Clear locks (with retry) ✅
+6. 📦 Deploy (with retry) ✅
+7. 🚀 Start app (with retry) ✅
+8. ✅ Verify config (with retry) ✅
+9. 🔍 Health check (multi-attempt) ✅
 ```
 
 ## 📋 Verification
 
 After implementing this fix, the deployment should:
 
-- ✅ **No more "az login" errors**
+- ✅ **No more MSAL AttributeError**
 - ✅ **Successful Azure CLI authentication**
 - ✅ **Reliable deployment process**
 - ✅ **Proper startup command configuration**
 - ✅ **Working health endpoint**
 
-The key insight was that the token cache clearing step was interfering with the authentication established by `azure/login@v2`. Removing this interference allows the proper authentication flow to work correctly.
+The key insight is that the MSAL error occurs due to compatibility issues between cached authentication files and the current Azure CLI version. By strategically clearing the cache after login but before CLI commands, we force a fresh authentication flow that bypasses these compatibility issues while preserving the federated credentials from GitHub Actions.

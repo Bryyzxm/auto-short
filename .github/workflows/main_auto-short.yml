@@ -127,6 +127,12 @@ jobs:
       tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_E44F98F9E12A46C5BACCA781DE353BF9 }}
       subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_404426B66873449A857F58923A51028A }}
 
+   - name: Clear Azure CLI cache to fix msal issues
+     run: |
+      echo "🔄 Clearing Azure CLI cache to avoid msal NormalizedResponse error..."
+      rm -rf ~/.azure
+      echo "✅ Azure CLI cache cleared - federated auth will re-establish automatically"
+
    - name: Stop Azure Web App to prevent deployment conflicts
      uses: Azure/cli@v2
      with:
