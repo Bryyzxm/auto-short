@@ -1,0 +1,439 @@
+/**
+ * SEGMENT DURATION VALIDATOR & MERGER
+ *
+ * Professional-grade segment duration enforcement with intelligent merging.
+ * Ensures all segments meet minimum 30-second requirement while preserving content integrity.
+ *
+ * Features:
+ * - Enforce strict 30.0s minimum duration
+ * - Intelligent segment merging with minimal temporal gaps
+ * - Split oversized segments at natural breaks
+ * - Preserve semantic coherence during merging
+ * - Comprehensive validation and reporting
+ */
+
+class SegmentDurationManager {
+ static MIN_DURATION = 30.0; // Strict 30-second minimum
+ static MAX_DURATION = 180.0; // Maximum before splitting
+ static TOLERANCE = 0.5; // ±0.5 second tolerance
+ static IDEAL_DURATION = 60.0; // Target duration for optimal engagement
+
+ /**
+  * MAIN PROCESSING METHOD
+  * Validates and fixes segment durations according to requirements
+  */
+ static validateAndFixSegmentDurations(segments) {
+  if (!Array.isArray(segments) || segments.length === 0) {
+   return {segments: [], statistics: this.getEmptyStats()};
+  }
+
+  console.log(`[DURATION-MANAGER] 🔍 Processing ${segments.length} segments for duration validation`);
+
+  // STEP 1: Calculate initial statistics
+  const initialStats = this.calculateSegmentStats(segments);
+  console.log(`[DURATION-MANAGER] 📊 Initial stats: ${initialStats.underMinimum} under 30s, avg: ${initialStats.averageDuration}s`);
+
+  // STEP 2: Fix segments under minimum duration
+  let processedSegments = this.mergeShortSegments([...segments]);
+
+  // STEP 3: Split oversized segments if needed
+  processedSegments = this.splitOversizedSegments(processedSegments);
+
+  // STEP 4: Final validation and statistics
+  const finalStats = this.calculateSegmentStats(processedSegments);
+
+  console.log(`[DURATION-MANAGER] ✅ Final result: ${processedSegments.length} segments, ${finalStats.underMinimum} under 30s`);
+
+  return {
+   segments: processedSegments,
+   statistics: {
+    initial: initialStats,
+    final: finalStats,
+    improvements: {
+     shortSegmentsFixed: initialStats.underMinimum - finalStats.underMinimum,
+     totalDurationPreserved: Math.abs(initialStats.totalDuration - finalStats.totalDuration) < 1.0,
+     averageImprovement: finalStats.averageDuration - initialStats.averageDuration,
+    },
+   },
+  };
+ }
+
+ /**
+  * Merge segments that are under minimum duration
+  * Uses intelligent neighbor selection based on temporal gaps
+  */
+ static mergeShortSegments(segments) {
+  const processedSegments = [];
+  let i = 0;
+
+  while (i < segments.length) {
+   const currentSegment = segments[i];
+   const duration = this.calculateDuration(currentSegment);
+
+   if (duration >= this.MIN_DURATION - this.TOLERANCE) {
+    // Segment meets minimum requirement
+    processedSegments.push(currentSegment);
+    i++;
+   } else {
+    // Segment is too short - find best merge candidate
+    const mergeResult = this.findBestMergeCandidate(segments, i);
+
+    if (mergeResult.success && mergeResult.combinedDuration >= this.MIN_DURATION) {
+     const mergedSegment = this.mergeSegments(segments.slice(mergeResult.startIndex, mergeResult.endIndex + 1));
+     processedSegments.push(mergedSegment);
+     i = mergeResult.endIndex + 1;
+
+     console.log(`[DURATION-MANAGER] 🔗 Merged ${mergeResult.endIndex - mergeResult.startIndex + 1} segments: ${duration.toFixed(1)}s → ${this.calculateDuration(mergedSegment).toFixed(1)}s`);
+    } else {
+     // Cannot merge effectively or merge still too short - extend to minimum duration
+     console.log(`[DURATION-MANAGER] 🔧 Extending isolated short segment ${i}: ${duration.toFixed(1)}s → 30.0s`);
+     const extendedSegment = this.extendSegmentToMinimum(currentSegment);
+     processedSegments.push(extendedSegment);
+     i++;
+    }
+   }
+  }
+
+  return processedSegments;
+ }
+
+ /**
+  * Find the best neighbor(s) to merge with a short segment
+  * Prioritizes temporal proximity and content coherence
+  */
+ static findBestMergeCandidate(segments, shortSegmentIndex) {
+  const shortSegment = segments[shortSegmentIndex];
+  const shortDuration = this.calculateDuration(shortSegment);
+
+  // Check immediate neighbors first
+  const candidates = [];
+
+  // Option 1: Merge with next segment
+  if (shortSegmentIndex + 1 < segments.length) {
+   const nextSegment = segments[shortSegmentIndex + 1];
+   const gap = nextSegment.start - shortSegment.end;
+   const combinedDuration = shortDuration + this.calculateDuration(nextSegment);
+
+   candidates.push({
+    type: 'next',
+    startIndex: shortSegmentIndex,
+    endIndex: shortSegmentIndex + 1,
+    gap,
+    combinedDuration,
+    score: this.calculateMergeScore(gap, combinedDuration),
+   });
+  }
+
+  // Option 2: Merge with previous segment
+  if (shortSegmentIndex > 0) {
+   const prevSegment = segments[shortSegmentIndex - 1];
+   const gap = shortSegment.start - prevSegment.end;
+   const combinedDuration = this.calculateDuration(prevSegment) + shortDuration;
+
+   candidates.push({
+    type: 'previous',
+    startIndex: shortSegmentIndex - 1,
+    endIndex: shortSegmentIndex,
+    gap,
+    combinedDuration,
+    score: this.calculateMergeScore(gap, combinedDuration),
+   });
+  }
+
+  // Option 3: Three-way merge if both neighbors are also short
+  if (shortSegmentIndex > 0 && shortSegmentIndex + 1 < segments.length) {
+   const prevSegment = segments[shortSegmentIndex - 1];
+   const nextSegment = segments[shortSegmentIndex + 1];
+
+   if (this.calculateDuration(prevSegment) < this.MIN_DURATION || this.calculateDuration(nextSegment) < this.MIN_DURATION) {
+    const totalDuration = this.calculateDuration(prevSegment) + shortDuration + this.calculateDuration(nextSegment);
+    const maxGap = Math.max(shortSegment.start - prevSegment.end, nextSegment.start - shortSegment.end);
+
+    candidates.push({
+     type: 'three-way',
+     startIndex: shortSegmentIndex - 1,
+     endIndex: shortSegmentIndex + 1,
+     gap: maxGap,
+     combinedDuration: totalDuration,
+     score: this.calculateMergeScore(maxGap, totalDuration) + 0.1, // Bonus for fixing multiple short segments
+    });
+   }
+  }
+
+  if (candidates.length === 0) {
+   return {success: false};
+  }
+
+  // Select best candidate based on score
+  const bestCandidate = candidates.reduce((best, current) => (current.score > best.score ? current : best), candidates[0]);
+
+  return {success: true, ...bestCandidate};
+ }
+
+ /**
+  * Calculate merge score (higher is better)
+  * Considers temporal gap and resulting duration
+  */
+ static calculateMergeScore(temporalGap, combinedDuration) {
+  // Penalize large temporal gaps
+  const gapPenalty = Math.min(temporalGap / 10, 1.0); // Max penalty 1.0 for gaps > 10s
+
+  // Reward durations closer to ideal
+  const durationScore = 1.0 - Math.abs(combinedDuration - this.IDEAL_DURATION) / this.IDEAL_DURATION;
+
+  // Ensure we don't create oversized segments
+  const oversizePenalty = combinedDuration > this.MAX_DURATION ? 0.5 : 0;
+
+  return Math.max(0, durationScore - gapPenalty - oversizePenalty);
+ }
+
+ /**
+  * Merge multiple segments into one cohesive segment
+  */
+ static mergeSegments(segmentsToMerge) {
+  if (segmentsToMerge.length === 1) {
+   return segmentsToMerge[0];
+  }
+
+  // Sort by start time to ensure proper order
+  const sortedSegments = segmentsToMerge.sort((a, b) => a.start - b.start);
+
+  const firstSegment = sortedSegments[0];
+  const lastSegment = sortedSegments[sortedSegments.length - 1];
+
+  // Combine all text content
+  const combinedText = sortedSegments
+   .map((segment) => segment.text || '')
+   .filter((text) => text.length > 0)
+   .join(' ')
+   .trim();
+
+  // Generate new metadata
+  const mergedSegment = {
+   ...firstSegment,
+   start: firstSegment.start,
+   end: lastSegment.end,
+   duration: lastSegment.end - firstSegment.start,
+   text: combinedText,
+
+   // Merge titles and descriptions intelligently
+   title: this.mergeTitles(sortedSegments),
+   description: this.mergeDescriptions(sortedSegments),
+
+   // Preserve important metadata
+   keyQuote: this.selectBestQuote(sortedSegments),
+   interestScore: this.calculateAverageScore(sortedSegments, 'interestScore'),
+
+   // Add merge information
+   mergedFrom: sortedSegments.length,
+   mergedSegmentIds: sortedSegments.map((s) => s.id || 'unknown'),
+   isMerged: true,
+  };
+
+  return mergedSegment;
+ }
+
+ /**
+  * Extend a short segment to meet minimum duration requirement
+  */
+ static extendSegmentToMinimum(segment) {
+  const currentDuration = this.calculateDuration(segment);
+  if (currentDuration >= this.MIN_DURATION) {
+   return segment;
+  }
+
+  const extensionNeeded = this.MIN_DURATION - currentDuration;
+
+  return {
+   ...segment,
+   duration: this.MIN_DURATION,
+   end: segment.start + this.MIN_DURATION,
+   endTimeSeconds: segment.startTimeSeconds + this.MIN_DURATION,
+   text: (segment.text || '') + ` [Extended ${extensionNeeded.toFixed(1)}s for minimum duration]`,
+   isExtended: true,
+   originalDuration: currentDuration,
+   extensionAmount: extensionNeeded,
+  };
+ }
+
+ /**
+  * Split oversized segments at natural breaks
+  */
+ static splitOversizedSegments(segments) {
+  const processedSegments = [];
+
+  for (const segment of segments) {
+   const duration = this.calculateDuration(segment);
+
+   if (duration <= this.MAX_DURATION) {
+    processedSegments.push(segment);
+   } else {
+    console.log(`[DURATION-MANAGER] ✂️ Splitting oversized segment: ${duration.toFixed(1)}s`);
+    const splitSegments = this.splitSegmentAtNaturalBreaks(segment);
+    processedSegments.push(...splitSegments);
+   }
+  }
+
+  return processedSegments;
+ }
+
+ /**
+  * Split a segment at natural sentence/pause boundaries
+  */
+ static splitSegmentAtNaturalBreaks(segment) {
+  const text = segment.text || '';
+  const duration = this.calculateDuration(segment);
+
+  // Find natural break points (sentences)
+  const sentences = text.split(/[.!?]+/).filter((s) => s.trim().length > 10);
+
+  if (sentences.length < 2) {
+   // Cannot split meaningfully - return as is
+   return [segment];
+  }
+
+  // Calculate optimal split point
+  const targetSplit = duration / 2;
+  const timePerChar = duration / text.length;
+
+  let currentLength = 0;
+  let splitIndex = Math.floor(sentences.length / 2); // Default middle split
+
+  // Find split closest to middle time-wise
+  for (let i = 0; i < sentences.length - 1; i++) {
+   currentLength += sentences[i].length;
+   const currentTime = currentLength * timePerChar;
+
+   if (Math.abs(currentTime - targetSplit) < Math.abs((currentLength - sentences[i].length) * timePerChar - targetSplit)) {
+    splitIndex = i + 1;
+   }
+  }
+
+  // Create two segments
+  const firstHalf = sentences.slice(0, splitIndex).join('. ').trim() + '.';
+  const secondHalf = sentences.slice(splitIndex).join('. ').trim() + '.';
+
+  const splitTime = segment.start + firstHalf.length * timePerChar;
+
+  const firstSegment = {
+   ...segment,
+   end: splitTime,
+   duration: splitTime - segment.start,
+   text: firstHalf,
+   title: `${segment.title} (Part 1)`,
+   isSplit: true,
+   splitFrom: segment.id,
+  };
+
+  const secondSegment = {
+   ...segment,
+   id: `${segment.id}-split2`,
+   start: splitTime,
+   duration: segment.end - splitTime,
+   text: secondHalf,
+   title: `${segment.title} (Part 2)`,
+   isSplit: true,
+   splitFrom: segment.id,
+  };
+
+  return [firstSegment, secondSegment];
+ }
+
+ /**
+  * Calculate duration from segment object
+  */
+ static calculateDuration(segment) {
+  if (segment.duration && segment.duration > 0) {
+   return segment.duration;
+  }
+
+  if (segment.end && segment.start) {
+   return segment.end - segment.start;
+  }
+
+  if (segment.endTimeSeconds && segment.startTimeSeconds) {
+   return segment.endTimeSeconds - segment.startTimeSeconds;
+  }
+
+  return 0;
+ }
+
+ /**
+  * Calculate comprehensive statistics for segments
+  */
+ static calculateSegmentStats(segments) {
+  if (!segments || segments.length === 0) {
+   return this.getEmptyStats();
+  }
+
+  const durations = segments.map((s) => this.calculateDuration(s));
+  const totalDuration = durations.reduce((sum, d) => sum + d, 0);
+  const averageDuration = totalDuration / segments.length;
+
+  const underMinimum = durations.filter((d) => d < this.MIN_DURATION - this.TOLERANCE).length;
+  const overMaximum = durations.filter((d) => d > this.MAX_DURATION).length;
+  const optimal = durations.filter((d) => d >= this.MIN_DURATION && d <= this.MAX_DURATION).length;
+
+  return {
+   totalSegments: segments.length,
+   totalDuration,
+   averageDuration: Math.round(averageDuration * 10) / 10,
+   minDuration: Math.min(...durations),
+   maxDuration: Math.max(...durations),
+   underMinimum,
+   overMaximum,
+   optimal,
+   complianceRate: Math.round((optimal / segments.length) * 100),
+   durationsDistribution: durations.sort((a, b) => a - b),
+  };
+ }
+
+ static getEmptyStats() {
+  return {
+   totalSegments: 0,
+   totalDuration: 0,
+   averageDuration: 0,
+   minDuration: 0,
+   maxDuration: 0,
+   underMinimum: 0,
+   overMaximum: 0,
+   optimal: 0,
+   complianceRate: 0,
+   durationsDistribution: [],
+  };
+ }
+
+ // Helper methods for merging
+ static mergeTitles(segments) {
+  const titles = segments.map((s) => s.title).filter((t) => t && t.length > 0);
+  if (titles.length === 0) return 'Merged Segment';
+  if (titles.length === 1) return titles[0];
+
+  // Use first title as base, indicate it's merged
+  return `${titles[0]} (+ ${titles.length - 1} more)`;
+ }
+
+ static mergeDescriptions(segments) {
+  const descriptions = segments.map((s) => s.description).filter((d) => d && d.length > 0);
+  if (descriptions.length === 0) return 'Merged content segment';
+
+  return descriptions.join('. ').substring(0, 300) + (descriptions.join('. ').length > 300 ? '...' : '');
+ }
+
+ static selectBestQuote(segments) {
+  const quotes = segments.map((s) => s.keyQuote).filter((q) => q && q.length > 0);
+  if (quotes.length === 0) return null;
+
+  // Select longest meaningful quote
+  return quotes.reduce((best, current) => (current.length > best.length ? current : best));
+ }
+
+ static calculateAverageScore(segments, scoreField) {
+  const scores = segments.map((s) => s[scoreField]).filter((score) => typeof score === 'number');
+  if (scores.length === 0) return 0;
+
+  return scores.reduce((sum, score) => sum + score, 0) / scores.length;
+ }
+}
+
+module.exports = SegmentDurationManager;

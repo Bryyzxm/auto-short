@@ -7,20 +7,24 @@
  * Features:
  * - AI-powered topic boundary detection
  * - Semantic shift analysis
- * - Dynamic segment length optimization (20-90 seconds)
+ * - Dynamic segment length optimization (30-90 seconds with 30s minimum enforcement)
  * - Compelling title generation
  * - Content-aware descriptions
  * - Impact quote extraction
  * - Multiple content type support (podcasts, lectures, vlogs)
+ * - Professional transcript cleaning and duration management
  *
  * Architecture:
  * - Multi-pass AI analysis for optimal results
  * - Groq Llama 3.3 70B for complex reasoning
  * - Fallback to Llama 3.1 8B for efficiency
  * - Comprehensive error handling and validation
+ * - Strict 30-second minimum duration enforcement
  */
 
 const Groq = require('groq-sdk');
+const TranscriptCleaner = require('../utils/transcriptCleaner');
+const SegmentDurationManager = require('../utils/segmentDurationManager');
 
 class EnhancedAISegmenter {
  constructor() {
@@ -31,19 +35,20 @@ class EnhancedAISegmenter {
   this.rateLimitDelay = 2000; // 2 seconds between requests
   this.lastRequestTime = 0;
 
-  // Segmentation parameters
-  this.minSegmentDuration = 20; // Minimum 20 seconds
-  this.maxSegmentDuration = 90; // Maximum 90 seconds
-  this.idealSegmentDuration = 60; // Target 60 seconds
+  // UPDATED: Segmentation parameters - STRICT 30s minimum
+  this.minSegmentDuration = 30.0; // STRICT 30 seconds minimum (changed from 20)
+  this.maxSegmentDuration = 180.0; // Maximum 180 seconds before splitting
+  this.idealSegmentDuration = 60.0; // Target 60 seconds
 
   console.log(`✅ [Enhanced AI Segmenter] Initialized with ${this.groq ? 'valid' : 'missing'} API key`);
+  console.log(`[Enhanced AI Segmenter] ⚙️ Duration enforcement: ${this.minSegmentDuration}s minimum, ${this.maxSegmentDuration}s maximum`);
   if (this.groq) {
    console.log(`[Enhanced AI Segmenter] 🔑 API key source: ${process.env.GROQ_API_KEY ? 'GROQ_API_KEY' : 'VITE_GROQ_API_KEY'}`);
   }
  }
 
  /**
-  * MAIN SEGMENTATION METHOD
+  * MAIN SEGMENTATION METHOD - UPDATED WITH DURATION ENFORCEMENT
   * Takes structured transcript and generates intelligent segments focused on interesting moments
   */
  async generateIntelligentSegments(transcriptSegments, options = {}) {
@@ -54,15 +59,20 @@ class EnhancedAISegmenter {
 
   try {
    console.log(`[AI-SEGMENTER] 🚀 Starting INTELLIGENT segmentation for ${transcriptSegments.length} transcript segments`);
-   console.log(`[AI-SEGMENTER] 🎯 Focus: Finding INTERESTING VIRAL MOMENTS (not rigid segmentation)`);
+   console.log(`[AI-SEGMENTER] 🎯 Focus: Finding INTERESTING VIRAL MOMENTS with STRICT 30s minimum duration`);
 
-   // Enforce segment limits with proper shorts duration - OPTIMIZED for better coverage
-   const maxSegments = Math.min(options.maxSegments || 18, 20); // Increased from 15 to 18, max 20
-   const targetCount = Math.min(options.targetCount || 15, maxSegments); // Increased target from 12 to 15
-   const minDuration = options.minDuration || 30; // 30 seconds minimum for shorts
-   const maxDuration = options.maxDuration || 90; // 90 seconds maximum for shorts
+   // STEP 0: Clean transcript text from all segments
+   console.log(`[AI-SEGMENTER] 🧹 Cleaning transcript text from tags and metadata...`);
+   const cleanedSegments = TranscriptCleaner.cleanTranscriptSegments(transcriptSegments);
+   console.log(`[AI-SEGMENTER] ✅ Cleaned ${cleanedSegments.length}/${transcriptSegments.length} segments (${transcriptSegments.length - cleanedSegments.length} removed as invalid)`);
 
-   console.log(`[AI-SEGMENTER] ⚙️ Parameters: target=${targetCount}, max=${maxSegments}, duration=${minDuration}-${maxDuration}s`);
+   // Enforce segment limits with STRICT 30-second minimum
+   const maxSegments = Math.min(options.maxSegments || 18, 20);
+   const targetCount = Math.min(options.targetCount || 15, maxSegments);
+   const minDuration = 30.0; // STRICT 30 seconds minimum - not configurable
+   const maxDuration = options.maxDuration || 90;
+
+   console.log(`[AI-SEGMENTER] ⚙️ Parameters: target=${targetCount}, max=${maxSegments}, duration=${minDuration}-${maxDuration}s (30s ENFORCED)`);
 
    // Extract language information from options
    const detectedLanguage = options.detectedLanguage || 'unknown';
@@ -71,31 +81,45 @@ class EnhancedAISegmenter {
    console.log(`[AI-SEGMENTER] 🌐 Language context: ${detectedLanguage} (Indonesian priority: ${preferIndonesian})`);
 
    // STEP 1: Analyze transcript for interesting moments and viral potential
-   const contentAnalysis = await this.analyzeTranscriptForViralMoments(transcriptSegments, {
+   const contentAnalysis = await this.analyzeTranscriptForViralMoments(cleanedSegments, {
     detectedLanguage,
     preferIndonesian,
    });
    console.log(`[AI-SEGMENTER] 📊 Viral analysis: ${contentAnalysis.contentType}, ${contentAnalysis.language}, ${contentAnalysis.viralMoments?.length || 0} interesting moments`);
 
    // STEP 2: Detect engaging content boundaries using AI focus on interest
-   const interestingMoments = await this.detectInterestingMoments(transcriptSegments, contentAnalysis);
+   const interestingMoments = await this.detectInterestingMoments(cleanedSegments, contentAnalysis);
    console.log(`[AI-SEGMENTER] 🎯 Detected ${interestingMoments.length} interesting moments`);
 
    // STEP 3: Generate segments around interesting moments with proper duration
-   const rawSegments = await this.generateMomentBasedSegments(transcriptSegments, interestingMoments, contentAnalysis, {targetCount, minDuration, maxDuration});
+   const rawSegments = await this.generateMomentBasedSegments(cleanedSegments, interestingMoments, contentAnalysis, {targetCount, minDuration, maxDuration});
    console.log(`[AI-SEGMENTER] ⚡ Generated ${rawSegments.length} moment-based segments`);
 
-   // STEP 4: Enforce STRICT limits and validate durations
-   const validatedSegments = this.validateAndLimitSegments(rawSegments, maxSegments, minDuration, maxDuration);
-   console.log(`[AI-SEGMENTER] 🔒 STRICT ENFORCEMENT: ${validatedSegments.length}/${maxSegments} segments (avg: ${Math.round(validatedSegments.reduce((sum, s) => sum + s.duration, 0) / validatedSegments.length)}s)`);
+   // STEP 4: CRITICAL - Apply strict duration validation and fixing
+   console.log(`[AI-SEGMENTER] 🔒 Applying STRICT 30-second minimum duration enforcement...`);
+   const durationResult = SegmentDurationManager.validateAndFixSegmentDurations(rawSegments);
+   const validatedSegments = durationResult.segments;
 
-   // STEP 5: Generate compelling metadata focused on viral appeal
-   const segmentsWithMetadata = await this.generateViralMetadata(validatedSegments, contentAnalysis);
+   console.log(`[AI-SEGMENTER] � Duration enforcement results:`);
+   console.log(`   - Fixed ${durationResult.statistics.improvements.shortSegmentsFixed} short segments`);
+   console.log(`   - Final compliance: ${durationResult.statistics.final.complianceRate}%`);
+   console.log(`   - Average duration: ${durationResult.statistics.final.averageDuration}s`);
+
+   // STEP 5: Limit to maximum allowed segments
+   const limitedSegments = validatedSegments.slice(0, maxSegments);
+   console.log(`[AI-SEGMENTER] 🔒 Limited to ${limitedSegments.length}/${maxSegments} segments`);
+
+   // STEP 6: Generate compelling metadata focused on viral appeal
+   const segmentsWithMetadata = await this.generateViralMetadata(limitedSegments, contentAnalysis);
    console.log(`[AI-SEGMENTER] 📝 Added viral-focused metadata to ${segmentsWithMetadata.length} segments`);
 
-   // STEP 6: Extract impact quotes for each segment
+   // STEP 7: Extract impact quotes for each segment
    const finalSegments = await this.extractImpactQuotes(segmentsWithMetadata);
-   console.log(`[AI-SEGMENTER] ✨ FINAL RESULT: ${finalSegments.length} INTERESTING segments (NOT rigid chunks)`);
+   console.log(`[AI-SEGMENTER] ✨ FINAL RESULT: ${finalSegments.length} DURATION-COMPLIANT segments`);
+
+   // STEP 8: Final validation check
+   const finalStats = SegmentDurationManager.calculateSegmentStats(finalSegments);
+   console.log(`[AI-SEGMENTER] 🎯 FINAL VALIDATION: ${finalStats.underMinimum} segments under 30s, ${finalStats.complianceRate}% compliance`);
 
    // Log final segment details for debugging
    finalSegments.forEach((segment, i) => {
@@ -125,13 +149,19 @@ class EnhancedAISegmenter {
   }
  }
  /**
-  * Fast mode segmentation for large transcripts
+  * Fast mode segmentation for large transcripts - UPDATED WITH DURATION ENFORCEMENT
   * Uses simplified analysis to reduce processing time
   */
  async generateFastSegments(transcriptSegments, options = {}) {
-  const targetCount = options.targetCount || 15; // FIXED: Default to 15 instead of 8
+  console.log(`[AI-SEGMENTER] ⚡ Starting FAST segmentation with duration enforcement...`);
+
+  // Clean transcript segments first
+  const cleanedSegments = TranscriptCleaner.cleanTranscriptSegments(transcriptSegments);
+  console.log(`[AI-SEGMENTER] 🧹 Cleaned ${cleanedSegments.length}/${transcriptSegments.length} segments for fast processing`);
+
+  const targetCount = options.targetCount || 15;
   const segmentDuration = 60; // 60 seconds per segment
-  const totalDuration = Math.max(...transcriptSegments.map((s) => s.end));
+  const totalDuration = Math.max(...cleanedSegments.map((s) => s.end));
 
   console.log(`[AI-SEGMENTER] ⚡ Fast segmentation: ${targetCount} segments from ${Math.round(totalDuration / 60)}min content`);
 
@@ -143,7 +173,7 @@ class EnhancedAISegmenter {
    const endTime = Math.min((i + 1) * segmentStep, totalDuration);
 
    // Find transcript segments in this time range
-   const segmentTranscripts = transcriptSegments.filter((t) => t.start < endTime && t.end > startTime);
+   const segmentTranscripts = cleanedSegments.filter((t) => t.start < endTime && t.end > startTime);
 
    if (segmentTranscripts.length > 0) {
     const combinedText = segmentTranscripts.map((t) => t.text).join(' ');
@@ -162,8 +192,15 @@ class EnhancedAISegmenter {
    }
   }
 
+  // CRITICAL: Apply duration enforcement to fast segments too
+  console.log(`[AI-SEGMENTER] 🔒 Applying duration enforcement to ${segments.length} fast segments...`);
+  const durationResult = SegmentDurationManager.validateAndFixSegmentDurations(segments);
+  const finalSegments = durationResult.segments;
+
+  console.log(`[AI-SEGMENTER] ⚡ Fast mode duration enforcement: ${durationResult.statistics.final.complianceRate}% compliance`);
+
   return {
-   segments: segments,
+   segments: finalSegments,
    analysis: {
     contentType: 'video',
     language: 'unknown',
@@ -171,11 +208,12 @@ class EnhancedAISegmenter {
    },
    metadata: {
     totalDuration: totalDuration,
-    averageSegmentDuration: Math.round(totalDuration / segments.length),
+    averageSegmentDuration: finalSegments.length > 0 ? Math.round(finalSegments.reduce((sum, s) => sum + s.duration, 0) / finalSegments.length) : 0,
     contentType: 'video',
     qualityScore: 0.7, // Lower quality for fast mode
     processingTime: Date.now(),
     fastMode: true,
+    durationCompliance: durationResult.statistics.final.complianceRate,
    },
   };
  }

@@ -1,13 +1,14 @@
 /**
- * ENHANCED TRANSCRIPT PROCESSOR
+ * ENHANCED TRANSCRIPT PROCESSOR - UPDATED WITH PROFESSIONAL CLEANING & DURATION ENFORCEMENT
  *
  * Production-ready service for processing uploaded transcript files and generating
  * intelligent video segments with AI-powered analysis.
  *
  * Features:
  * - Advanced SRT/TXT/VTT parsing with robust error handling
+ * - Professional transcript text cleaning (removes tags, metadata, normalizes text)
  * - AI-powered segmentation using enhanced AI segmenter
- * - Flexible duration constraints (20-90 seconds)
+ * - STRICT duration constraints (30-180 seconds with 30s minimum enforcement)
  * - Multi-format timestamp support
  * - Content validation and quality scoring
  * - Fallback mechanisms for various edge cases
@@ -17,48 +18,57 @@
  * - Integrates with enhanced AI segmenter for intelligent analysis
  * - Supports both sync and generation modes
  * - Compatible with existing frontend components
+ * - Enforces professional transcript cleaning standards
  */
 
 const enhancedAISegmenter = require('./enhancedAISegmenter.js');
+const TranscriptCleaner = require('../utils/transcriptCleaner');
+const SegmentDurationManager = require('../utils/segmentDurationManager');
 
 class EnhancedTranscriptProcessor {
  constructor() {
   this.supportedFormats = ['.srt', '.txt', '.vtt'];
   this.maxFileSize = 10 * 1024 * 1024; // 10MB
-  this.minSegmentDuration = 20; // seconds
-  this.maxSegmentDuration = 90; // seconds
+  this.minSegmentDuration = 30.0; // STRICT 30 seconds minimum (updated from 20)
+  this.maxSegmentDuration = 180.0; // Maximum 180 seconds before splitting (updated from 90)
 
-  console.log('✅ [Enhanced Transcript Processor] Initialized');
+  console.log('✅ [Enhanced Transcript Processor] Initialized with professional cleaning & duration enforcement');
+  console.log(`[Enhanced Transcript Processor] ⚙️ Duration enforcement: ${this.minSegmentDuration}s minimum, ${this.maxSegmentDuration}s maximum`);
  }
 
  /**
-  * MAIN PROCESSING METHOD
+  * MAIN PROCESSING METHOD - UPDATED WITH PROFESSIONAL CLEANING & DURATION ENFORCEMENT
   * Processes uploaded transcript file and generates intelligent segments
   */
  async processUploadedTranscript(fileBuffer, originalName, videoId, existingSegments = []) {
   try {
-   console.log(`[TRANSCRIPT-PROCESSOR] 🚀 Processing ${originalName} for video ${videoId}`);
+   console.log(`[TRANSCRIPT-PROCESSOR] 🚀 Processing ${originalName} for video ${videoId} with professional cleaning`);
 
    // STEP 1: Parse the transcript file
-   const transcriptSegments = this.parseTranscriptFile(fileBuffer, originalName);
-   console.log(`[TRANSCRIPT-PROCESSOR] 📄 Parsed ${transcriptSegments.length} transcript segments`);
+   const rawTranscriptSegments = this.parseTranscriptFile(fileBuffer, originalName);
+   console.log(`[TRANSCRIPT-PROCESSOR] 📄 Parsed ${rawTranscriptSegments.length} raw transcript segments`);
 
-   // STEP 2: Validate transcript quality
-   const validation = this.validateTranscriptQuality(transcriptSegments);
+   // STEP 2: Clean transcript text professionally (NEW)
+   console.log(`[TRANSCRIPT-PROCESSOR] 🧹 Applying professional transcript cleaning...`);
+   const cleanedSegments = TranscriptCleaner.cleanTranscriptSegments(rawTranscriptSegments);
+   console.log(`[TRANSCRIPT-PROCESSOR] ✅ Cleaned ${cleanedSegments.length}/${rawTranscriptSegments.length} segments (${rawTranscriptSegments.length - cleanedSegments.length} removed as invalid)`);
+
+   // STEP 3: Validate transcript quality
+   const validation = this.validateTranscriptQuality(cleanedSegments);
    if (!validation.isValid) {
     throw new Error(`Transcript validation failed: ${validation.reason}`);
    }
 
-   // STEP 3: Determine processing mode
+   // STEP 4: Determine processing mode
    const processingMode = existingSegments.length > 0 ? 'synchronize' : 'generate';
    console.log(`[TRANSCRIPT-PROCESSOR] 🎯 Processing mode: ${processingMode}`);
 
    if (processingMode === 'synchronize') {
     // Mode 1: Synchronize with existing video segments
-    return await this.synchronizeWithExistingSegments(transcriptSegments, existingSegments, videoId);
+    return await this.synchronizeWithExistingSegments(cleanedSegments, existingSegments, videoId);
    } else {
     // Mode 2: Generate new segments from transcript using AI
-    return await this.generateSegmentsFromTranscript(transcriptSegments, videoId);
+    return await this.generateSegmentsFromTranscript(cleanedSegments, videoId);
    }
   } catch (error) {
    console.error('[TRANSCRIPT-PROCESSOR] ❌ Processing failed:', error);
