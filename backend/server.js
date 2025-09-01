@@ -2636,7 +2636,203 @@ app.get('/health', async (req, res) => {
  res.json(healthInfo);
 });
 
-// 🎬 FFmpeg Status Endpoint
+// API Health endpoint (alias for /health)
+app.get('/api/health', async (req, res) => {
+ res.redirect('/health');
+});
+
+// 🩺 COMPREHENSIVE DIAGNOSTICS ENDPOINT
+// =====================================
+app.get('/api/diagnostics', async (req, res) => {
+ try {
+  const EnhancedYtDlpService = require('./services/enhancedYtDlpService');
+  const ytdlpService = new EnhancedYtDlpService();
+
+  const diagnostics = {
+   timestamp: new Date().toISOString(),
+   environment: {
+    type: azureEnv.azureConfig.environment,
+    isAzure: azureEnv.isAzure,
+    platform: process.platform,
+    nodeVersion: process.version,
+    uptime: process.uptime(),
+    memory: process.memoryUsage(),
+   },
+   services: {
+    enhancedYtDlp: ytdlpService.getDiagnostics(),
+    ffmpeg: {
+     available: false,
+     path: FFMPEG_PATH,
+     source: FFMPEG_SOURCE,
+     retryCount: ffmpegRetryCount || 0,
+    },
+   },
+   azure: azureEnv.isAzure
+    ? {
+       siteName: azureEnv.azureConfig.siteName,
+       hostname: azureEnv.azureConfig.hostname,
+       resourceGroup: azureEnv.azureConfig.resourceGroup,
+       instanceId: azureEnv.azureConfig.instanceId,
+       paths: azureEnv.azureConfig.paths,
+       limits: azureEnv.azureConfig.limits,
+      }
+    : null,
+   performance: {
+    loadAverage: process.platform !== 'win32' ? require('os').loadavg() : null,
+    cpuUsage: process.cpuUsage(),
+    freemem: require('os').freemem(),
+    totalmem: require('os').totalmem(),
+   },
+  };
+
+  // Test FFmpeg
+  try {
+   const ffmpegTest = execSync(`${FFMPEG_PATH} -version 2>&1 | head -1`, {
+    encoding: 'utf8',
+    timeout: 3000,
+   });
+   diagnostics.services.ffmpeg.available = true;
+   diagnostics.services.ffmpeg.version = ffmpegTest.trim();
+  } catch (error) {
+   diagnostics.services.ffmpeg.error = error.message;
+  }
+
+  res.json(diagnostics);
+ } catch (error) {
+  res.status(500).json({
+   error: 'Diagnostics failed',
+   message: error.message,
+   timestamp: new Date().toISOString(),
+  });
+ }
+});
+
+// 🔄 SERVICE RESET ENDPOINT (Admin)
+// =================================
+app.post('/api/admin/reset-services', async (req, res) => {
+ try {
+  const EnhancedYtDlpService = require('./services/enhancedYtDlpService');
+  const ytdlpService = new EnhancedYtDlpService();
+
+  const result = await ytdlpService.resetService();
+
+  res.json({
+   success: true,
+   message: 'Services reset successfully',
+   details: result,
+   timestamp: new Date().toISOString(),
+  });
+ } catch (error) {
+  res.status(500).json({
+   success: false,
+   error: 'Service reset failed',
+   message: error.message,
+   timestamp: new Date().toISOString(),
+  });
+ }
+});
+
+// 📊 RATE LIMITER STATS ENDPOINT
+// ==============================
+app.get('/api/rate-limiter/stats', async (req, res) => {
+ try {
+  const EnhancedYtDlpService = require('./services/enhancedYtDlpService');
+  const ytdlpService = new EnhancedYtDlpService();
+
+  const stats = ytdlpService.rateLimiter.getStats();
+
+  res.json({
+   stats,
+   timestamp: new Date().toISOString(),
+   description: {
+    totalVideosTracked: 'Number of videos being tracked for rate limiting',
+    recentAttempts: 'Attempts in the last 10 minutes',
+    recentSuccesses: 'Successful requests in the last 10 minutes',
+    successRate: 'Success rate (0-1) in the last 10 minutes',
+    videosInCooldown: 'Number of videos currently in cooldown',
+    globalCooldownRemaining: 'Global cooldown time remaining (ms)',
+   },
+  });
+ } catch (error) {
+  res.status(500).json({
+   error: 'Rate limiter stats failed',
+   message: error.message,
+   timestamp: new Date().toISOString(),
+  });
+ }
+});
+
+// 🍪 COOKIE VALIDATION ENDPOINT
+// =============================
+app.get('/api/cookies/validate', async (req, res) => {
+ try {
+  const AzureCookieManager = require('./services/azureCookieManager');
+  const cookieManager = new AzureCookieManager();
+
+  const cookiesPath = path.join(__dirname, 'cookies.txt');
+
+  if (!fs.existsSync(cookiesPath)) {
+   return res.json({
+    valid: false,
+    exists: false,
+    message: 'Cookies file not found',
+    timestamp: new Date().toISOString(),
+   });
+  }
+
+  const isValid = await cookieManager.validateCookies(cookiesPath);
+  const stats = fs.statSync(cookiesPath);
+
+  res.json({
+   valid: isValid,
+   exists: true,
+   fileSize: stats.size,
+   lastModified: stats.mtime,
+   message: isValid ? 'Cookies are valid' : 'Cookies need refresh',
+   timestamp: new Date().toISOString(),
+  });
+ } catch (error) {
+  res.status(500).json({
+   error: 'Cookie validation failed',
+   message: error.message,
+   timestamp: new Date().toISOString(),
+  });
+ }
+});
+
+// � VIDEO ACCESS CHECK ENDPOINT
+// =============================
+app.get('/api/video-access-check', async (req, res) => {
+ try {
+  const {videoId} = req.query;
+
+  if (!videoId) {
+   return res.status(400).json({
+    error: 'Video ID is required',
+    timestamp: new Date().toISOString(),
+   });
+  }
+
+  const EnhancedYtDlpService = require('./services/enhancedYtDlpService');
+  const ytdlpService = new EnhancedYtDlpService();
+
+  const result = await ytdlpService.checkVideoAccess(videoId);
+
+  res.json({
+   ...result,
+   videoId,
+   timestamp: new Date().toISOString(),
+  });
+ } catch (error) {
+  res.status(500).json({
+   accessible: false,
+   error: error.message,
+   timestamp: new Date().toISOString(),
+  });
+ }
+});
+
+// �🎬 FFmpeg Status Endpoint
 // =========================
 app.get('/api/ffmpeg-status', async (req, res) => {
  try {

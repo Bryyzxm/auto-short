@@ -94,7 +94,8 @@ result.segments.forEach((s, i) => {
 console.log('\n✅ DURATION VERIFICATION:');
 const allMeetMinimum = result.segments.every((s) => s.duration >= 30);
 console.log(`   All segments >= 30s: ${allMeetMinimum ? '✅' : '❌'}`);
-console.log(`   Segments fixed: ${result.statistics.improvements.shortSegmentsFixed}`);
+console.log(`   Segments extended (no merging): ${result.statistics.improvements.shortSegmentsFixed}`);
+console.log(`   Processing mode: ${result.statistics.improvements.processingMode || 'extension_only'}`);
 console.log(`   Final compliance: ${result.statistics.final.complianceRate}%`);
 
 // Test case 2: Single isolated short segment

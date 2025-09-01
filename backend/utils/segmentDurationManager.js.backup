@@ -6,7 +6,7 @@
  *
  * Features:
  * - Enforce strict 30.0s minimum duration through extension
- * - Split oversized segments at natural breaks  
+ * - Split oversized segments at natural breaks
  * - NO MERGING to avoid monotonous/repetitive results
  * - Preserve original segment boundaries and content diversity
  * - Natural pause extensions for minimum duration compliance
@@ -53,7 +53,7 @@ class SegmentDurationManager {
      shortSegmentsFixed: initialStats.underMinimum - finalStats.underMinimum,
      totalDurationPreserved: Math.abs(initialStats.totalDuration - finalStats.totalDuration) < 1.0,
      averageImprovement: finalStats.averageDuration - initialStats.averageDuration,
-     processingMode: 'extension_only_no_merging'
+     processingMode: 'extension_only_no_merging',
     },
    },
   };
@@ -66,19 +66,155 @@ class SegmentDurationManager {
   */
  static extendShortSegments(segments) {
   console.log(`[DURATION-MANAGER] 🔧 Extending short segments (no merging to preserve content diversity)`);
-  
+
   const processedSegments = segments.map((segment, index) => {
    const duration = this.calculateDuration(segment);
-   
+
    if (duration < this.MIN_DURATION - this.TOLERANCE) {
     console.log(`[DURATION-MANAGER] ⏱️ Extending segment ${index}: ${duration.toFixed(1)}s → ${this.MIN_DURATION}s`);
     return this.extendSegmentToMinimum(segment);
    }
-   
+
    return segment;
   });
 
   return processedSegments;
+ }
+
+ /**
+  * Find the best neighbor(s) to merge with a short segment
+  * Prioritizes temporal proximity and content coherence
+  */
+ static findBestMergeCandidate(segments, shortSegmentIndex) {
+  const shortSegment = segments[shortSegmentIndex];
+  const shortDuration = this.calculateDuration(shortSegment);
+
+  // Check immediate neighbors first
+  const candidates = [];
+
+  // Option 1: Merge with next segment
+  if (shortSegmentIndex + 1 < segments.length) {
+   const nextSegment = segments[shortSegmentIndex + 1];
+   const gap = nextSegment.start - shortSegment.end;
+   const combinedDuration = shortDuration + this.calculateDuration(nextSegment);
+
+   candidates.push({
+    type: 'next',
+    startIndex: shortSegmentIndex,
+    endIndex: shortSegmentIndex + 1,
+    gap,
+    combinedDuration,
+    score: this.calculateMergeScore(gap, combinedDuration),
+   });
+  }
+
+  // Option 2: Merge with previous segment
+  if (shortSegmentIndex > 0) {
+   const prevSegment = segments[shortSegmentIndex - 1];
+   const gap = shortSegment.start - prevSegment.end;
+   const combinedDuration = this.calculateDuration(prevSegment) + shortDuration;
+
+   candidates.push({
+    type: 'previous',
+    startIndex: shortSegmentIndex - 1,
+    endIndex: shortSegmentIndex,
+    gap,
+    combinedDuration,
+    score: this.calculateMergeScore(gap, combinedDuration),
+   });
+  }
+
+  // Option 3: Three-way merge if both neighbors are also short
+  if (shortSegmentIndex > 0 && shortSegmentIndex + 1 < segments.length) {
+   const prevSegment = segments[shortSegmentIndex - 1];
+   const nextSegment = segments[shortSegmentIndex + 1];
+
+   if (this.calculateDuration(prevSegment) < this.MIN_DURATION || this.calculateDuration(nextSegment) < this.MIN_DURATION) {
+    const totalDuration = this.calculateDuration(prevSegment) + shortDuration + this.calculateDuration(nextSegment);
+    const maxGap = Math.max(shortSegment.start - prevSegment.end, nextSegment.start - shortSegment.end);
+
+    candidates.push({
+     type: 'three-way',
+     startIndex: shortSegmentIndex - 1,
+     endIndex: shortSegmentIndex + 1,
+     gap: maxGap,
+     combinedDuration: totalDuration,
+     score: this.calculateMergeScore(maxGap, totalDuration) + 0.1, // Bonus for fixing multiple short segments
+    });
+   }
+  }
+
+  if (candidates.length === 0) {
+   return {success: false};
+  }
+
+  // Select best candidate based on score
+  const bestCandidate = candidates.reduce((best, current) => (current.score > best.score ? current : best), candidates[0]);
+
+  return {success: true, ...bestCandidate};
+ }
+
+ /**
+  * Calculate merge score (higher is better)
+  * Considers temporal gap and resulting duration
+  */
+ static calculateMergeScore(temporalGap, combinedDuration) {
+  // Penalize large temporal gaps
+  const gapPenalty = Math.min(temporalGap / 10, 1.0); // Max penalty 1.0 for gaps > 10s
+
+  // Reward durations closer to ideal
+  const durationScore = 1.0 - Math.abs(combinedDuration - this.IDEAL_DURATION) / this.IDEAL_DURATION;
+
+  // Ensure we don't create oversized segments
+  const oversizePenalty = combinedDuration > this.MAX_DURATION ? 0.5 : 0;
+
+  return Math.max(0, durationScore - gapPenalty - oversizePenalty);
+ }
+
+ /**
+  * Merge multiple segments into one cohesive segment
+  */
+ static mergeSegments(segmentsToMerge) {
+  if (segmentsToMerge.length === 1) {
+   return segmentsToMerge[0];
+  }
+
+  // Sort by start time to ensure proper order
+  const sortedSegments = segmentsToMerge.sort((a, b) => a.start - b.start);
+
+  const firstSegment = sortedSegments[0];
+  const lastSegment = sortedSegments[sortedSegments.length - 1];
+
+  // Combine all text content
+  const combinedText = sortedSegments
+   .map((segment) => segment.text || '')
+   .filter((text) => text.length > 0)
+   .join(' ')
+   .trim();
+
+  // Generate new metadata
+  const mergedSegment = {
+   ...firstSegment,
+   start: firstSegment.start,
+   end: lastSegment.end,
+   duration: lastSegment.end - firstSegment.start,
+   text: combinedText,
+
+   // Merge titles and descriptions intelligently
+   title: this.mergeTitles(sortedSegments),
+   description: this.mergeDescriptions(sortedSegments),
+
+   // Preserve important metadata
+   keyQuote: this.selectBestQuote(sortedSegments),
+   interestScore: this.calculateAverageScore(sortedSegments, 'interestScore'),
+
+   // Add merge information
+   mergedFrom: sortedSegments.length,
+   mergedSegmentIds: sortedSegments.map((s) => s.id || 'unknown'),
+   isMerged: true,
+  };
+
+  return mergedSegment;
  }
 
  /**
@@ -92,30 +228,23 @@ class SegmentDurationManager {
   }
 
   const extensionNeeded = this.MIN_DURATION - currentDuration;
-  
+
   // Create more natural extension by adding thoughtful pause or context
-  const naturalExtensions = [
-   '...',
-   '. [Pause]',
-   '. [Reflection moment]',
-   '. [Takes a breath]',
-   '. [Continues thoughtfully]',
-   '. [Moment of consideration]'
-  ];
-  
+  const naturalExtensions = ['...', '. [Pause]', '. [Reflection moment]', '. [Takes a breath]', '. [Continues thoughtfully]', '. [Moment of consideration]'];
+
   const randomExtension = naturalExtensions[Math.floor(Math.random() * naturalExtensions.length)];
-  
+
   return {
    ...segment,
    duration: this.MIN_DURATION,
    end: segment.start + this.MIN_DURATION,
-   endTimeSeconds: (segment.startTimeSeconds || segment.start) + this.MIN_DURATION,
+   endTimeSeconds: segment.startTimeSeconds + this.MIN_DURATION,
    // More natural text extension
    text: (segment.text || '').trim() + randomExtension,
    isExtended: true,
    originalDuration: currentDuration,
    extensionAmount: extensionNeeded,
-   extensionType: 'natural_pause'
+   extensionType: 'natural_pause',
   };
  }
 
@@ -264,6 +393,38 @@ class SegmentDurationManager {
    complianceRate: 0,
    durationsDistribution: [],
   };
+ }
+
+ // Helper methods for merging
+ static mergeTitles(segments) {
+  const titles = segments.map((s) => s.title).filter((t) => t && t.length > 0);
+  if (titles.length === 0) return 'Merged Segment';
+  if (titles.length === 1) return titles[0];
+
+  // Use first title as base, indicate it's merged
+  return `${titles[0]} (+ ${titles.length - 1} more)`;
+ }
+
+ static mergeDescriptions(segments) {
+  const descriptions = segments.map((s) => s.description).filter((d) => d && d.length > 0);
+  if (descriptions.length === 0) return 'Merged content segment';
+
+  return descriptions.join('. ').substring(0, 300) + (descriptions.join('. ').length > 300 ? '...' : '');
+ }
+
+ static selectBestQuote(segments) {
+  const quotes = segments.map((s) => s.keyQuote).filter((q) => q && q.length > 0);
+  if (quotes.length === 0) return null;
+
+  // Select longest meaningful quote
+  return quotes.reduce((best, current) => (current.length > best.length ? current : best));
+ }
+
+ static calculateAverageScore(segments, scoreField) {
+  const scores = segments.map((s) => s[scoreField]).filter((score) => typeof score === 'number');
+  if (scores.length === 0) return 0;
+
+  return scores.reduce((sum, score) => sum + score, 0) / scores.length;
  }
 }
 

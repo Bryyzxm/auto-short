@@ -3,8 +3,8 @@
  "version": "1.0.0",
  "main": "server.js",
  "scripts": {
-  "prestart": "chmod +x node_modules/yt-dlp-exec/bin/yt-dlp 2>/dev/null || true && bash -c 'source ./setup-ffmpeg.sh 2>/dev/null || true' && node scripts/azure-cookie-fix.js",
-  "start": "export PATH=\"$PATH:$(pwd)/node_modules/.bin\" && node server.js",
+  "prestart": "node scripts/azure-cookie-fix.js || echo 'Cookie fix skipped'",
+  "start": "node server.js",
   "dev": "NODE_ENV=development nodemon server.js",
   "verify-ytdlp": "yt-dlp --version && echo '✅ yt-dlp verified' || echo '❌ yt-dlp verification failed'",
   "health-check": "curl -f http://localhost:${PORT:-5001}/health || exit 1",
