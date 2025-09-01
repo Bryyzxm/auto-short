@@ -144,7 +144,7 @@ ${chunk.text}
         content: prompt,
        },
       ],
-      model: 'llama3-70b-8192', // Use powerful model for complex unified task
+      model: 'llama-3.3-70b-versatile', // Use powerful model for complex unified task
       temperature: 0.2, // Lower temperature for more consistent duration compliance
       max_tokens: 1000, // More tokens for unified processing
       top_p: 0.8,
@@ -642,7 +642,7 @@ export const generateShortsIdeas = async (videoUrl: string, transcript?: string,
   }
 
   // ===== UNIFIED SINGLE-PASS: Discovery + Duration Optimization Combined =====
-  console.log(`[UNIFIED-WORKFLOW] 🧠 UNIFIED PASS: Topic Discovery + Duration Optimization with llama3-70b-8192...`);
+  console.log(`[UNIFIED-WORKFLOW] 🧠 UNIFIED PASS: Topic Discovery + Duration Optimization with llama-3.3-70b-versatile...`);
   const validatedSegments = await generateTableOfContents(transcript, videoDuration);
 
   if (validatedSegments.length === 0) {

@@ -328,7 +328,7 @@ OUTPUT FORMAT (JSON only):
        content: prompt,
       },
      ],
-     model: 'llama3-70b-8192', // Use powerful model for complex reasoning
+     model: 'llama-3.3-70b-versatile', // Use powerful model for complex reasoning
      temperature: 0.2,
      max_tokens: 800,
      response_format: {type: 'json_object'},
@@ -478,7 +478,7 @@ OUTPUT FORMAT (JSON only):
        content: prompt,
       },
      ],
-     model: 'llama3-70b-8192', // Use powerful model for creative tasks
+     model: 'llama-3.3-70b-versatile', // Use powerful model for creative tasks
      temperature: 0.3,
      max_tokens: 1200,
      response_format: {type: 'json_object'},
@@ -844,7 +844,7 @@ Return JSON format:
        content: metadataPrompt,
       },
      ],
-     model: 'llama3-70b-8192',
+     model: 'llama-3.3-70b-versatile',
      temperature: 0.4, // Balance creativity with accuracy
      max_tokens: 1000,
      response_format: {type: 'json_object'},
@@ -1735,7 +1735,7 @@ JSON format only:
       content: prompt,
      },
     ],
-    model: 'llama3-70b-8192',
+    model: 'llama-3.3-70b-versatile',
     temperature: 0.3,
     max_tokens: 600, // Reduced token limit to prevent rate limiting
     response_format: {type: 'json_object'},
@@ -1849,7 +1849,7 @@ JSON format:
        content: prompt,
       },
      ],
-     model: 'llama3-70b-8192',
+     model: 'llama-3.3-70b-versatile',
      temperature: 0.4,
      max_tokens: 600, // Increased token limit for more detailed responses
      response_format: {type: 'json_object'},
@@ -2207,7 +2207,7 @@ OUTPUT FORMAT (JSON only):
        content: prompt,
       },
      ],
-     model: 'llama3-70b-8192',
+     model: 'llama-3.3-70b-versatile',
      temperature: 0.5, // Higher creativity for viral content
      max_tokens: 1000,
      response_format: {type: 'json_object'},
