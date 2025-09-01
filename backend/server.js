@@ -5945,6 +5945,18 @@ async function parseVTTToSegments(vttFilePath) {
  const fs = require('fs').promises;
  const path = require('path');
 
+
+// ========================================
+// EMERGENCY SERVICES - Critical Azure Fix
+// ========================================
+const EmergencyCookieManager = require('./services/emergencyCookieManager');
+const EmergencyRateLimiter = require('./services/emergencyRateLimiter');
+
+// Initialize emergency services
+const emergencyCookies = new EmergencyCookieManager();
+const emergencyRate = new EmergencyRateLimiter();
+
+console.log('🚨 Emergency services initialized for Azure production fix');
  try {
   const vttContent = await fs.readFile(vttFilePath, 'utf8');
   const segments = [];
@@ -6407,6 +6419,164 @@ app.get('/api/azure-health/errors', (req, res) => {
 });
 
 // Start server first, then run validation asynchronously
+
+
+// ========================================
+// EMERGENCY MONITORING ENDPOINTS
+// ========================================
+
+// Cookie status monitoring
+app.get('/api/emergency/cookies', async (req, res) => {
+    try {
+        const status = await emergencyCookies.getStatus();
+        const cookies = await emergencyCookies.getCurrentCookies();
+        
+        res.json({
+            status: status,
+            cookieCount: cookies.length,
+            cookies: cookies.map(c => ({
+                name: c.name,
+                domain: c.domain,
+                path: c.path,
+                secure: c.secure,
+                httpOnly: c.httpOnly,
+                hasValue: !!c.value
+            })),
+            lastValidation: emergencyCookies.lastValidation,
+            userAgent: emergencyCookies.getCurrentUserAgent(),
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error('Emergency cookie status error:', error);
+        res.status(500).json({ 
+            error: 'Cookie status check failed',
+            status: 'ERROR',
+            timestamp: new Date().toISOString()
+        });
+    }
+});
+
+// Rate limiter statistics
+app.get('/api/emergency/rate-stats', (req, res) => {
+    try {
+        const stats = emergencyRate.getStats();
+        res.json({
+            ...stats,
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error('Emergency rate stats error:', error);
+        res.status(500).json({ 
+            error: 'Rate stats check failed',
+            timestamp: new Date().toISOString()
+        });
+    }
+});
+
+// Overall health check
+app.get('/api/emergency/health', async (req, res) => {
+    try {
+        const cookieStatus = await emergencyCookies.getStatus();
+        const rateStats = emergencyRate.getStats();
+        
+        const isHealthy = cookieStatus === 'VALID' && 
+                         rateStats.videosInCooldown < 5 &&
+                         rateStats.globalCooldownActive === false;
+        
+        res.json({
+            status: isHealthy ? 'HEALTHY' : 'WARNING',
+            cookies: {
+                status: cookieStatus,
+                count: (await emergencyCookies.getCurrentCookies()).length
+            },
+            rateLimiter: {
+                videosInCooldown: rateStats.videosInCooldown,
+                globalCooldown: rateStats.globalCooldownActive,
+                maxAttempts: rateStats.maxAttemptsPerVideo
+            },
+            timestamp: new Date().toISOString(),
+            uptime: process.uptime()
+        });
+    } catch (error) {
+        console.error('Emergency health check error:', error);
+        res.status(500).json({ 
+            status: 'ERROR',
+            error: 'Health check failed',
+            timestamp: new Date().toISOString()
+        });
+    }
+});
+
+// Video-specific status
+app.get('/api/emergency/video/:videoId/status', (req, res) => {
+    try {
+        const videoId = req.params.videoId;
+        const status = emergencyRate.getVideoStatus(videoId);
+        
+        res.json({
+            videoId: videoId,
+            ...status,
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error('Emergency video status error:', error);
+        res.status(500).json({ 
+            error: 'Video status check failed',
+            videoId: req.params.videoId,
+            timestamp: new Date().toISOString()
+        });
+    }
+});
+
+// Reset video rate limit (admin)
+app.post('/api/emergency/reset-video/:videoId', (req, res) => {
+    try {
+        const videoId = req.params.videoId;
+        emergencyRate.resetVideo(videoId);
+        
+        console.log(`🔄 Emergency reset for video: ${videoId}`);
+        
+        res.json({
+            success: true,
+            message: `Rate limit reset for video: ${videoId}`,
+            videoId: videoId,
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error('Emergency video reset error:', error);
+        res.status(500).json({ 
+            success: false,
+            error: 'Video reset failed',
+            videoId: req.params.videoId,
+            timestamp: new Date().toISOString()
+        });
+    }
+});
+
+// Reset all rate limits (admin)
+app.post('/api/emergency/reset-all', (req, res) => {
+    try {
+        emergencyRate.resetAll();
+        
+        console.log('🔄 Emergency reset ALL rate limits');
+        
+        res.json({
+            success: true,
+            message: 'All rate limits reset',
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error('Emergency reset-all error:', error);
+        res.status(500).json({ 
+            success: false,
+            error: 'Reset all failed',
+            timestamp: new Date().toISOString()
+        });
+    }
+});
+
+console.log('🚨 Emergency endpoints configured - monitoring active');
+
 app.listen(PORT, () => {
  console.log(`\n🚀 Backend server running on http://localhost:${PORT}`);
  console.log(`🌐 Environment: ${azureEnv.azureConfig.environment}`);
